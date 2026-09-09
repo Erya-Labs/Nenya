@@ -3,12 +3,44 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 local.properties
+.kotlin/
 
-# The agent loop and its governance are operator tooling, not product. This repo is
-# public; the queue, the driver, the reviewer definition and the permission config
-# stay on the machine that runs them.
+# ---------------------------------------------------------------------------
+# AI tooling and the agent loop. This repository is PUBLIC and none of this is
+# product: the queue, the driver, the reviewer definition, the permission
+# config and any assistant instructions stay on the machine that runs them.
+#
+# .gitignore alone is not enough to guarantee that, for two reasons:
+#   - it does NOT untrack a file that is already committed, so a pattern added
+#     later is not retroactive; and
+#   - a push carries whole trees, so a single bad historical commit publishes
+#     everything in it. That is how .claude/ and loop/ reached a public repo
+#     on 2026-08-28.
+# .git/hooks/pre-push therefore refuses any push containing a commit whose tree
+# carries these paths, whatever the phrasing of the push. The hook is the real
+# guarantee; this list is the convenience.
+# ---------------------------------------------------------------------------
 loop/
 .claude/
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+.mcp.json
+.cursor/
+.cursorrules
+.cursorignore
+.aider*
+.codeium/
+.continue/
+.windsurf/
+.windsurfrules
+.roo/
+.cline*
+.clinerules
+.gemini/
+.specstory/
+.github/copilot-instructions.md
 
 # OS / editor
 .DS_Store
