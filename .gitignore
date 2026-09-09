@@ -1,0 +1,17 @@
+# Build
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+
+# The agent loop and its governance are operator tooling, not product. This repo is
+# public; the queue, the driver, the reviewer definition and the permission config
+# stay on the machine that runs them.
+loop/
+.claude/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+*.iml
