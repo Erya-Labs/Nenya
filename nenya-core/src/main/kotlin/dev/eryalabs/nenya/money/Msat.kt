@@ -30,6 +30,16 @@ public enum class MoneyRejection {
      */
     NOT_WHOLE_SATOSHIS,
 
+    /**
+     * A fee term above [FeeTerm.MAX_BASIS_POINTS] — more than 100%, which §8.1 rejects.
+     *
+     * Distinct from a client's own lower policy limit, which §8.1 requires be surfaced as
+     * its own named condition and which this library does not hold. Reporting a locally
+     * disallowed but legal fee with this reason would make a conformant peer look broken,
+     * which is the confusion §8.1 exists to prevent.
+     */
+    BPS_ABOVE_MAXIMUM,
+
     /** Not a decimal amount at all: empty, signed, spaced, exponential, non-ASCII digits. */
     MALFORMED,
 
