@@ -22,6 +22,15 @@ import kotlin.test.fail
  * worked order id first, and an anchor that simply took the 64 characters following
  * `SHA-256 ` would capture a backtick and 63 hex digits.
  *
+ * ### Scoped to §18's `nip44.vectors.json` row
+ *
+ * The anchor is applied to the one §18 table row that names `nip44.vectors.json`, not to the
+ * whole document. Both matter, and the narrowing is the point: this helper is *for* that
+ * vector file, and a document-global "exactly one digest" assertion would turn every test that
+ * uses it red the day a revision published a second digest — for `bip340-vectors.csv`, say —
+ * for a reason unrelated to any code under test. Within the row the assertion is unchanged and
+ * still exact: one row naming the file, one backticked digest on it.
+ *
  * Every accessor here fails loudly with the absolute path it looked at, so a wrong working
  * directory cannot make a test pass vacuously.
  */
@@ -36,7 +45,10 @@ internal object SpecAnchor {
 
     private const val NIP44_VECTORS_PATH: String = "src/test/resources/vectors/nip44.vectors.json"
 
-    /** `SHA-256 ` then a backticked lowercase digest — the §18 table row and nothing else. */
+    /** The file name §18's row names, and the name of the file this helper hands back. */
+    private const val NIP44_VECTORS_NAME: String = "nip44.vectors.json"
+
+    /** `SHA-256 ` then a backticked lowercase digest — the §18 table cell and nothing else. */
     private val PUBLISHED_DIGEST = Regex("SHA-256 `([0-9a-f]{64})`")
 
     fun specFile(): File = required(SPEC_PATH, "the NENYA-1 specification")
@@ -45,14 +57,20 @@ internal object SpecAnchor {
 
     /** The SHA-256 §18 publishes for `nip44.vectors.json`, in lowercase hex. */
     fun publishedNip44Digest(): String {
-        val matches = PUBLISHED_DIGEST.findAll(specFile().readText())
-            .map { it.groupValues[1] }
-            .toList()
+        val spec = specFile()
+        val rows = spec.readLines().filter { NIP44_VECTORS_NAME in it && PUBLISHED_DIGEST.containsMatchIn(it) }
+        assertEquals(
+            1,
+            rows.size,
+            "§18 must carry exactly one row naming $NIP44_VECTORS_NAME alongside a backticked " +
+                "SHA-256 digest; found ${rows.size} in ${spec.absolutePath}",
+        )
+        val matches = PUBLISHED_DIGEST.findAll(rows.single()).map { it.groupValues[1] }.toList()
         assertEquals(
             1,
             matches.size,
-            "§18 must publish exactly one backticked SHA-256 digest for the NIP-44 vectors; " +
-                "found ${matches.size} in ${specFile().absolutePath}",
+            "the §18 row for $NIP44_VECTORS_NAME must publish exactly one digest; found " +
+                "${matches.size} in ${spec.absolutePath}",
         )
         return matches.single()
     }
