@@ -1,0 +1,48 @@
+# NENYA-1 §11.2 — the legal order transitions, transcribed from `spec/NENYA-1.md`.
+#
+# Format, one legal transition per line:
+#
+#     <line number in spec/NENYA-1.md> | <from state> | <to state>
+#
+# Blank lines and lines beginning with `#` are ignored.
+#
+# PRE-EXPANDED, one (from, to) PAIR per line — not one table row per line. §11.2's rows are
+# not one-to-one: some name several destinations in a single `/`-separated destination cell,
+# so "row by row" and "transition by transition" are different counts. Several lines below
+# therefore share a spec line number, which is correct and is what the cross-check expects.
+# No number is written down here on purpose — a count in a comment is a claim nothing
+# verifies, and it would go stale silently the day §11.2 gained another such row.
+#
+# The `—` in the first column is §11.2's genesis row, which has no from-state: an order
+# comes into existence at `proposed`. It is the only non-state token permitted in either
+# column; every other token in both columns is one of §11.1's ten canonical states.
+#
+# DO NOT hand-maintain this file against memory. It is checked for *completeness*, not
+# plausibility: `TransitionTableTest` parses §11.2's own `|`-delimited row block out of
+# `../spec/NENYA-1.md` at test time, expands the `/`-separated destination cells, and
+# asserts the two sets of (spec line, from, to) triples are **equal**. Deleting a line,
+# adding one, or shifting a line number by one all turn the suite red. No count is
+# transcribed anywhere — the count falls out of the parse — because a file asserted against
+# a header comment the same hand wrote proves only that the file agrees with itself.
+#
+# The line numbers are what let a reviewer diff this file against the specification by eye.
+
+1523 | — | proposed
+1524 | proposed | accepted
+1525 | proposed | cancelled
+1526 | proposed | expired
+1527 | accepted | committed
+1528 | accepted | cancelled
+1528 | accepted | expired
+1529 | committed | awaiting_payment
+1530 | committed | cancelled
+1530 | committed | expired
+1530 | committed | disputed
+1531 | awaiting_payment | paid
+1532 | awaiting_payment | cancelled
+1532 | awaiting_payment | expired
+1532 | awaiting_payment | disputed
+1533 | paid | released
+1534 | paid | disputed
+1535 | released | settled
+1536 | released | disputed
