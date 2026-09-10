@@ -18,6 +18,27 @@ public enum class OrderStateRejection {
      * stranger's unrecognised token as though this implementation had understood it.
      */
     UNKNOWN_IS_NOT_EMITTABLE,
+
+    /**
+     * [OrderTerms] were built with an `expiration` at or after their `deliver_by`.
+     *
+     * §7.5 requires `expiration` to fall strictly before `deliver_by` when both are present, and
+     * requires an implementation to **reject** a proposal that violates it rather than prefer one
+     * of the two: an order that can still be accepted after its own delivery deadline has passed
+     * is incoherent, and leaves the provider in a state where acceptance and `expired` are
+     * simultaneously correct. Refused at construction, so no such order exists to transition.
+     */
+    DEADLINES_INVERTED,
+
+    /**
+     * An [OrderMachine] was built with a zero or negative release timeout.
+     *
+     * §11.2 requires an implementation whose accepted terms carry no `deliver_by` to "apply and
+     * display a release timeout of its own" and MUST NOT leave the order in `paid` indefinitely.
+     * A non-positive one satisfies neither half: it disputes an order the moment it is paid,
+     * which is not a timeout but a refusal to deliver.
+     */
+    RELEASE_TIMEOUT_NOT_POSITIVE,
 }
 
 /**
