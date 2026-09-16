@@ -145,7 +145,19 @@ kotlin {
     // (jsNodeTest, jsTest, allTests, check, build) and assemble do, and are not loop gates.
     js(IR) {
         moduleName = "nenya"
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha {
+                    // Mocha's default per-test limit is 2000 ms, and it fails a synchronous
+                    // test that finishes after that limit even when every assertion passed.
+                    // The seeded property tests (BidPropertyTest, ListingPropertyTest,
+                    // TagPropertyTest) each build and round-trip a whole generated corpus and
+                    // took 2.2-3.0 s on Node 22 on the first JS run, so 7 of them "failed"
+                    // on time alone. 30 s is a hang detector, not a performance budget.
+                    timeout = "30s"
+                }
+            }
+        }
         binaries.library()
         generateTypeScriptDefinitions()
         useEsModules()
