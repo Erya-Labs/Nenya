@@ -1,6 +1,8 @@
 package dev.eryalabs.nenya.wire
 
 import dev.eryalabs.nenya.SpecAnchor
+import dev.eryalabs.nenya.utf8Bytes
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -69,6 +71,7 @@ class WireBoundsTest {
         fun refusal(block: () -> Unit): WireRejection = assertFailsWith<WireException> { block() }.reason
     }
 
+    @JsName("the_four_defaults_are_the_four_numbers_the_specification_publishes")
     @Test
     fun `the four defaults are the four numbers the specification publishes`() {
         val published = publishedBounds()
@@ -84,6 +87,7 @@ class WireBoundsTest {
         )
     }
 
+    @JsName("an_empty_tag_array_is_rejected")
     @Test
     fun `an empty tag array is rejected`() {
         assertEquals(
@@ -95,6 +99,7 @@ class WireBoundsTest {
         WireFixtures.eventWith(tags = listOf(listOf("")))
     }
 
+    @JsName("the_tag_count_bound_accepts_512_and_refuses_513")
     @Test
     fun `the tag-count bound accepts 512 and refuses 513`() {
         val bound = WireLimits.DEFAULT_MAX_TAGS_PER_EVENT
@@ -108,6 +113,7 @@ class WireBoundsTest {
         )
     }
 
+    @JsName("the_tag_value_bound_accepts_1024_bytes_and_refuses_1025")
     @Test
     fun `the tag-value bound accepts 1024 bytes and refuses 1025`() {
         val bound = WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES
@@ -127,6 +133,7 @@ class WireBoundsTest {
      * that are 3072 bytes. §4.3 says **bytes** per tag value, and every other bound test here
      * uses ASCII, where the two measures are the same number.
      */
+    @JsName("the_tag_value_bound_is_measured_in_utf_8_bytes_and_not_in_characters")
     @Test
     fun `the tag-value bound is measured in UTF-8 bytes and not in characters`() {
         val value = "中".repeat(WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES)
@@ -136,7 +143,7 @@ class WireBoundsTest {
             value.length,
             "the fixture must be exactly at the bound by character count, or it proves nothing",
         )
-        assertEquals(3 * WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES, value.toByteArray(Charsets.UTF_8).size)
+        assertEquals(3 * WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES, value.utf8Bytes().size)
         assertEquals(
             WireRejection.TAG_VALUE_TOO_LONG,
             refusal { WireFixtures.eventWith(tags = listOf(listOf(value))).canonicalSerialisation() },
@@ -152,6 +159,7 @@ class WireBoundsTest {
      * threw a bare `NullPointerException` out of the serialiser, which is a denial of service in
      * the buyer's client rather than a rejection.
      */
+    @JsName("a_null_tag_element_is_refused_and_never_reaches_the_serialiser")
     @Test
     fun `a null tag element is refused, and never reaches the serialiser`() {
         @Suppress("UNCHECKED_CAST")
@@ -172,6 +180,7 @@ class WireBoundsTest {
      * bare `NullPointerException` — the denial of service the element check exists to prevent,
      * one nesting level out.
      */
+    @JsName("a_null_tag_is_refused_for_the_same_reason_a_null_element_is")
     @Test
     fun `a null tag is refused for the same reason a null element is`() {
         @Suppress("UNCHECKED_CAST")
@@ -184,6 +193,7 @@ class WireBoundsTest {
         )
     }
 
+    @JsName("the_content_bound_accepts_16_kib_and_refuses_one_byte_more")
     @Test
     fun `the content bound accepts 16 KiB and refuses one byte more`() {
         val bound = WireLimits.DEFAULT_MAX_CONTENT_BYTES
@@ -199,12 +209,13 @@ class WireBoundsTest {
         )
     }
 
+    @JsName("the_serialised_event_bound_accepts_64_kib_and_refuses_one_byte_more")
     @Test
     fun `the serialised-event bound accepts 64 KiB and refuses one byte more`() {
         val bound = WireLimits.DEFAULT_MAX_SERIALISED_EVENT_BYTES
 
         val atBound = eventOfSerialisedLength(bound)
-        assertEquals(bound, atBound.canonicalSerialisation().toByteArray(Charsets.UTF_8).size)
+        assertEquals(bound, atBound.canonicalSerialisation().utf8Bytes().size)
 
         assertEquals(
             WireRejection.SERIALISED_EVENT_TOO_LARGE,
@@ -220,6 +231,7 @@ class WireBoundsTest {
      * green — the identical failure mode, unguarded, one field over. §4.3 writes both bounds in
      * KiB, which is a byte unit, so 16 384 CJK characters is 49 152 bytes and MUST be refused.
      */
+    @JsName("the_content_and_whole_event_bounds_are_measured_in_utf_8_bytes_too")
     @Test
     fun `the content and whole-event bounds are measured in UTF-8 bytes too`() {
         val content = "中".repeat(WireLimits.DEFAULT_MAX_CONTENT_BYTES)
@@ -240,12 +252,13 @@ class WireBoundsTest {
             "the fixture must be under the bound by characters, or it proves nothing",
         )
         assertTrue(
-            serialisation.toByteArray(Charsets.UTF_8).size > WireLimits.DEFAULT_MAX_SERIALISED_EVENT_BYTES,
+            serialisation.utf8Bytes().size > WireLimits.DEFAULT_MAX_SERIALISED_EVENT_BYTES,
             "…and over it by bytes",
         )
         assertEquals(WireRejection.SERIALISED_EVENT_TOO_LARGE, refusal { wide.canonicalSerialisation() })
     }
 
+    @JsName("nothing_is_truncated_to_fit")
     @Test
     fun `nothing is truncated to fit`() {
         val tooLong = "a".repeat(WireLimits.DEFAULT_MAX_CONTENT_BYTES + 1)
@@ -261,6 +274,7 @@ class WireBoundsTest {
         )
     }
 
+    @JsName("a_caller_may_raise_or_lower_every_bound_and_a_bound_below_one_is_refused")
     @Test
     fun `a caller may raise or lower every bound, and a bound below one is refused`() {
         val tiny = WireLimits(maxTagsPerEvent = 1)
@@ -283,6 +297,7 @@ class WireBoundsTest {
         }
     }
 
+    @JsName("a_negative_created_at_is_refused_as_a_timestamp")
     @Test
     fun `a negative created_at is refused as a timestamp`() {
         assertEquals(
@@ -293,6 +308,7 @@ class WireBoundsTest {
         WireEvent(WireFixtures.pubkeyFor(0), 0L, 1, emptyList(), "")
     }
 
+    @JsName("a_pubkey_of_the_wrong_length_is_refused_as_the_wrong_length_never_padded")
     @Test
     fun `a pubkey of the wrong length is refused as the wrong length, never padded`() {
         val pubkey = WireFixtures.pubkeyFor(3)
@@ -319,6 +335,7 @@ class WireBoundsTest {
      * §4.1's recompute-and-compare rule exists to prevent. It fails in the safe direction, which
      * is why it survived a first review; nothing but this test would ever have found it.
      */
+    @JsName("an_uppercase_pubkey_is_accepted_and_its_case_survives_into_the_id_preimage")
     @Test
     fun `an uppercase pubkey is accepted and its case survives into the id preimage`() {
         val pubkey = WireFixtures.pubkeyFor(3).uppercase()
@@ -330,7 +347,7 @@ class WireBoundsTest {
             "the serialisation carries the pubkey exactly as it arrived",
         )
         val claimed = WireFixtures.lowerHex(
-            WireFixtures.sha256(event.canonicalSerialisation().toByteArray(Charsets.UTF_8)),
+            WireFixtures.sha256(event.canonicalSerialisation().utf8Bytes()),
         )
         assertEquals(
             claimed,
@@ -339,6 +356,7 @@ class WireBoundsTest {
         )
     }
 
+    @JsName("the_id_check_enforces_the_bounds_too_so_nothing_large_gets_past_it")
     @Test
     fun `the id check enforces the bounds too, so nothing large gets past it`() {
         val event = WireFixtures.eventWith(tags = List(WireLimits.DEFAULT_MAX_TAGS_PER_EVENT + 1) { listOf("t") })

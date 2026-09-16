@@ -1,5 +1,8 @@
 package dev.eryalabs.nenya.wire
 
+import dev.eryalabs.nenya.TestText
+import dev.eryalabs.nenya.utf8Bytes
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -23,6 +26,7 @@ class WirePropertyTest {
         val corpus: List<WireEvent> by lazy { WireFixtures.events(SAMPLES) }
     }
 
+    @JsName("every_event_round_trips_through_an_independently_written_unescaper")
     @Test
     fun `every event round-trips through an independently written unescaper`() {
         var checked = 0
@@ -39,10 +43,11 @@ class WirePropertyTest {
         assertEquals(SAMPLES, checked, "the corpus must actually have been walked")
     }
 
+    @JsName("no_serialisation_carries_a_byte_below_0x20")
     @Test
     fun `no serialisation carries a byte below 0x20`() {
         for (event in corpus) {
-            val bytes = event.canonicalSerialisation().toByteArray(Charsets.UTF_8)
+            val bytes = event.canonicalSerialisation().utf8Bytes()
             val offending = bytes.indexOfFirst { (it.toInt() and 0xff) < 0x20 }
 
             assertEquals(
@@ -56,6 +61,7 @@ class WirePropertyTest {
         }
     }
 
+    @JsName("every_backslash_begins_one_of_exactly_the_eight_legal_escape_forms")
     @Test
     fun `every backslash begins one of exactly the eight legal escape forms`() {
         val legal = Section41.shortcutEscapes().keys + "\\u"
@@ -75,6 +81,7 @@ class WirePropertyTest {
         )
     }
 
+    @JsName("no_serialisation_carries_whitespace_outside_a_string_value")
     @Test
     fun `no serialisation carries whitespace outside a string value`() {
         for (event in corpus) {
@@ -90,6 +97,7 @@ class WirePropertyTest {
         }
     }
 
+    @JsName("distinct_events_produce_distinct_ids")
     @Test
     fun `distinct events produce distinct ids`() {
         val ids = mutableSetOf<String>()
@@ -109,16 +117,17 @@ class WirePropertyTest {
      * encodings agree. Ten thousand events, dozens of them carrying an emoji, is the floor that
      * does not depend on one test remembering.
      */
+    @JsName("every_id_is_the_sha_256_of_the_serialisation_s_utf_8_bytes_recomputed_here")
     @Test
     fun `every id is the SHA-256 of the serialisation's UTF-8 bytes, recomputed here`() {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
         for (event in corpus) {
-            val bytes = event.canonicalSerialisation().toByteArray(Charsets.UTF_8)
+            val bytes = event.canonicalSerialisation().utf8Bytes()
 
-            assertEquals(WireFixtures.lowerHex(digest.digest(bytes)), EventId.of(event).toHex())
+            assertEquals(WireFixtures.lowerHex(WireFixtures.sha256(bytes)), EventId.of(event).toHex())
         }
     }
 
+    @JsName("an_id_survives_a_round_trip_through_its_own_hex_for_every_event_in_the_corpus")
     @Test
     fun `an id survives a round trip through its own hex, for every event in the corpus`() {
         for (event in corpus) {
@@ -134,6 +143,7 @@ class WirePropertyTest {
      * ASCII, and a generator that quietly produced one would make this whole file green and
      * meaningless.
      */
+    @JsName("the_corpus_actually_exercises_every_character_the_escaping_rules_are_about")
     @Test
     fun `the corpus actually exercises every character the escaping rules are about`() {
         val everything = corpus.joinToString("") { event ->
@@ -151,7 +161,7 @@ class WirePropertyTest {
             assertTrue(everything.contains(code.toChar()), "the corpus carries no 0x${code.toString(16)}")
         }
         assertTrue(
-            everything.contains(String(Character.toChars(0x1F600))),
+            everything.contains(TestText.codePoint(0x1F600)),
             "the corpus carries no non-BMP character, so the UTF-8 rule went unexercised",
         )
         for (text in listOf("é", "中")) {

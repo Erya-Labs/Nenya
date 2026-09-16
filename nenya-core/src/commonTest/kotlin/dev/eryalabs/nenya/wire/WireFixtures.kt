@@ -1,7 +1,9 @@
 package dev.eryalabs.nenya.wire
 
-import java.security.MessageDigest
-import java.util.Random
+import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.TestText
+import dev.eryalabs.nenya.oracleSha256
+import dev.eryalabs.nenya.utf8Bytes
 
 /**
  * The generator behind every event fixture in this package.
@@ -9,8 +11,9 @@ import java.util.Random
  * This is not a scratch file: the queue's Definition of done forbids an encoded value appearing
  * in a test as something somebody typed out. No event id, no digest and no pubkey here is
  * typed — the pubkeys are SHA-256 digests of a per-index label, the strings are assembled from
- * an alphabet by a `java.util.Random` pinned to [SEED], and every id under test is computed by
- * `MessageDigest`. A reviewer can change [SEED], re-run the suite, and every property must still
+ * an alphabet by `java.util.Random`'s algorithm ([JdkRandom]) pinned to [SEED], and every id under
+ * test is computed by the platform's own SHA-256 ([oracleSha256]: `MessageDigest` on the JVM). A
+ * reviewer can change [SEED], re-run the suite, and every property must still
  * hold.
  *
  * ### The alphabet is the point
@@ -33,9 +36,9 @@ import java.util.Random
 internal object WireFixtures {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random` is
-     * deliberate: its algorithm is specified by the JDK, so this file produces the same runs on
-     * any JVM a reviewer re-runs it on.
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm rather than
+     * `kotlin.random` is deliberate: it is specified by the JDK, so this file produces the same runs
+     * on any JVM a reviewer re-runs it on — and, as [JdkRandom], the same runs on JavaScript.
      */
     const val SEED: Long = 20260910L
 
@@ -50,8 +53,8 @@ internal object WireFixtures {
         // Multi-byte UTF-8, including two non-BMP code points that travel as surrogate pairs.
         add("é")
         add("中")
-        add(String(Character.toChars(0x1F600)))
-        add(String(Character.toChars(0x10348)))
+        add(TestText.codePoint(0x1F600))
+        add(TestText.codePoint(0x10348))
         // Ordinary values, so the corpus is not pathological end to end.
         add("nenya")
         add("wss://relay.example.invalid")
@@ -60,7 +63,7 @@ internal object WireFixtures {
 
     /** [count] events, provably distinct, drawn from one seeded run. */
     fun events(count: Int): List<WireEvent> {
-        val random = Random(SEED)
+        val random = JdkRandom(SEED)
         return List(count) { index ->
             val tags = List(random.nextInt(5)) {
                 List(1 + random.nextInt(3)) { hostileString(random, 3) }
@@ -95,9 +98,9 @@ internal object WireFixtures {
     const val KIND: Int = 30_404
 
     /** A generated 64-character lowercase-hex pubkey, unique per [index] and never typed. */
-    fun pubkeyFor(index: Int): String = lowerHex(sha256("nenya-wire-fixture-$index".toByteArray()))
+    fun pubkeyFor(index: Int): String = lowerHex(sha256("nenya-wire-fixture-$index".utf8Bytes()))
 
-    fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
+    fun sha256(bytes: ByteArray): ByteArray = oracleSha256(bytes)
 
     /** §4.3's canonical form: lowercase, unpadded. Written here so no test transcribes hex. */
     fun lowerHex(bytes: ByteArray): String {
@@ -110,7 +113,7 @@ internal object WireFixtures {
         return out.toString()
     }
 
-    private fun hostileString(random: Random, maxPieces: Int): String {
+    private fun hostileString(random: JdkRandom, maxPieces: Int): String {
         val out = StringBuilder()
         repeat(random.nextInt(maxPieces + 1)) {
             out.append(ALPHABET[random.nextInt(ALPHABET.size)])

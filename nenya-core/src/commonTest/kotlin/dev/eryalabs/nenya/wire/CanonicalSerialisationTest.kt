@@ -1,5 +1,8 @@
 package dev.eryalabs.nenya.wire
 
+import dev.eryalabs.nenya.TestText
+import dev.eryalabs.nenya.utf8Bytes
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -43,6 +46,7 @@ class CanonicalSerialisationTest {
         }
     }
 
+    @JsName("the_seven_shortcut_escapes_are_exactly_the_seven_the_specification_names")
     @Test
     fun `the seven shortcut escapes are exactly the seven the specification names`() {
         val published = Section41.shortcutEscapes()
@@ -63,6 +67,7 @@ class CanonicalSerialisationTest {
         assertTrue(published.isNotEmpty(), "the parse must not be empty, or this equality is vacuous")
     }
 
+    @JsName("every_other_control_character_is_the_four_hex_digit_form_with_lowercase_digits")
     @Test
     fun `every other control character is the four-hex-digit form, with lowercase digits`() {
         val shortcutCodes = Section41.shortcutEscapes().values.toSet()
@@ -85,6 +90,7 @@ class CanonicalSerialisationTest {
         }
     }
 
+    @JsName("the_six_elements_are_the_ones_the_template_names_in_that_order")
     @Test
     fun `the six elements are the ones the template names, in that order`() {
         val template = Section41.templateElements()
@@ -122,6 +128,7 @@ class CanonicalSerialisationTest {
         )
     }
 
+    @JsName("a_solidus_is_emitted_verbatim_and_never_escaped")
     @Test
     fun `a solidus is emitted verbatim and never escaped`() {
         val event = WireFixtures.eventWith(tags = listOf(listOf("r", "https://relay.example.invalid")))
@@ -135,6 +142,7 @@ class CanonicalSerialisationTest {
         assertTrue(serialisation.contains("https://relay.example.invalid"))
     }
 
+    @JsName("del_is_emitted_verbatim_because_it_is_above_0x20")
     @Test
     fun `DEL is emitted verbatim because it is above 0x20`() {
         val del = 0x7F.toChar().toString()
@@ -162,6 +170,7 @@ class CanonicalSerialisationTest {
      * unescapes `\uXXXX` deliberately, so the round-trip still succeeds, and `\u` is already one
      * of the eight legal escape forms.
      */
+    @JsName("a_non_ascii_bmp_character_is_emitted_verbatim_and_never_u_escaped")
     @Test
     fun `a non-ASCII BMP character is emitted verbatim and never u-escaped`() {
         for (text in listOf("é", "中", "Ω", " ", "߿", "￿")) {
@@ -185,9 +194,10 @@ class CanonicalSerialisationTest {
         }
     }
 
+    @JsName("a_non_bmp_character_is_emitted_as_utf_8_and_never_as_an_escaped_surrogate_pair")
     @Test
     fun `a non-BMP character is emitted as UTF-8 and never as an escaped surrogate pair`() {
-        val emoji = String(Character.toChars(0x1F600))
+        val emoji = TestText.codePoint(0x1F600)
         val event = WireFixtures.eventWith(tags = emptyList(), content = emoji)
 
         val serialisation = event.canonicalSerialisation()
@@ -201,11 +211,12 @@ class CanonicalSerialisationTest {
         )
         assertEquals(
             4,
-            emoji.toByteArray(Charsets.UTF_8).size,
+            emoji.utf8Bytes().size,
             "the fixture must actually be non-BMP, or this control proves nothing",
         )
     }
 
+    @JsName("none_of_the_seven_is_emitted_in_the_six_character_form")
     @Test
     fun `none of the seven is emitted in the six-character form`() {
         for ((escape, code) in Section41.shortcutEscapes()) {
@@ -221,6 +232,7 @@ class CanonicalSerialisationTest {
         }
     }
 
+    @JsName("tag_order_is_preserved_exactly_never_sorted_or_normalised")
     @Test
     fun `tag order is preserved exactly, never sorted or normalised`() {
         val tags = listOf(
@@ -242,6 +254,7 @@ class CanonicalSerialisationTest {
         assertEquals(tags, event.tags, "and the event itself keeps the order it was given")
     }
 
+    @JsName("an_empty_tag_value_an_empty_content_and_an_event_with_no_tags_all_serialise")
     @Test
     fun `an empty tag value, an empty content and an event with no tags all serialise`() {
         val parsed = CanonicalReader.read(
@@ -260,6 +273,7 @@ class CanonicalSerialisationTest {
         )
     }
 
+    @JsName("the_tags_are_unmodifiable_so_the_event_whose_id_was_computed_stays_that_event")
     @Test
     fun `the tags are unmodifiable, so the event whose id was computed stays that event`() {
         val mutable = mutableListOf(mutableListOf("t", "nenya"))

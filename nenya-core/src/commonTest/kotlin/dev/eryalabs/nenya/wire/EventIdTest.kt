@@ -1,6 +1,10 @@
 package dev.eryalabs.nenya.wire
 
-import java.security.MessageDigest
+import dev.eryalabs.nenya.TestText
+import dev.eryalabs.nenya.latin1Bytes
+import dev.eryalabs.nenya.oracleSha256
+import dev.eryalabs.nenya.utf8Bytes
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,7 +17,8 @@ import kotlin.test.assertTrue
  * here and compared against what the relay claimed — before any other processing.
  *
  * No id and no digest is typed anywhere. Every expected value in this file is computed by
- * `MessageDigest` in the test, over bytes the test encodes itself, so a serialiser and a hasher
+ * the platform's own SHA-256 in the test ([oracleSha256]: `MessageDigest` on the JVM), over bytes
+ * the test encodes itself, so a serialiser and a hasher
  * that agreed with each other and with nothing else would still have to agree with an
  * independent encoding of the same rule.
  */
@@ -22,11 +27,12 @@ class EventIdTest {
     private companion object {
 
         fun sha256Hex(bytes: ByteArray): String =
-            WireFixtures.lowerHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+            WireFixtures.lowerHex(oracleSha256(bytes))
 
         fun refusal(block: () -> Unit): WireRejection = assertFailsWith<WireException> { block() }.reason
     }
 
+    @JsName("the_id_is_the_sha_256_of_the_serialisation_s_utf_8_bytes")
     @Test
     fun `the id is the SHA-256 of the serialisation's UTF-8 bytes`() {
         val event = WireFixtures.eventWith(
@@ -37,7 +43,7 @@ class EventIdTest {
         val serialisation = event.canonicalSerialisation()
 
         assertEquals(
-            sha256Hex(serialisation.toByteArray(Charsets.UTF_8)),
+            sha256Hex(serialisation.utf8Bytes()),
             EventId.of(event).toHex(),
         )
     }
@@ -48,16 +54,17 @@ class EventIdTest {
      * hashed the platform's default bytes — or ISO-8859-1, the JDK's cheapest wrong answer —
      * computes an id nobody else computes for exactly the events that carry an emoji.
      */
+    @JsName("the_id_is_over_utf_8_bytes_and_differs_from_the_same_string_s_iso_8859_1_bytes")
     @Test
     fun `the id is over UTF-8 bytes and differs from the same string's ISO-8859-1 bytes`() {
         val event = WireFixtures.eventWith(
             tags = emptyList(),
-            content = String(Character.toChars(0x1F600)),
+            content = TestText.codePoint(0x1F600),
         )
         val serialisation = event.canonicalSerialisation()
 
-        val utf8 = sha256Hex(serialisation.toByteArray(Charsets.UTF_8))
-        val latin1 = sha256Hex(serialisation.toByteArray(Charsets.ISO_8859_1))
+        val utf8 = sha256Hex(serialisation.utf8Bytes())
+        val latin1 = sha256Hex(serialisation.latin1Bytes())
 
         assertEquals(utf8, EventId.of(event).toHex())
         assertNotEquals(
@@ -68,6 +75,7 @@ class EventIdTest {
         assertNotEquals(latin1, EventId.of(event).toHex())
     }
 
+    @JsName("a_matching_claim_yields_a_checked_event_carrying_the_id_the_event_and_the_bounds")
     @Test
     fun `a matching claim yields a checked event carrying the id, the event and the bounds`() {
         val event = WireFixtures.event()
@@ -86,6 +94,7 @@ class EventIdTest {
         )
     }
 
+    @JsName("an_uppercase_claimed_id_is_accepted_and_normalised")
     @Test
     fun `an uppercase claimed id is accepted and normalised`() {
         val event = WireFixtures.event()
@@ -103,6 +112,7 @@ class EventIdTest {
         assertEquals(claimed.lowercase(), checked.id.toHex())
     }
 
+    @JsName("a_claimed_id_of_63_characters_is_refused_as_the_wrong_length_never_padded")
     @Test
     fun `a claimed id of 63 characters is refused as the wrong length, never padded`() {
         val event = WireFixtures.event()
@@ -117,6 +127,7 @@ class EventIdTest {
         )
     }
 
+    @JsName("a_claim_that_does_not_match_produces_no_checked_event_at_all")
     @Test
     fun `a claim that does not match produces no checked event at all`() {
         val event = WireFixtures.event()
@@ -132,6 +143,7 @@ class EventIdTest {
         assertNotEquals(EventId.of(other), EventId.of(event))
     }
 
+    @JsName("one_changed_byte_anywhere_changes_the_id")
     @Test
     fun `one changed byte anywhere changes the id`() {
         val base = WireFixtures.eventWith(tags = listOf(listOf("t", "nenya")), content = "hello")
@@ -151,6 +163,7 @@ class EventIdTest {
         }
     }
 
+    @JsName("an_event_id_reads_back_from_its_own_hex_in_either_case")
     @Test
     fun `an event id reads back from its own hex, in either case`() {
         val id = EventId.of(WireFixtures.event())
@@ -161,6 +174,7 @@ class EventIdTest {
         assertEquals(EventId.BYTE_LENGTH, id.bytes().size)
     }
 
+    @JsName("an_event_id_copies_its_bytes_on_the_way_out")
     @Test
     fun `an event id copies its bytes on the way out`() {
         val id = EventId.of(WireFixtures.event())
@@ -177,6 +191,7 @@ class EventIdTest {
      * sentence. A default Kotlin `toString` would carry the pubkey and the whole of `content`;
      * this is the control that catches the debugging `toString` somebody adds later.
      */
+    @JsName("no_tostring_here_names_a_pubkey_an_id_or_a_byte_of_content")
     @Test
     fun `no toString here names a pubkey, an id or a byte of content`() {
         val secretish = "the buyer's shipping address"
@@ -202,6 +217,7 @@ class EventIdTest {
      * and item 11 forbids one in a crash report; a message may name a length, a count, a bound
      * and a reason, and nothing the caller handed in.
      */
+    @JsName("no_rejection_message_echoes_a_pubkey_a_tag_value_or_a_byte_of_content")
     @Test
     fun `no rejection message echoes a pubkey, a tag value or a byte of content`() {
         val pubkey = WireFixtures.pubkeyFor(4)

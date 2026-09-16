@@ -12,6 +12,12 @@ package dev.eryalabs.nenya
  */
 internal expect fun oracleSha256(bytes: ByteArray): ByteArray
 
+/** `toByteArray(Charsets.UTF_8)` for common tests: [TestText.utf8]. */
+internal fun String.utf8Bytes(): ByteArray = TestText.utf8(this)
+
+/** `toByteArray(Charsets.ISO_8859_1)` for common tests: [TestText.latin1]. */
+internal fun String.latin1Bytes(): ByteArray = TestText.latin1(this)
+
 /**
  * Text helpers for common tests that the JDK used to provide, each written independently of the
  * library's own `dev.eryalabs.nenya.text` code so a fixture's bytes are not the code under test's

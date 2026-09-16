@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.money
 
+import kotlin.js.JsName
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,6 +37,7 @@ class MsatPropertyTest {
         val MAX_SAT: Long = Msat.SUPPLY_CAP_MSAT / Msat.MSAT_PER_SAT
     }
 
+    @JsName("every_satoshi_amount_at_or_below_the_cap_converts_and_round_trips_exactly")
     @Test
     fun `every satoshi amount at or below the cap converts, and round-trips exactly`() {
         val random = Random(SEED)
@@ -53,6 +55,7 @@ class MsatPropertyTest {
         assertTrue(samples.size > SAMPLES, "the sampler must actually produce $SAMPLES values")
     }
 
+    @JsName("a_millisatoshi_amount_that_is_not_a_multiple_of_one_thousand_is_refused_never_truncated")
     @Test
     fun `a millisatoshi amount that is not a multiple of one thousand is refused, never truncated`() {
         val random = Random(SEED)
@@ -80,6 +83,7 @@ class MsatPropertyTest {
         assertEquals(SAMPLES, nonMultiples, "the sampler must actually produce $SAMPLES non-multiples")
     }
 
+    @JsName("every_millisatoshi_amount_at_or_below_the_cap_survives_a_btc_round_trip")
     @Test
     fun `every millisatoshi amount at or below the cap survives a BTC round-trip`() {
         val random = Random(SEED)
@@ -96,6 +100,7 @@ class MsatPropertyTest {
         }
     }
 
+    @JsName("a_twelfth_fractional_digit_is_refused_across_the_whole_range")
     @Test
     fun `a twelfth fractional digit is refused across the whole range`() {
         val random = Random(SEED)
