@@ -8,7 +8,9 @@ import kotlin.test.fail
 
 /**
  * The sweep that makes injection real rather than stylistic: **no source line under
- * `src/jvmMain/kotlin` reads an ambient clock or an ambient random source.**
+ * `src/commonMain/kotlin` or `src/jvmMain/kotlin` reads an ambient clock or an ambient random
+ * source.** Both roots are swept together, so code moved to common cannot escape the rule by
+ * moving.
  *
  * Every module in this library takes its clock and its randomness by injection, and the reason is
  * not style. §4.6 requires every deadline be evaluated against the implementation's own injected
@@ -34,7 +36,7 @@ import kotlin.test.fail
  *
  * The cost is stated rather than hidden: stripping `//` also strips anything after a `//` inside
  * a string literal, so a forbidden token hiding there would be missed. Nothing under
- * `src/jvmMain/kotlin` contains a `//` inside a string today, and the failure mode of that gap is a
+ * the main source roots contains a `//` inside a string today, and the failure mode of that gap is a
  * false *negative* on a construction no reviewer would let through anyway.
  */
 class AmbientEffectsTest {
@@ -51,9 +53,18 @@ class AmbientEffectsTest {
      */
     internal companion object {
 
-        const val MAIN: String = "src/jvmMain/kotlin"
+        /**
+         * Every production source root, relative to the module directory. `src/commonMain/kotlin`
+         * is here because code moved there compiles into the same library and must answer to the
+         * same sweeps; a sweep over `src/jvmMain/kotlin` alone would pass over it silently. A
+         * `src/jsMain/kotlin` root joins this list in the commit that creates it.
+         */
+        val MAIN_ROOTS: List<String> = listOf("src/commonMain/kotlin", "src/jvmMain/kotlin")
 
-        /** The `.kt` files under [MAIN] at commit 6432814, pinned as a floor for [mainSources]. */
+        /**
+         * The `.kt` files under all of [MAIN_ROOTS] together, pinned as a floor for [mainSources]:
+         * 27, the whole main tree at commit 6432814. Moving a file between roots keeps the total.
+         */
         const val MIN_MAIN_SOURCES: Int = 27
 
         /**
@@ -84,7 +95,7 @@ class AmbientEffectsTest {
         )
 
         /**
-         * The types that may never be *named* under `src/jvmMain/kotlin` at all, in any form.
+         * The types that may never be *named* under any of [MAIN_ROOTS] at all, in any form.
          *
          * The allowlist half of the rule above, and the durable half: a blacklist of call spellings
          * is one new idiom away from being incomplete, whereas an import of `java.util.UUID` into a
@@ -102,23 +113,28 @@ class AmbientEffectsTest {
         val EXPECTED_SEAM_SOURCES: Set<String> = setOf("SeamAnswer.kt", "Seams.kt", "OrderId.kt")
 
         fun mainSources(): List<File> {
-            val root = File(MAIN)
-            if (!root.isDirectory) {
-                fail(
-                    "$MAIN was expected at ${root.absolutePath} but is not a directory. The tests run " +
-                        "with the module directory as the working directory; this one is " +
-                        "${File(".").absoluteFile.normalize()}. A sweep that silently found no files " +
-                        "would pass over anything at all.",
-                )
+            val roots = MAIN_ROOTS.map { path ->
+                val root = File(path)
+                if (!root.isDirectory) {
+                    fail(
+                        "$path was expected at ${root.absolutePath} but is not a directory. The tests " +
+                            "run with the module directory as the working directory; this one is " +
+                            "${File(".").absoluteFile.normalize()}. A sweep that silently skipped a " +
+                            "source root would pass over everything in it.",
+                    )
+                }
+                root
             }
-            val sources = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
-            // A directory that exists but holds fewer sources than it did is the quiet failure: after
-            // code moves to another source root, both sweeps here and KindConstantTest's would pass
-            // over whatever was left behind. 27 is the main tree at commit 6432814, a floor.
+            val sources = roots.flatMap { root ->
+                root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            }
+            // Roots that exist but hold fewer sources than the tree did are the quiet failure: after
+            // code moves to a root this list does not name, both sweeps here and KindConstantTest's
+            // would pass over it. 27 is the main tree at commit 6432814, a floor over all roots.
             assertTrue(
                 sources.size >= MIN_MAIN_SOURCES,
-                "${root.absolutePath} holds ${sources.size} .kt file(s); at least $MIN_MAIN_SOURCES " +
-                    "were pinned. A sweep over part of the main tree passes over the rest.",
+                "${roots.map { it.absolutePath }} hold ${sources.size} .kt file(s); at least " +
+                    "$MIN_MAIN_SOURCES were pinned. A sweep over part of the main tree passes over the rest.",
             )
             return sources
         }
@@ -177,13 +193,18 @@ class AmbientEffectsTest {
     fun `the sweep reads the whole main tree, and this task's files by name`() {
         val sources = mainSources()
 
-        assertTrue(sources.isNotEmpty(), "the sweep found no Kotlin sources under $MAIN")
+        assertTrue(sources.isNotEmpty(), "the sweep found no Kotlin sources under $MAIN_ROOTS")
         val names = sources.map { it.name }.toSet()
+        assertTrue(
+            "NenyaProtocol.kt" in names,
+            "NenyaProtocol.kt lives in src/commonMain/kotlin and was not among the sources swept; " +
+                "found $names. Common code must answer to the same sweep as JVM code.",
+        )
         for (expected in EXPECTED_SEAM_SOURCES) {
             assertTrue(
                 expected in names,
                 "$expected was not among the sources swept; found $names. Several .kt files already " +
-                    "existed under $MAIN before this task — seven, not the three T5's text guessed " +
+                    "existed under the main tree before this task — seven, not the three T5's text guessed " +
                     "— so a bare count is satisfied well before this task writes a line.",
             )
         }
@@ -219,7 +240,7 @@ class AmbientEffectsTest {
     }
 
     /**
-     * The allowlist half: these types may not be *named* under `src/jvmMain/kotlin` in any form.
+     * The allowlist half: these types may not be *named* under any main source root in any form.
      *
      * A blacklist of call spellings is one new idiom away from being incomplete — `java.util.Date()`
      * defeated the original eight. An import of `java.util.UUID` into a library that takes all its

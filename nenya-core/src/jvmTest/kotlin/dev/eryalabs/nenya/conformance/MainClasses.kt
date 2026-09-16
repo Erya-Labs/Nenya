@@ -26,7 +26,10 @@ import kotlin.test.fail
  */
 internal object MainClasses {
 
-    /** Every class compiled from `src/jvmMain` into [packageName], nested and companion ones included. */
+    /**
+     * Every class compiled from `src/commonMain` and `src/jvmMain` into [packageName], nested and
+     * companion ones included. The JVM compilation writes both source sets to one output directory.
+     */
     fun of(packageName: String): List<Class<*>> {
         val loader = MainClasses::class.java.classLoader
         val urls = loader.getResources(packageName.replace('.', '/')).toList()
@@ -111,7 +114,8 @@ internal object MainClasses {
         "${type.name.removePrefix("$packageName.")}.${method.name}"
 
     /**
-     * Every package this library compiles from `src/jvmMain`, discovered rather than listed.
+     * Every package this library compiles from `src/commonMain` and `src/jvmMain`, discovered rather
+     * than listed.
      *
      * The root package and each directory beneath it in the main output tree. Discovered so that a
      * package added by a later task joins the library-wide sweeps — §14 item 12's no-floating-point

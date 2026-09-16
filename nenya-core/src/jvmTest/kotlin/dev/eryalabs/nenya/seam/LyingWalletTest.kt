@@ -220,10 +220,13 @@ internal object SeamReflection {
 
     const val PACKAGE: String = "dev.eryalabs.nenya.seam"
 
-    /** Every class Gradle wrote for `src/jvmMain/kotlin`'s copy of this package. */
+    /** Every class Gradle wrote for this package from `src/commonMain/kotlin` and `src/jvmMain/kotlin`. */
     fun mainClasses(): List<Class<*>> = classesIn("/classes/kotlin/jvm/main/", MIN_MAIN_CLASSES)
 
-    /** Every class Gradle wrote for `src/jvmTest/kotlin`'s copy — where the fakes live. */
+    /**
+     * Every class Gradle wrote for this package from `src/commonTest/kotlin` and
+     * `src/jvmTest/kotlin` — where the fakes live. The JVM test compilation writes both to one directory.
+     */
     fun testClasses(): List<Class<*>> = classesIn("/classes/kotlin/jvm/test/", MIN_TEST_CLASSES)
 
     /**

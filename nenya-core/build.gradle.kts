@@ -12,9 +12,20 @@ kotlin {
     explicitApi()
     jvmToolchain(17)
 
-    // JVM only for now: sources live in src/jvmMain and src/jvmTest, and nothing is
-    // in commonMain yet. No js() target, so no Node, Yarn or npm is ever needed.
+    // Code that is truly common lives in src/commonMain / src/commonTest and compiles
+    // for both targets; everything still JVM-bound lives in src/jvmMain / src/jvmTest.
     jvm()
+
+    // Node only, no browser(): browser tests would need a headless Chrome. Compiling
+    // (compileKotlinJs, compileTestKotlinJs) needs no Node, Yarn or npm; running JS tests
+    // (jsNodeTest, jsTest, allTests, check, build) and assemble do, and are not loop gates.
+    js(IR) {
+        moduleName = "nenya"
+        nodejs()
+        binaries.library()
+        generateTypeScriptDefinitions()
+        useEsModules()
+    }
 
     sourceSets {
         commonTest.dependencies {

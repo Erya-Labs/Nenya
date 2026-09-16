@@ -184,9 +184,11 @@ signer are all equally valid behind the `NostrSigner` seam. Nenya does not know 
 where the secret lives.
 
 ```
-nenya-core/src/jvmMain/kotlin/dev/eryalabs/nenya/   implementation
-nenya-core/src/jvmTest/kotlin/dev/eryalabs/nenya/   tests
-nenya-core/src/jvmTest/resources/                   test vectors and fixtures
+nenya-core/src/commonMain/kotlin/dev/eryalabs/nenya/ implementation shared by JVM and JS
+nenya-core/src/jvmMain/kotlin/dev/eryalabs/nenya/    implementation still JVM-bound
+nenya-core/src/commonTest/kotlin/dev/eryalabs/nenya/ tests run on every target
+nenya-core/src/jvmTest/kotlin/dev/eryalabs/nenya/    JVM-only tests
+nenya-core/src/jvmTest/resources/                    test vectors and fixtures
 spec/                                               the microstandard
 ```
 
@@ -198,12 +200,13 @@ is a breaking change waiting to happen.
 
 ## Build and test
 
-Requires a JDK 17 toolchain. Nothing else — no Android SDK, no emulator, no network access,
-no relay.
+Requires a JDK 17 toolchain. For the JVM tests and the JS compile, nothing else — no Android
+SDK, no emulator, no Node, no network access, no relay.
 
 ```sh
-./gradlew :nenya-core:jvmTest  # unit tests (JVM target)
-./gradlew :nenya-core:build    # compile, test, assemble
+./gradlew :nenya-core:jvmTest :nenya-core:compileTestKotlinJs  # JVM tests + proof common code compiles for JS
+./gradlew :nenya-core:jsNodeTest  # JS tests under Node (downloads Node, Yarn and npm packages)
+./gradlew :nenya-core:build       # everything, JS included (same downloads)
 ```
 
 Where an externally-authored test vector exists, we use it rather than a fixture we wrote
