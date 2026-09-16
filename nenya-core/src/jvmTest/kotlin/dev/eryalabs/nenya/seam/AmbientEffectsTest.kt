@@ -92,6 +92,32 @@ class AmbientEffectsTest {
             // `Random.nextInt(...)` / `Random.Default.nextBytes(...)` and reads nothing like it.
             "a companion-style Random" to Regex("""\bRandom(\.Default)?\.next"""),
             "System.getenv or getProperty" to Regex("""System\.(getenv|getProperty)"""),
+            // Common Kotlin and Kotlin/JS spell the same effects differently, and every pattern
+            // above is a JVM spelling: a clock read moved to src/commonMain as
+            // `Clock.System.now()` would have passed straight over them. Proven by a scratch
+            // file under build/ fed to this sweep before these were added (green) and after (red),
+            // and pinned permanently by the in-memory control
+            // `every common-Kotlin and JavaScript spelling of an ambient effect is caught`.
+            "TimeSource.Monotonic" to Regex("""TimeSource\.Monotonic"""),
+            // kotlin.time.Clock.System (stdlib, Kotlin 2.1.20+) and kotlinx.datetime.Clock.System
+            // read identically at a call site; one pattern covers both, qualified or not.
+            "Clock.System (kotlin.time or kotlinx-datetime)" to Regex("""\bClock\.System\b"""),
+            // measureTime/measureTimedValue read TimeSource.Monotonic without naming it, and the
+            // kotlin.system helpers read the wall or monotonic clock the same way.
+            "measureTime and friends" to
+                Regex("""\bmeasureTime(dValue)?\b|\bmeasureTimeMillis\b|\bmeasureNanoTime\b|\bgetTime(Millis|Nanos)\b"""),
+            // `kotlin.random.Random` is imported by default, so the unseeded companion needs no
+            // import to reach: `Random.Default`, `shuffled(Random)`, `val r: Random = Random`. Any
+            // `Random` not followed by `(` is it; `Random(seed)` is deterministic and allowed.
+            "the unseeded Random companion or Random.Default" to Regex("""\bRandom\b(?!\s*\()"""),
+            // The collection helpers whose no-argument forms draw from Random.Default.
+            "an unseeded random()/shuffled()" to Regex("""\.(random|randomOrNull|shuffled|shuffle)\(\s*\)"""),
+            "Uuid.random" to Regex("""\bUuid\.random"""),
+            // JavaScript, whether reached through kotlin.js.Date or inside a js("...") string.
+            "Date.now" to Regex("""\bDate\.now\b"""),
+            "performance.now or process.hrtime" to Regex("""\bperformance\.now\b|\bprocess\.hrtime\b"""),
+            "Web Crypto or node:crypto randomness" to
+                Regex("""\bcrypto\.(getRandomValues|randomUUID|randomBytes|randomInt)\b"""),
         )
 
         /**
@@ -107,6 +133,9 @@ class AmbientEffectsTest {
             "java.util.concurrent.ThreadLocalRandom",
             "java.security.SecureRandom",
             "kotlin.random",
+            // Kotlin/JS's wrapper over the JavaScript Date object, whose no-argument constructor
+            // and `Date.now()` are the wall clock.
+            "kotlin.js.Date",
         )
 
         /** The files this task adds, asserted by name. Several `.kt` files already existed. */
@@ -296,6 +325,50 @@ class AmbientEffectsTest {
             2,
             code.count { line -> FORBIDDEN.any { (_, pattern) -> pattern.containsMatchIn(line) } },
             "both hidden effects must be visible to the sweep; before this fix neither was",
+        )
+    }
+
+    /**
+     * The control for the common-Kotlin and JavaScript half of [FORBIDDEN].
+     *
+     * Every pattern that list carried before the multiplatform move was a JVM spelling, so a clock
+     * read in `src/commonMain` as `Clock.System.now()` — or in a future `src/jsMain` as
+     * `Date.now()` — passed the sweep. Each line below is one such read and must be caught; the two
+     * after it must not be, or the new patterns are simply matching everything. In memory, like
+     * the stripper control above, so no probe file can outlive the test.
+     */
+    @Test
+    fun `every common-Kotlin and JavaScript spelling of an ambient effect is caught`() {
+        val ambient = listOf(
+            "val a = TimeSource.Monotonic.markNow()",
+            "val b = kotlin.time.Clock.System.now()",
+            "val c = Clock.System.now()",
+            "val d = Random.Default",
+            "val e = listOf(1, 2).shuffled(Random)",
+            "val f = listOf(1, 2).random()",
+            "val g = Date.now()",
+            "val h = js(\"performance.now()\")",
+            "val i = measureTime { }",
+            "val j = Uuid.random()",
+            "val k = js(\"crypto.getRandomValues(new Uint8Array(32))\")",
+        )
+        val innocent = listOf(
+            "val seeded = Random(42)",
+            "fun draw(source: Randomness, clock: NenyaClock) = source",
+        )
+        fun caught(line: String): List<String> =
+            FORBIDDEN.filter { (_, pattern) -> pattern.containsMatchIn(line) }.map { it.first }
+
+        for (line in ambient) {
+            assertTrue(caught(line).isNotEmpty(), "the sweep must catch this ambient read: $line")
+        }
+        for (line in innocent) {
+            assertEquals(emptyList(), caught(line), "the sweep must not flag this line: $line")
+        }
+        assertTrue(
+            codeLines(listOf("import kotlin.js.Date")).single().second.contains("kotlin.js.Date") &&
+                "kotlin.js.Date" in FORBIDDEN_TYPES,
+            "the JavaScript Date type must be banned by name as well",
         )
     }
 
