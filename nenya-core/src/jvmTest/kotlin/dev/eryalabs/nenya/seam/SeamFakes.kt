@@ -1,7 +1,6 @@
 package dev.eryalabs.nenya.seam
 
 import dev.eryalabs.nenya.money.Msat
-import java.time.Instant
 import java.util.Random
 
 /**
@@ -135,9 +134,9 @@ internal class LyingWallet(private val fabricatedPreimageHex: String) : Wallet {
  * about what it says: a fake reporting 1970 and one reporting the year 3000 are both simply
  * used. The controls in `OrderIdTest` assert precisely that.
  */
-internal class FakeClock(private val instant: Instant) : NenyaClock {
+internal class FakeClock(private val unixSeconds: Long) : NenyaClock {
 
-    override fun now(): SeamAnswer<Instant> = SeamAnswer.Provided(instant)
+    override fun now(): SeamAnswer<Long> = SeamAnswer.Provided(unixSeconds)
 }
 
 /**

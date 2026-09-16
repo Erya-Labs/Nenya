@@ -401,7 +401,7 @@ class SeamFailClosedTest {
             WalletPaymentState.CLAIMS_SETTLED,
             LyingWallet("00").payInvoice(SeamFixtures.NOT_AN_INVOICE).provided().state,
         )
-        assertEquals(java.time.Instant.EPOCH, FakeClock(java.time.Instant.EPOCH).now().provided())
+        assertEquals(0L, FakeClock(0L).now().provided())
         assertEquals(4, RecordingRandomness().randomBytes(4).provided().size)
         assertEquals(
             SignatureVerdict.VALID,

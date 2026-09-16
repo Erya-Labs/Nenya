@@ -2,7 +2,6 @@ package dev.eryalabs.nenya.seam
 
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
-import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -39,8 +38,10 @@ class OrderIdTest {
         val PRICE: Msat = Msat.ofSat(120_000L)
 
         /** Long before nostr and long after this specification. §4.6: both are simply used. */
-        val FAR_PAST: Instant = Instant.EPOCH
-        val FAR_FUTURE: Instant = Instant.parse("3000-01-01T00:00:00Z")
+        const val FAR_PAST: Long = 0L
+
+        /** 3000-01-01T00:00:00Z, in unix seconds. */
+        const val FAR_FUTURE: Long = 32_503_680_000L
 
         /**
          * What a buyer does when proposing (§7.5): it has a coordinate, a price, a fee term and a
@@ -59,7 +60,7 @@ class OrderIdTest {
             // coordinate, either pubkey, the price and the time from reaching the order id.
             check(coordinate.isNotEmpty())
             check(split.total >= price)
-            check(proposedAt.epochSecond >= 0L)
+            check(proposedAt >= 0L)
             return OrderId.mint(randomness)
         }
     }

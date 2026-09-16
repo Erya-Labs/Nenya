@@ -3,7 +3,6 @@ package dev.eryalabs.nenya.order
 import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
-import java.time.Instant
 
 /**
  * Which key a rumor in an order thread arrived from, as this implementation resolved it.
@@ -76,15 +75,28 @@ public class OrderTerms(
     /** §8.3's three amounts, and §9.2's answer to which payees a receipt is required from. */
     public val split: FeeSplit,
 
-    /** §7.5's `["expiration", ...]` — the deadline for **acceptance**, or `null` if none. */
-    public val expiration: Instant? = null,
+    /**
+     * §7.5's `["expiration", ...]` — the deadline for **acceptance**, in unix seconds, or `null`
+     * if none.
+     */
+    public val expiration: Long? = null,
 
-    /** §7.5's `["deliver_by", ...]` — the deadline for **release**, or `null` if none. */
-    public val deliverBy: Instant? = null,
+    /**
+     * §7.5's `["deliver_by", ...]` — the deadline for **release**, in unix seconds, or `null` if
+     * none.
+     */
+    public val deliverBy: Long? = null,
 ) {
 
     init {
-        if (expiration != null && deliverBy != null && !expiration.isBefore(deliverBy)) {
+        if ((expiration != null && expiration < 0L) || (deliverBy != null && deliverBy < 0L)) {
+            throw OrderStateException(
+                OrderStateRejection.NEGATIVE_TIMESTAMP,
+                "§4.3 fixes a timestamp as a non-negative integer of unix seconds, and §7.5's " +
+                    "expiration and deliver_by are both timestamps",
+            )
+        }
+        if (expiration != null && deliverBy != null && expiration >= deliverBy) {
             throw OrderStateException(
                 OrderStateRejection.DEADLINES_INVERTED,
                 "§7.5 requires a proposal's expiration to fall strictly before its deliver_by, and " +
@@ -164,8 +176,8 @@ public class OrderTerms(
         public fun of(
             price: Msat,
             fee: FeeTerm = FeeTerm.Absent,
-            expiration: Instant? = null,
-            deliverBy: Instant? = null,
+            expiration: Long? = null,
+            deliverBy: Long? = null,
         ): OrderTerms = OrderTerms(fee.splitOn(price), expiration, deliverBy)
     }
 }

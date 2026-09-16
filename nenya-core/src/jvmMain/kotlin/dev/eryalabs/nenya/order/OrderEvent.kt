@@ -5,7 +5,6 @@ import dev.eryalabs.nenya.delivery.DeliverableRelease
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.VerifiedPayment
-import java.time.Instant
 
 /**
  * How §10.4's three steps failed, when they failed in the caller.
@@ -90,7 +89,7 @@ public sealed interface OrderEvent {
          * that would fail the day something starts reading it — the same shape as the seam
          * package's `LyingWallet`.
          */
-        public val createdAt: Instant?
+        public val createdAt: Long?
     }
 
     /**
@@ -117,8 +116,13 @@ public sealed interface OrderEvent {
         /** The terms the proposal states. A `FeeTerm.Absent` term is §8.1's zero-fee proposal. */
         public val terms: OrderTerms,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:16` `type=3` — a status update (§7.4), carrying a `["status", ...]` token from §11.1.
@@ -152,8 +156,13 @@ public sealed interface OrderEvent {
          */
         public val assertedTerms: OrderTerms? = null,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:16` `type=5` — the provider's delivery commitment (§10.1).
@@ -171,8 +180,13 @@ public sealed interface OrderEvent {
         /** Whose key sealed it. §11.2: the provider's, and nobody else's. */
         public val from: Party,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:16` `type=2` — the payment requests received for this order (§8.6), as a set of the
@@ -206,8 +220,13 @@ public sealed interface OrderEvent {
          */
         public val payees: Set<Payee>,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:15` — the provider's release of the deliverable (§10.3).
@@ -232,8 +251,13 @@ public sealed interface OrderEvent {
         /** Whose key sealed it. §11.2: the provider's. */
         public val from: Party,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:16` `type=6` — a private bid (§6.1). **Advances nothing, in any state, from any key.**
@@ -251,8 +275,13 @@ public sealed interface OrderEvent {
         /** Whose key sealed it. §11.2: from any key, and it changes nothing. */
         public val from: Party,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:14` — free-text chat inside the order thread (§7.4).
@@ -267,8 +296,13 @@ public sealed interface OrderEvent {
         /** Whose key sealed it. §11.2: from any key, and it changes nothing. */
         public val from: Party,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * `kind:16` `type=4` — GammaMarkets' shipping update. **Reserved; advances nothing.**
@@ -282,8 +316,13 @@ public sealed interface OrderEvent {
         /** Whose key sealed it. It changes nothing whoever sent it. */
         public val from: Party,
 
-        override val createdAt: Instant? = null,
-    ) : Rumor
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
 
     /**
      * The receipts (`kind:17`) this library has **verified for itself**, per §9.2.
@@ -373,4 +412,21 @@ public sealed interface OrderEvent {
      * [DeliveryRefused], not by this.
      */
     public data object LocallyDisputed : Local
+}
+
+/**
+ * §4.3's timestamp rule, applied to a rumor's [OrderEvent.Rumor.createdAt]: unix seconds, never
+ * negative.
+ *
+ * `WireEvent` already refuses a negative `created_at`, so a value that reaches here negative was
+ * not read off the wire — it was made up by the caller, and is refused rather than carried.
+ */
+private fun requireNonNegativeCreatedAt(createdAt: Long?) {
+    if (createdAt != null && createdAt < 0L) {
+        throw OrderStateException(
+            OrderStateRejection.NEGATIVE_TIMESTAMP,
+            "§4.3 fixes a timestamp as a non-negative integer of unix seconds, and a rumor's " +
+                "created_at is one",
+        )
+    }
 }

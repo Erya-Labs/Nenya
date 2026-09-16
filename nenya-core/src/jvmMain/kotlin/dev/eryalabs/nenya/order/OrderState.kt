@@ -39,6 +39,16 @@ public enum class OrderStateRejection {
      * which is not a timeout but a refusal to deliver.
      */
     RELEASE_TIMEOUT_NOT_POSITIVE,
+
+    /**
+     * A timestamp that §4.3 fixes as non-negative unix seconds was negative: an [OrderTerms]
+     * `expiration` or `deliver_by`, or a rumor's `created_at`.
+     *
+     * These are wire values, and §4.3 has no encoding for a negative one — `WireEvent` and the
+     * tag codec already refuse it on read. A negative value reaching the order package was
+     * therefore made up rather than decoded, and is refused at construction.
+     */
+    NEGATIVE_TIMESTAMP,
 }
 
 /**

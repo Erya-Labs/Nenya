@@ -3,7 +3,6 @@ package dev.eryalabs.nenya.listing
 import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.tag.NenyaKind
-import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -23,7 +22,7 @@ class ListingActivityTest {
         /** A deadline in the fixture's own units, well clear of the fixed `created_at`. */
         const val DEADLINE: Long = ListingFixtures.CREATED_AT + 10_000L
 
-        fun clockAt(unixSeconds: Long): NenyaClock = FakeClock(Instant.ofEpochSecond(unixSeconds))
+        fun clockAt(unixSeconds: Long): NenyaClock = FakeClock(unixSeconds)
 
         /** A listing of [kind] carrying [expiration], published at [createdAt]. */
         fun listing(

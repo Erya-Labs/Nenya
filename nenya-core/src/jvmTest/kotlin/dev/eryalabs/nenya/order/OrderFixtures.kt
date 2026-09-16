@@ -12,7 +12,6 @@ import dev.eryalabs.nenya.payment.PaymentHash
 import dev.eryalabs.nenya.payment.Preimage
 import dev.eryalabs.nenya.payment.VerifiedPayment
 import dev.eryalabs.nenya.seam.FakeClock
-import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.fail
 
@@ -35,17 +34,17 @@ import kotlin.test.fail
  */
 internal object OrderFixtures {
 
-    /** §7.5's acceptance deadline for every fixture order. An arbitrary, fixed instant. */
-    val EXPIRATION: Instant = Instant.EPOCH.plusSeconds(1_757_016_400L)
+    /** §7.5's acceptance deadline for every fixture order. An arbitrary, fixed unix second. */
+    const val EXPIRATION: Long = 1_757_016_400L
 
     /** §7.5's delivery deadline. Strictly after [EXPIRATION], as §7.5 requires. */
-    val DELIVER_BY: Instant = Instant.EPOCH.plusSeconds(1_757_066_034L)
+    const val DELIVER_BY: Long = 1_757_066_034L
 
     /** A clock reading before both deadlines: nothing has expired. */
-    val BEFORE_DEADLINES: Instant = EXPIRATION.minusSeconds(3_600L)
+    const val BEFORE_DEADLINES: Long = EXPIRATION - 3_600L
 
     /** A clock reading after both deadlines: everything a deadline can fire on, has. */
-    val AFTER_DEADLINES: Instant = DELIVER_BY.plusSeconds(3_600L)
+    const val AFTER_DEADLINES: Long = DELIVER_BY + 3_600L
 
     /** §8.3's own worked rate: 250 bps is 2.5%, and on this price the fee is non-zero. */
     const val FEE_BASIS_POINTS: Int = 250

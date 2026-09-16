@@ -4,7 +4,6 @@ import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.tag.NenyaTags
 import dev.eryalabs.nenya.wire.EventId
-import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -154,12 +153,12 @@ class ListingPropertyTest {
 
             assertEquals(
                 ListingActivity.EXPIRED,
-                listing.activity(FakeClock(Instant.ofEpochSecond(deadline + 1))),
+                listing.activity(FakeClock(deadline + 1)),
                 "fixture ${fixture.index}",
             )
             assertEquals(
                 ListingActivity.ACTIVE,
-                listing.activity(FakeClock(Instant.ofEpochSecond(deadline - 1))),
+                listing.activity(FakeClock(deadline - 1)),
                 "fixture ${fixture.index}",
             )
             assertEquals(

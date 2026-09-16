@@ -1,6 +1,5 @@
 package dev.eryalabs.nenya.seam
 
-import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -86,7 +85,7 @@ class SeamAnswerRedactionTest {
     @Test
     fun `the redacted form still names the type it is holding`() {
         assertTrue(SeamAnswer.Provided("x").toString().contains("String"))
-        assertTrue(SeamAnswer.Provided(Instant.EPOCH).toString().contains("Instant"))
+        assertTrue(SeamAnswer.Provided(0L).toString().contains("Long"))
         assertEquals(
             "SeamAnswer.Provided(OrderId, redacted)",
             SeamAnswer.Provided(OrderId.mint(RecordingRandomness())).toString(),

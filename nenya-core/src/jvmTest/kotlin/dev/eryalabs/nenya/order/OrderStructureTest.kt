@@ -306,18 +306,25 @@ class OrderStructureTest {
      *
      * Every deadline in NENYA-1 is evaluated against the injected clock and never against a
      * counterparty's `created_at` (§7.1 randomises gift-wrap timestamps into the past on purpose).
-     * A rule stated that way is a rule to remember; a parameter list with nowhere to put an
-     * `Instant` is a rule the compiler keeps. The clock arrives on the **constructor**, which is
-     * the seam, and is deliberately not swept here.
+     * A rule stated that way is a rule to remember; a parameter list with nowhere to put a time
+     * is a rule the compiler keeps. A time in this library is a `Long` of unix seconds, so the
+     * sweep refuses a `long` or `Long` parameter of any kind — which a method on the machine has
+     * no other use for. The clock arrives on the **constructor**, which is the seam, and is
+     * deliberately not swept here. (The name predates the switch from `java.time.Instant` to unix
+     * seconds, and is kept.)
      */
     @Test
     fun `no method on the machine accepts an Instant`() {
         val machine = OrderStructure.mainClasses().single { it.name == "$PACKAGE.OrderMachine" }
 
         for (method in machine.methods.filter { it.declaringClass == machine && '$' !in it.name }) {
-            assertFalse(
-                java.time.Instant::class.java in method.parameterTypes,
-                "${method.name} takes an Instant. §4.6: the only time this library may know comes " +
+            val timeShaped = method.parameterTypes.filter {
+                it == Long::class.javaPrimitiveType || it == Long::class.javaObjectType
+            }
+            assertTrue(
+                timeShaped.isEmpty(),
+                "${method.name} takes a Long, which is how this library carries unix seconds. " +
+                    "§4.6: the only time this library may know comes " +
                     "from the injected clock, and a parameter is a door for a counterparty's " +
                     "created_at to arrive through",
             )

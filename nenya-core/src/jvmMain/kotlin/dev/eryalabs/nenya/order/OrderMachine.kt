@@ -7,8 +7,6 @@ import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.seam.SeamAnswer
-import java.time.Duration
-import java.time.Instant
 
 /**
  * Why a `(state, event)` pair was refused.
@@ -295,15 +293,15 @@ public sealed interface Order {
     public val commitment: DeliverableCommitment?
 
     /**
-     * The injected clock's reading at the moment the order became `paid`, or `null` if it had
-     * none to give.
+     * The injected clock's reading at the moment the order became `paid`, in unix seconds, or
+     * `null` if it had none to give.
      *
      * Recorded for exactly one purpose: §11.2 says that where the accepted terms carry no
      * `deliver_by`, an implementation MUST apply a release timeout of its own and MUST NOT leave
      * the order in `paid` indefinitely. A timeout needs something to run from, and the only
      * instant §4.6 permits this library to know is one the injected clock gave it.
      */
-    public val paidAt: Instant?
+    public val paidAt: Long?
 
     /** Why the order is `disputed`, and `null` in every other state (§14 item 3). */
     public val disputeGround: DisputeGround?
@@ -357,20 +355,20 @@ public sealed interface Order {
  * and says `CLOCK_UNAVAILABLE` when asked, rather than expiring against an ambient clock.
  *
  * @param clock §4.6's authoritative clock.
- * @param releaseTimeout §11.2's own-release timeout, applied only where the accepted terms carry
- *   no `deliver_by`. **Local policy, not a wire value** — §11.2 requires an implementation to
- *   apply and display one and fixes no number, which is why this is a parameter with a default
- *   rather than a constant. Seven days is long enough not to fire on a provider who is merely
- *   slow and short enough that an abandoned order reaches a terminal state while the buyer still
- *   remembers it.
+ * @param releaseTimeoutSeconds §11.2's own-release timeout, as a number of seconds, applied only
+ *   where the accepted terms carry no `deliver_by`. **Local policy, not a wire value** — §11.2
+ *   requires an implementation to apply and display one and fixes no number, which is why this
+ *   is a parameter with a default rather than a constant. Seven days is long enough not to fire
+ *   on a provider who is merely slow and short enough that an abandoned order reaches a terminal
+ *   state while the buyer still remembers it. Must be strictly positive.
  */
 public class OrderMachine(
     private val clock: NenyaClock = NenyaClock.FAIL_CLOSED,
-    private val releaseTimeout: Duration = DEFAULT_RELEASE_TIMEOUT,
+    private val releaseTimeoutSeconds: Long = DEFAULT_RELEASE_TIMEOUT_SECONDS,
 ) {
 
     init {
-        if (releaseTimeout.isNegative || releaseTimeout.isZero) {
+        if (releaseTimeoutSeconds <= 0L) {
             throw OrderStateException(
                 OrderStateRejection.RELEASE_TIMEOUT_NOT_POSITIVE,
                 "§11.2 requires an implementation with no `deliver_by` to apply and display a " +
@@ -660,7 +658,7 @@ public class OrderMachine(
                 "fire on; §7.5 does not make the tag REQUIRED and this library does not invent one",
         )
         val now = reading() ?: return clockUnavailable(order)
-        return if (now.isBefore(deadline)) {
+        return if (now < deadline) {
             refuse(
                 order,
                 TransitionRejection.DEADLINE_NOT_PASSED,
@@ -676,35 +674,28 @@ public class OrderMachine(
      *
      * Where the accepted terms carry no `deliver_by`, §11.2 requires an implementation to apply a
      * release timeout of its own and MUST NOT leave the order in `paid` indefinitely — so
-     * [releaseTimeout] runs from [Order.paidAt], the clock reading taken when the order became
-     * `paid`. If the clock gave none then, there is nothing to run from and the refusal says so
-     * rather than substituting a time from somewhere §4.6 does not permit.
+     * [releaseTimeoutSeconds] runs from [Order.paidAt], the clock reading taken when the order
+     * became `paid`. If the clock gave none then, there is nothing to run from and the refusal
+     * says so rather than substituting a time from somewhere §4.6 does not permit.
      */
     private fun releaseDeadline(order: Order): OrderOutcome {
         val now = reading() ?: return clockUnavailable(order)
         val paidAt = order.paidAt
         val deadline = order.terms.deliverBy
             ?: paidAt?.let { at ->
-                // The injected clock is the embedding client's, so `paidAt` can be any instant it
-                // chose — including one so late that adding the timeout leaves the representable
-                // range. `on` is documented total over every pair (§11.2), and an arithmetic
-                // exception escaping it would be exactly the "we forgot a case" §11.2 names. A
-                // deadline beyond every representable clock reading is a deadline no clock can
-                // pass, so the honest answer is the one below rather than a rethrow.
-                val timedOut = try {
-                    at.plus(releaseTimeout)
-                } catch (overflow: java.time.DateTimeException) {
-                    null
-                } catch (overflow: ArithmeticException) {
-                    null
-                }
-                // Caught by type rather than with `runCatching`, which would also swallow an
-                // `OutOfMemoryError` and report it as a deadline that has not passed. These two
-                // are the whole of what `Instant.plus` throws.
-                timedOut ?: return refuse(
+                // The injected clock is the embedding client's, so `paidAt` can be any `Long` it
+                // chose — including one so late that adding the timeout overflows. Plain `+` would
+                // wrap silently to a large negative deadline that every clock reading has already
+                // passed, disputing the order on the spot; that silent wrap is the bug class
+                // `Msat` refuses too. `on` is documented total over every pair (§11.2), so the
+                // overflow is not thrown either: a deadline beyond `Long.MAX_VALUE` is a deadline
+                // no clock reading can reach, and the honest answer is the refusal below.
+                // `releaseTimeoutSeconds` is positive (checked in `init`), so only the top of the
+                // range can be crossed.
+                checkedDeadline(at, releaseTimeoutSeconds) ?: return refuse(
                     order,
                     TransitionRejection.DEADLINE_NOT_PASSED,
-                    "§11.2's own-release timeout lands beyond the last representable instant, so " +
+                    "§11.2's own-release timeout lands beyond the last representable second, so " +
                         "no clock reading can reach it",
                 )
             }
@@ -715,7 +706,7 @@ public class OrderMachine(
                     "the order became `paid`, so §11.2's own-release timeout has nothing to run " +
                     "from",
             )
-        return if (now.isBefore(deadline)) {
+        return if (now < deadline) {
             refuse(
                 order,
                 TransitionRejection.DEADLINE_NOT_PASSED,
@@ -876,11 +867,12 @@ public class OrderMachine(
     /**
      * §4.6's clock reading, or `null` when the seam declined.
      *
-     * The only place in this file a time comes from. There is no parameter anywhere on
-     * [OrderMachine] that accepts an [Instant], which is what makes "a counterparty's `created_at`
-     * never drives a deadline" structural rather than a rule to remember.
+     * The only place in this file a time comes from. There is no parameter on any of
+     * [OrderMachine]'s methods that accepts a time — no `Long` of unix seconds at all — which is
+     * what makes "a counterparty's `created_at` never drives a deadline" structural rather than a
+     * rule to remember.
      */
-    private fun reading(): Instant? = when (val answer = clock.now()) {
+    private fun reading(): Long? = when (val answer = clock.now()) {
         is SeamAnswer.Provided -> answer.value
         is SeamAnswer.Unavailable -> null
     }
@@ -922,10 +914,23 @@ public class OrderMachine(
          * display one and deliberately fixes no number — revision `1.1`'s unnamed "release
          * deadline" is exactly what §11.2 says left the transition "untestable and invented per
          * implementation". A constant so it can be named in a UI; a parameter with a default so a
-         * client and a test can both pin it.
+         * client and a test can both pin it. Seven days, as a number of seconds.
          */
-        public val DEFAULT_RELEASE_TIMEOUT: Duration = Duration.ofDays(7L)
+        public const val DEFAULT_RELEASE_TIMEOUT_SECONDS: Long = 7L * 24L * 60L * 60L
     }
+}
+
+/**
+ * [atSeconds] plus [durationSeconds], or `null` if the sum does not fit in a `Long`.
+ *
+ * The check is written as a comparison before the addition, so no wrapped value is ever
+ * computed. Internal so the boundary can be pinned by a test at [Long.MAX_VALUE] and
+ * [Long.MIN_VALUE] directly, rather than only through a clock.
+ */
+internal fun checkedDeadline(atSeconds: Long, durationSeconds: Long): Long? = when {
+    durationSeconds > 0L && atSeconds > Long.MAX_VALUE - durationSeconds -> null
+    durationSeconds < 0L && atSeconds < Long.MIN_VALUE - durationSeconds -> null
+    else -> atSeconds + durationSeconds
 }
 
 /**
@@ -953,7 +958,7 @@ private fun sameCommitment(one: DeliverableCommitment, other: DeliverableCommitm
 private fun Order.with(
     state: OrderState = this.state,
     commitment: DeliverableCommitment? = this.commitment,
-    paidAt: Instant? = this.paidAt,
+    paidAt: Long? = this.paidAt,
     disputeGround: DisputeGround? = this.disputeGround,
     paymentChecksPerformed: Set<PaymentCheck> = this.paymentChecksPerformed,
     paymentChecksNotPerformedHere: Set<PaymentCheck> = this.paymentChecksNotPerformedHere,
@@ -976,7 +981,7 @@ private class OpenOrder(
     override val state: OrderState,
     override val terms: OrderTerms,
     override val commitment: DeliverableCommitment?,
-    override val paidAt: Instant?,
+    override val paidAt: Long?,
     override val disputeGround: DisputeGround?,
     override val paymentChecksPerformed: Set<PaymentCheck>,
     override val paymentChecksNotPerformedHere: Set<PaymentCheck>,

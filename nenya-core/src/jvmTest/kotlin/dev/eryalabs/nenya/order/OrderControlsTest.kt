@@ -15,8 +15,6 @@ import dev.eryalabs.nenya.seam.LyingWallet
 import dev.eryalabs.nenya.seam.SeamFixtures
 import dev.eryalabs.nenya.seam.WalletPaymentState
 import dev.eryalabs.nenya.seam.provided
-import java.time.Duration
-import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -367,7 +365,7 @@ class OrderControlsTest {
             expiration = OrderFixtures.EXPIRATION,
             deliverBy = null,
         )
-        val timeout = Duration.ofDays(2L)
+        val timeout = 2L * 24L * 60L * 60L
         val building = OrderMachine(FakeClock(OrderFixtures.BEFORE_DEADLINES), timeout)
         val paid = OrderFixtures.orders(terms).getValue(OrderState.PAID)
         assertNotNull(paid.paidAt, "the clock reading at `paid` is what the timeout runs from")
@@ -378,7 +376,7 @@ class OrderControlsTest {
         )
 
         val afterTimeout = OrderMachine(
-            FakeClock(paid.paidAt!!.plus(timeout).plusSeconds(1L)),
+            FakeClock(paid.paidAt!! + timeout + 1L),
             timeout,
         )
         val disputed = OrderFixtures.advanced(afterTimeout, paid, OrderEvent.ClockChecked)
@@ -389,7 +387,7 @@ class OrderControlsTest {
     /** §7.5 — `expiration` MUST fall strictly before `deliver_by`, and a violation is rejected. */
     @Test
     fun `terms whose expiration is not strictly before deliver_by are rejected`() {
-        for (deliverBy in listOf(OrderFixtures.EXPIRATION, OrderFixtures.EXPIRATION.minusSeconds(1L))) {
+        for (deliverBy in listOf(OrderFixtures.EXPIRATION, OrderFixtures.EXPIRATION - 1L)) {
             val failure = assertFailsWith<OrderStateException> {
                 OrderTerms.of(OrderFixtures.PRICE, FeeTerm.Absent, OrderFixtures.EXPIRATION, deliverBy)
             }
@@ -472,7 +470,7 @@ class OrderControlsTest {
             OrderFixtures.PRICE,
             FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
             expiration = OrderFixtures.EXPIRATION,
-            deliverBy = OrderFixtures.DELIVER_BY.plusSeconds(1L),
+            deliverBy = OrderFixtures.DELIVER_BY + 1L,
         )
         val refusal = OrderFixtures.refusal(
             machine,
@@ -614,8 +612,10 @@ class OrderControlsTest {
 
     /**
      * §11.2 says the transition function is total over every `(state, event)` pair, and the clock
-     * is the embedding client's — so `paidAt` can be any instant it chose, including one where
-     * adding the release timeout leaves the representable range.
+     * is the embedding client's — so `paidAt` can be any `Long` it chose, including
+     * `Long.MAX_VALUE`, where adding the release timeout overflows. Unchecked, the sum wraps to a
+     * large negative deadline that every reading has passed, and the order would be disputed on
+     * the spot; the refusal below is what proves the overflow was caught instead.
      *
      * An arithmetic exception escaping `on` would be precisely the "we forgot a case" §11.2's
      * totality rule exists to prevent. A deadline beyond every representable clock reading is one
@@ -629,17 +629,18 @@ class OrderControlsTest {
             expiration = OrderFixtures.EXPIRATION,
             deliverBy = null,
         )
-        val extreme = OrderMachine(FakeClock(Instant.MAX))
+        val extreme = OrderMachine(FakeClock(Long.MAX_VALUE))
         val awaiting = OrderFixtures.orders(terms).getValue(OrderState.AWAITING_PAYMENT)
         val paid = OrderFixtures.advanced(
             extreme,
             awaiting,
             OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         )
-        assertEquals(Instant.MAX, paid.paidAt)
+        assertEquals(Long.MAX_VALUE, paid.paidAt)
 
         val refusal = OrderFixtures.refusal(extreme, paid, OrderEvent.ClockChecked)
         assertEquals(TransitionRejection.DEADLINE_NOT_PASSED, refusal.reason)
+        assertEquals(null, checkedDeadline(Long.MAX_VALUE, OrderMachine.DEFAULT_RELEASE_TIMEOUT_SECONDS))
     }
 
     /**
@@ -649,12 +650,100 @@ class OrderControlsTest {
      */
     @Test
     fun `a machine cannot be built with a non-positive release timeout`() {
-        for (timeout in listOf(Duration.ZERO, Duration.ofDays(-1L))) {
+        for (timeout in listOf(0L, -86_400L, Long.MIN_VALUE)) {
             val failure = assertFailsWith<OrderStateException> {
                 OrderMachine(FakeClock(OrderFixtures.BEFORE_DEADLINES), timeout)
             }
             assertEquals(OrderStateRejection.RELEASE_TIMEOUT_NOT_POSITIVE, failure.reason)
         }
+    }
+
+    /**
+     * The exact edge of the overflow check, from both sides. A release deadline that lands on
+     * `Long.MAX_VALUE` itself is representable and a clock reading of `Long.MAX_VALUE` reaches it;
+     * one second later it is not representable, and the same reading is refused rather than
+     * wrapping to a deadline in the distant past.
+     */
+    @Test
+    fun `a release deadline landing exactly on Long MAX_VALUE fires and one second later refuses`() {
+        val terms = OrderTerms.of(
+            OrderFixtures.PRICE,
+            FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+            expiration = OrderFixtures.EXPIRATION,
+            deliverBy = null,
+        )
+        val timeout = 3_600L
+        val awaiting = OrderFixtures.orders(terms).getValue(OrderState.AWAITING_PAYMENT)
+        val atEndOfTime = OrderMachine(FakeClock(Long.MAX_VALUE), timeout)
+
+        val paidOnTheEdge = OrderFixtures.advanced(
+            OrderMachine(FakeClock(Long.MAX_VALUE - timeout), timeout),
+            awaiting,
+            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+        )
+        val disputed = OrderFixtures.advanced(atEndOfTime, paidOnTheEdge, OrderEvent.ClockChecked)
+        assertEquals(OrderState.DISPUTED, disputed.state)
+        assertEquals(DisputeGround.RELEASE_DEADLINE_PASSED, disputed.disputeGround)
+
+        val paidPastTheEdge = OrderFixtures.advanced(
+            OrderMachine(FakeClock(Long.MAX_VALUE - timeout + 1L), timeout),
+            awaiting,
+            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+        )
+        assertEquals(
+            TransitionRejection.DEADLINE_NOT_PASSED,
+            OrderFixtures.refusal(atEndOfTime, paidPastTheEdge, OrderEvent.ClockChecked).reason,
+        )
+    }
+
+    /** The checked addition itself, at both ends of `Long`: a sum that does not fit is `null`. */
+    @Test
+    fun `deadline arithmetic never wraps at either end of Long`() {
+        assertEquals(Long.MAX_VALUE, checkedDeadline(Long.MAX_VALUE - 5L, 5L))
+        assertEquals(null, checkedDeadline(Long.MAX_VALUE - 5L, 6L))
+        assertEquals(null, checkedDeadline(Long.MAX_VALUE, 1L))
+        assertEquals(null, checkedDeadline(Long.MAX_VALUE, Long.MAX_VALUE))
+        assertEquals(Long.MIN_VALUE, checkedDeadline(Long.MIN_VALUE + 5L, -5L))
+        assertEquals(null, checkedDeadline(Long.MIN_VALUE + 5L, -6L))
+        assertEquals(null, checkedDeadline(Long.MIN_VALUE, Long.MIN_VALUE))
+        assertEquals(-1L, checkedDeadline(Long.MAX_VALUE, Long.MIN_VALUE))
+        assertEquals(OrderFixtures.DELIVER_BY, checkedDeadline(OrderFixtures.EXPIRATION, OrderFixtures.DELIVER_BY - OrderFixtures.EXPIRATION))
+    }
+
+    /**
+     * §4.3 fixes a timestamp as a non-negative integer, and §7.5's two deadlines are timestamps.
+     * `java.time.Instant` never prevented a pre-1970 deadline either, but a `Long` makes the
+     * question explicit, so it is answered at construction.
+     */
+    @Test
+    fun `terms carrying a negative expiration or deliver_by are rejected`() {
+        val negatives = listOf(-1L to null, null to -1L, Long.MIN_VALUE to OrderFixtures.DELIVER_BY, -2L to -1L)
+        for ((expiration, deliverBy) in negatives) {
+            val failure = assertFailsWith<OrderStateException> {
+                OrderTerms.of(OrderFixtures.PRICE, FeeTerm.Absent, expiration, deliverBy)
+            }
+            assertEquals(OrderStateRejection.NEGATIVE_TIMESTAMP, failure.reason)
+        }
+        assertEquals(0L, OrderTerms.of(OrderFixtures.PRICE, FeeTerm.Absent, 0L, 1L).expiration)
+    }
+
+    /** A rumor's `created_at` is a §4.3 timestamp too: a negative one was never on the wire. */
+    @Test
+    fun `a rumor carrying a negative created_at is rejected`() {
+        val rumors = listOf<() -> OrderEvent.Rumor>(
+            { OrderEvent.Proposal(OrderFixtures.TERMS, createdAt = -1L) },
+            { OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, createdAt = -1L) },
+            { OrderEvent.PrivateBid(Party.BUYER, createdAt = Long.MIN_VALUE) },
+            { OrderEvent.ChatMessage(Party.BUYER, createdAt = -1L) },
+            { OrderEvent.ShippingUpdate(Party.PROVIDER, createdAt = -1L) },
+            { OrderEvent.PaymentRequestsReceived(emptySet(), createdAt = -1L) },
+        )
+        for (build in rumors) {
+            val failure = assertFailsWith<OrderStateException> { build() }
+            assertEquals(OrderStateRejection.NEGATIVE_TIMESTAMP, failure.reason)
+        }
+        assertEquals(0L, OrderEvent.ChatMessage(Party.BUYER, createdAt = 0L).createdAt)
+        assertEquals(null, OrderEvent.ChatMessage(Party.BUYER).createdAt)
     }
 
     /**
@@ -679,7 +768,7 @@ class OrderControlsTest {
         assertEquals(
             TransitionRejection.DEADLINE_NOT_PASSED,
             OrderFixtures.refusal(
-                OrderMachine(FakeClock(OrderFixtures.EXPIRATION.minusNanos(1L))),
+                OrderMachine(FakeClock(OrderFixtures.EXPIRATION - 1L)),
                 orders.getValue(OrderState.PROPOSED),
                 OrderEvent.ClockChecked,
             ).reason,
@@ -697,7 +786,7 @@ class OrderControlsTest {
         assertEquals(
             TransitionRejection.DEADLINE_NOT_PASSED,
             OrderFixtures.refusal(
-                OrderMachine(FakeClock(OrderFixtures.DELIVER_BY.minusNanos(1L))),
+                OrderMachine(FakeClock(OrderFixtures.DELIVER_BY - 1L)),
                 orders.getValue(OrderState.PAID),
                 OrderEvent.ClockChecked,
             ).reason,

@@ -1,7 +1,6 @@
 package dev.eryalabs.nenya.seam
 
 import dev.eryalabs.nenya.money.Msat
-import java.time.Instant
 
 /**
  * The marker every one of §3's seams carries.
@@ -274,15 +273,22 @@ public interface Wallet : Seam {
  *
  * ### Named `NenyaClock` rather than `Clock`
  *
- * `java.time.Clock` would be the obvious type, and a default built from it — `Clock.systemUTC()`
+ * The JDK's `Clock` would be the obvious JVM type, and a default built from it — `Clock.systemUTC()`
  * — is a live ambient effect that every injected-fake test would step straight over. The suite
  * sweeps `src/jvmMain/kotlin` for exactly that token, among others, and a distinct name keeps the
  * two from being confused at a call site.
  */
 public interface NenyaClock : Seam {
 
-    /** The current time, as the embedding client understands it. */
-    public fun now(): SeamAnswer<Instant>
+    /**
+     * The current time, as the embedding client understands it, in **unix seconds** — the unit
+     * of nostr's `created_at` and of every §4.3 timestamp this reading is compared against.
+     *
+     * Any `Long` is used as given, including a negative one (a reading before 1970) and
+     * [Long.MAX_VALUE]; the deadline arithmetic that consumes it is overflow-checked rather than
+     * relying on the clock to stay in a plausible range.
+     */
+    public fun now(): SeamAnswer<Long>
 
     public companion object {
 
@@ -445,7 +451,7 @@ private object FailClosedWallet : Wallet {
 
 private object FailClosedClock : NenyaClock {
 
-    override fun now(): SeamAnswer<Instant> =
+    override fun now(): SeamAnswer<Long> =
         SeamAnswer.unavailable(SeamCapability.CLOCK_READING)
 
     override fun toString(): String = "NenyaClock.FAIL_CLOSED"

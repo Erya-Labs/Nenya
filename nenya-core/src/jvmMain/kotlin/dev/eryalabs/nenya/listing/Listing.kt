@@ -223,7 +223,7 @@ public class Listing internal constructor(
         return when (val reading = clock.now()) {
             is SeamAnswer.Unavailable -> ListingActivity.CANNOT_SAY
             is SeamAnswer.Provided ->
-                if (reading.value.epochSecond >= deadline) ListingActivity.EXPIRED
+                if (reading.value >= deadline) ListingActivity.EXPIRED
                 else ListingActivity.ACTIVE
         }
     }
