@@ -194,11 +194,14 @@ public sealed interface OrderEvent {
      *
      * Plural because §11.2's trigger is plural: "one valid `type=2` per **required** payee". The
      * per-invoice checks §11.2 lists on that row — amount `== price_msat`, fee amount
-     * `== fee_msat`, sealed by the fee recipient (§8.7), fee term matching (§8.4) — need the
-     * BOLT-11 parser, the tag codec and gift-wrap machinery, none of which exists yet, so what
-     * reaches here is which payees the caller accepted a request from. That narrowing is not
-     * silently absorbed: it is the same set of unperformed checks every `VerifiedPayment` already
-     * publishes, and the order carries them forward (§17).
+     * `== fee_msat`, sealed by the fee recipient (§8.7), fee term matching (§8.4) — are **not**
+     * performed here: what reaches this event is which payees the caller accepted a request from.
+     * Two of the four now have somewhere to be performed —
+     * `Settlement.checkFeePaymentRequest` does §8.4 and §8.7 over a fee `type=2` — and the caller
+     * that runs it before constructing this event is the one honouring the row. The other two need
+     * the BOLT-11 parser this library does not have. That narrowing is not silently absorbed: it is
+     * the same set of unperformed checks every `VerifiedPayment` already publishes, and the order
+     * carries them forward (§17).
      *
      * §8.5 is why this event exists as its own thing rather than folding into the receipt: the
      * fee **payment request** is accepted as part of `committed → awaiting_payment` and nowhere

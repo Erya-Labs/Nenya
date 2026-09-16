@@ -76,8 +76,9 @@ internal object MainClasses {
         "dev.eryalabs.nenya.payment" to 16,
         "dev.eryalabs.nenya.seam" to 33,
         // Added by the §8.6/§9.2-check-1 settlement package, which did not exist at 6432814;
-        // pinned at the count it compiled to when it was written, on the same terms as above.
-        "dev.eryalabs.nenya.settlement" to 29,
+        // pinned at the count it compiled to when it was written, on the same terms as above,
+        // and raised to 42 by §9.2 check 6's fee-term model.
+        "dev.eryalabs.nenya.settlement" to 42,
         "dev.eryalabs.nenya.tag" to 30,
         "dev.eryalabs.nenya.wire" to 12,
     )

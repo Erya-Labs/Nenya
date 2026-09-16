@@ -127,18 +127,31 @@ public enum class PaymentCheck {
      */
     INVOICE_EXPIRY,
 
-    /** §9.2 check 6, first obligation — the fee term matches (§8.4). Needs the tag codec. */
+    /**
+     * §9.2 check 6, first obligation — the fee term matches (§8.4).
+     *
+     * Performed by `Settlement.verifyFeeReceipt`, over the **raw** tag elements at every point
+     * §8.4 names, and recorded in *that* result's own performed-set. Not by a bare [verify], which
+     * has no tags to compare and whose result therefore still names this constant as unperformed.
+     */
     FEE_TERM_MATCH,
 
     /**
-     * §9.2 check 6, second obligation — the sealing key is the fee recipient's (§8.7). Needs
-     * gift-wrap machinery.
+     * §9.2 check 6, second obligation — the sealing key is the fee recipient's (§8.7).
+     *
+     * Performed on the same path, and against the seal the stored `type=2` arrived under rather
+     * than the receipt's own: a fee receipt is authored by the buyer (§9.2's worked example), so
+     * the literal reading would refuse every conformant one. See `Settlement.verifyFeeReceipt`.
+     * The equality is checked; no BIP-340 signature behind it is verified by anybody here.
      */
     FEE_SEALING_KEY,
 
     /**
-     * §9.2 check 6, third obligation — the order is already `awaiting_payment` (§8.5). Needs
-     * the state machine.
+     * §9.2 check 6, third obligation — the order is already `awaiting_payment` (§8.5).
+     *
+     * Performed on the same path, read from the order the state machine produced and never from a
+     * status token a counterparty sent. It governs the fee **receipt** and deliberately not the
+     * fee payment **request**, which §8.5 accepts as part of `committed → awaiting_payment`.
      */
     FEE_STATE_PRECONDITION,
 }

@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.settlement
 
 import dev.eryalabs.nenya.channel.ChannelTags
+import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.payment.PaymentRejection
 import dev.eryalabs.nenya.tag.TagRejection
 
@@ -33,6 +34,29 @@ public enum class SettlementRejection {
 
     /** §9.2's decoder was handed a rumor that is not a `kind:17`. See [NOT_A_PAYMENT_REQUEST]. */
     NOT_A_RECEIPT,
+
+    /**
+     * §8.4's second point is "the acceptance (`type=3`, `status=accepted`)" and the `type=3` handed
+     * to it announces something else.
+     *
+     * Its own constant for the reason [NOT_A_RECEIPT] has one. A `["status", "cancelled"]` is a
+     * well-formed message about this order — §11.2 accepts a cancellation from either party before
+     * `paid` — and §7.6 requires the four terms be repeated on an **acceptance** and on nothing
+     * else, so reading one as §8.4 point 2 would compare terms §7.6 never asked for and report a
+     * terms mismatch where there was a cancellation.
+     */
+    NOT_AN_ACCEPTANCE,
+
+    /**
+     * An entry point for §8.4's `payee=fee` point was handed a `payee=provider` message.
+     *
+     * The caller's mistake rather than the peer's, and distinct from every §8.4 divergence below:
+     * §8.4 makes the `fee` tag OPTIONAL on both provider messages and MUST NOT be required there,
+     * so a provider request or receipt carrying no `fee` tag is entirely conformant. Refusing one
+     * *as a terms mismatch* would be the over-strict direction §8.4 names, which breaks conformant
+     * peers while looking correct.
+     */
+    PAYEE_IS_NOT_FEE,
 
     /**
      * §8.6 or §9.2 marks a tag MUST on this message and the event carries no readable one.
@@ -187,6 +211,110 @@ public enum class SettlementRejection {
     INVOICE_NOT_IDENTICAL,
 
     /**
+     * A `fee` tag that is not §8.1's shape at all: another tag's name, an arity §8.1 does not give,
+     * or a recipient element that is not §4.3's 64-character hex.
+     *
+     * A refusal about the **operand** of §8.4's comparison rather than about the comparison, and
+     * kept apart from [FEE_TERM_MISMATCH] for the reason that runs through this whole enum: a
+     * caller told "terms mismatch" aborts the order and tells its user the counterparty re-quoted
+     * the fee, and a caller told this looks at the tag it handed in.
+     *
+     * §8.1's bps-to-arity correspondence is deliberately **not** checked here, and the omission is
+     * load-bearing rather than an oversight. §8.1 names a three-element `["fee", "0", "<pubkey>"]`
+     * and a two-element `["fee", "250"]` as malformed, and T9's tag codec refuses both on read, so
+     * neither reaches this package through a decoded message. Through [FeeTermSighting.of] one
+     * can, and it must be **comparable**: `["fee", "0", X]` against a signed `["fee", "0"]` is
+     * precisely somebody adding a fee recipient to a signed zero-fee term, which §8.4 calls a
+     * divergence. Refusing it as malformed here would report a syntax error where a term was
+     * substituted, and would abort the order for the wrong stated reason.
+     */
+    MALFORMED_FEE_TERM,
+
+    /**
+     * A §8.4 point that MUST already exist by the time this message is judged was not among the
+     * ones handed in.
+     *
+     * The failure this exists for is the one that makes a check-6 result a lie rather than a
+     * refusal. §8.4 names the fee term as REQUIRED on four points and the order is a message
+     * order: a fee `type=2` cannot exist before the proposal and the acceptance that signed the
+     * term it charges, and a fee `kind:17` cannot exist before the `type=2` it settles. A caller
+     * that handed in none of them would have the message under test compared only against
+     * **itself** — which always agrees, and which lets a stranger who names themselves in both
+     * their own `payee` tag and their own `fee` tag satisfy §8.7 out of a term nobody signed. So
+     * the sequence is refused rather than compared, and no `Settlement` claiming
+     * `PaymentCheck.FEE_TERM_MATCH` is produced for it.
+     *
+     * Distinct from [FEE_TERM_NOT_COMPARABLE], which is the emptier case and a different mistake:
+     * that one is a comparison with fewer than two points, this one is a comparison with points
+     * enough and without the signed term among them.
+     */
+    FEE_TERM_POINT_MISSING,
+
+    /**
+     * §8.4's comparison has fewer than two points left to compare.
+     *
+     * §8.4 is a statement about a pair appearing at **several** places, so there is no answer over
+     * a sequence with nothing to compare against — and the answer an implementation reaches for is
+     * "consistent", which reports a fee term as agreed on the strength of having seen it once.
+     * That vacuous `true` is the failure this constant exists to make loud rather than silent, and
+     * a single point is the same vacuity with a point attached to it: a term compared against
+     * itself always agrees.
+     *
+     * Reachable three ways: an empty sequence; a sequence of §8.4 OPTIONAL points that all carried
+     * no `fee` tag, which are dropped rather than compared because §8.4 says an implementation
+     * MUST NOT require one there; and a sequence that reduces to one point.
+     */
+    FEE_TERM_NOT_COMPARABLE,
+
+    /**
+     * §8.4: the `(bps, recipient)` pair is not byte-identical at every point it appears.
+     *
+     * "Any divergence at any point MUST abort the order and MUST be surfaced to the user as a
+     * **terms mismatch**, not as a transient error. An implementation MUST NOT 'take the newest',
+     * 'take the smaller', or renegotiate silently." The point and the side that diverged travel on
+     * [SettlementException.feeTermDivergence], because a caller that cannot say which point
+     * diverged cannot tell its user whether the fee was re-quoted or the recipient substituted.
+     */
+    FEE_TERM_MISMATCH,
+
+    /**
+     * §8.7: a fee invoice that did not arrive sealed by the fee recipient's own key.
+     *
+     * "A `type=2` payment request with `["payee", "fee", ...]` MUST arrive in a gift wrap whose
+     * seal (`kind:13`) `pubkey` equals the fee-recipient pubkey named in the signed fee term. A fee
+     * invoice forwarded by the provider, or arriving from any other key, MUST be rejected."
+     *
+     * Deliberately **not** [MALFORMED_PAYEE_RECIPIENT] and not [MISSING_REQUIRED_TAG], and those
+     * are the two an implementer conflates it with: the `payee` tag here is present, well formed
+     * and names the right recipient — what is wrong is who sealed the message, which is a fact
+     * about the transport and not about the tag. A peer told its `payee` tag is malformed goes and
+     * fixes a tag that was correct.
+     */
+    FEE_SEAL_NOT_RECIPIENT,
+
+    /**
+     * §9.2 check 6: a `payee=fee` **receipt** presented while the order's state is not
+     * `awaiting_payment`.
+     *
+     * The distinction §8.5 calls load-bearing, and the half that bites is the receipt: the fee
+     * **payment request** is accepted as part of `committed → awaiting_payment` and is not refused
+     * here or anywhere. "A rule that rejected the fee `type=2` while the order was still
+     * `committed` would therefore make `awaiting_payment` unreachable for every fee-bearing order,
+     * and would make this document's own worked order (Appendix A, step 6) illegal." §11.3
+     * invariant 2 is the direct test of the pairing.
+     *
+     * **The condition is equality, not "before", and the constant is named for the equality.**
+     * §8.5 says no fee receipt may be accepted "before the order reaches `awaiting_payment`";
+     * §9.2 check 6 says "the state MUST already be `awaiting_payment`". The two differ only past
+     * that state, and this implements check 6's equality — so a fee receipt arriving once the
+     * order is already `paid` is refused too. That is a duplicate or a replay rather than an early
+     * settlement, it evidences nothing the order does not already carry, and refusing it is the
+     * fail-closed direction; naming the constant "before" would have made the refusal state the
+     * opposite of what happened.
+     */
+    FEE_RECEIPT_STATE_NOT_AWAITING_PAYMENT,
+
+    /**
      * An `order` value this codec could not read as §7.4's 32-byte id.
      *
      * Cannot fire on a rumor T13 already decoded — it reads the `order` tag through T5's codec —
@@ -225,6 +353,18 @@ public class SettlementException internal constructor(
     public val tag: String?,
     message: String,
     cause: Throwable? = null,
+
+    /**
+     * §8.4's first divergence, on a [SettlementRejection.FEE_TERM_MISMATCH] and `null` on every
+     * other reason.
+     *
+     * §8.4 requires the divergence be "surfaced to the user as a terms mismatch", and a user
+     * cannot be told which point diverged by an exception that dropped it on the way out. The
+     * message never names the pair (see below), so this field is the only way the *structured*
+     * answer survives the throw — and it carries vocabulary constants only, never a value a
+     * counterparty chose.
+     */
+    public val feeTermDivergence: FeeTermAgreement.Diverged? = null,
 ) : IllegalArgumentException(message, cause)
 
 /**
@@ -251,6 +391,18 @@ internal object SettlementVocabulary {
 
     /** §7.4's `order` row, read through `ChannelTags` rather than spelled a second time. */
     const val ORDER: String = ChannelTags.ORDER
+
+    /**
+     * §5.3's `status` row, which §8.4's second point names as `status=accepted`.
+     *
+     * Read through `ChannelVocabulary` rather than spelled again, and the **token** is
+     * `OrderState.ACCEPTED.token` from §11.1's vocabulary: a wire constant duplicated across a
+     * codebase is how two call sites come to disagree (§5.2).
+     */
+    const val STATUS: String = ChannelVocabulary.STATUS
+
+    /** §5.3's and §8.1's `fee` row, read through `ChannelVocabulary` for the same reason. */
+    const val FEE: String = ChannelVocabulary.FEE
 
     /** The tags whose second occurrence is a rejection here, because no layer below reaches them. */
     val SINGLE_OCCURRENCE: List<String> = listOf(PAYMENT, PAYEE)

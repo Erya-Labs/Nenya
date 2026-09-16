@@ -170,6 +170,7 @@ internal object SettlementFixtures {
         payeeTag: List<String>? = SettlementFixtures.payeeTag(Payee.PROVIDER, index),
         version: String? = VERSION,
         type: String? = PAYMENT_REQUEST_TYPE,
+        fee: List<String>? = null,
     ): MutableList<List<String>> {
         val tags = mutableListOf<List<String>>()
         if (order != null) tags += listOf(ChannelTags.ORDER, order)
@@ -177,6 +178,9 @@ internal object SettlementFixtures {
         tags += listOf(ChannelVocabulary.COUNTERPARTY, pubkey(index + PROVIDER_OFFSET))
         if (payment != null) tags += payment
         if (payeeTag != null) tags += payeeTag
+        // §8.4 makes it REQUIRED on a `payee=fee` request and OPTIONAL on a `payee=provider` one,
+        // so it is defaulted absent here and supplied by whichever test is about §8.4.
+        if (fee != null) tags += fee
         if (version != null) tags += listOf(ChannelVocabulary.VERSION, version)
         return tags
     }
@@ -188,12 +192,14 @@ internal object SettlementFixtures {
         payment: List<String>? = null,
         payeeTag: List<String>? = SettlementFixtures.payeeTag(Payee.PROVIDER, index),
         version: String? = VERSION,
+        fee: List<String>? = null,
     ): MutableList<List<String>> {
         val tags = mutableListOf<List<String>>()
         if (order != null) tags += listOf(ChannelTags.ORDER, order)
         tags += listOf(ChannelVocabulary.COUNTERPARTY, pubkey(index + PROVIDER_OFFSET))
         if (payment != null) tags += payment
         if (payeeTag != null) tags += payeeTag
+        if (fee != null) tags += fee
         if (version != null) tags += listOf(ChannelVocabulary.VERSION, version)
         return tags
     }
@@ -206,10 +212,30 @@ internal object SettlementFixtures {
     fun requestPaymentTag(reference: String, medium: String = PaymentMedium.LIGHTNING.token!!):
         List<String> = listOf(SettlementVocabulary.PAYMENT, medium, reference)
 
+    /** The buyer at [index] — the key `bound` attributes a rumor to unless told otherwise. */
+    fun buyer(index: Int = 0): String = pubkey(index)
+
+    /** The provider at [index], the `p` counterparty of every fixture here. */
+    fun provider(index: Int = 0): String = pubkey(index + PROVIDER_OFFSET)
+
+    /** The fee recipient at [index] — §8.1's third `fee` element and §8.7's required seal. */
+    fun feeRecipient(index: Int = 0): String = pubkey(index + FEE_RECIPIENT_OFFSET)
+
     /** [tags] as a `kind:16` rumor attributed to the key that authored it — §7.2's positive case. */
     fun bound(tags: List<List<String>>, kind: Int = NenyaKind.ORDER_MESSAGE, index: Int = 0):
+        AttributedRumor.Bound = boundSealedBy(buyer(index), tags, kind)
+
+    /**
+     * [tags] as a rumor whose **seal** is [author], which §7.2 makes the key every term is
+     * attributed to.
+     *
+     * The rumor's own `pubkey` is the same key, so §7.2's equality holds and every control built
+     * on this is about §8.7 rather than about §7.2 — which `ChannelCodecTest` covers. §8.7's rule
+     * is that the *fee recipient's* key is the one a fee invoice may arrive under, so a fixture
+     * that could not choose the sealing key could not state the rule at all.
+     */
+    fun boundSealedBy(author: String, tags: List<List<String>>, kind: Int = NenyaKind.ORDER_MESSAGE):
         AttributedRumor.Bound {
-        val author = pubkey(index)
         val rumor = AttributedRumor.attribute(author, ChannelFixtures.checked(author, kind, tags))
         return rumor as? AttributedRumor.Bound
             ?: fail("a kind:$kind must decode to a bound rumor, not to $rumor")
@@ -219,9 +245,17 @@ internal object SettlementFixtures {
     fun request(tags: List<List<String>>, split: FeeSplit = split(), index: Int = 0): PaymentRequest =
         PaymentRequest.decode(bound(tags, NenyaKind.ORDER_MESSAGE, index), split)
 
+    /** The same, sealed by [author] — §8.7's operand. */
+    fun requestSealedBy(author: String, tags: List<List<String>>, split: FeeSplit = split()): PaymentRequest =
+        PaymentRequest.decode(boundSealedBy(author, tags, NenyaKind.ORDER_MESSAGE), split)
+
     /** [tags] decoded as §9.2's receipt. */
     fun receipt(tags: List<List<String>>, index: Int = 0): PaymentReceipt =
         PaymentReceipt.decode(bound(tags, NenyaKind.RECEIPT, index))
+
+    /** The same, sealed by [author]. */
+    fun receiptSealedBy(author: String, tags: List<List<String>>): PaymentReceipt =
+        PaymentReceipt.decode(boundSealedBy(author, tags, NenyaKind.RECEIPT))
 
     /** [tags] with every occurrence of [name] removed. */
     fun without(tags: List<List<String>>, name: String): List<List<String>> =

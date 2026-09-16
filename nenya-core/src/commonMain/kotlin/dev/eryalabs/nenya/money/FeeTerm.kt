@@ -18,10 +18,15 @@ package dev.eryalabs.nenya.money
  * ### What this type deliberately does not hold
  *
  * The recipient pubkey. §8.1 makes it REQUIRED when basis points are greater than zero and
- * OMITTED when they are zero, and validating a 64-character lowercase x-only hex key —
- * along with the reachability check §8.1 requires before a fee term is proposed — belongs
- * to the tag codec, which does not exist yet. [namesRecipient] records *whether* §8.1
+ * OMITTED when they are zero, and validating a 64-character lowercase x-only hex key belongs to
+ * the tag codec, which reads it into `TagSet.feeRecipient`; §8.1's reachability check needs a
+ * relay query this library opens no socket for. [namesRecipient] records *whether* §8.1
  * requires one, which is all §8.3 and §9.2 need in order to say which payees are required.
+ *
+ * §8.4's comparison does not go through this type at all, and that is the point of the omission
+ * rather than a gap in it: "byte-identical" is a question about the raw tag elements, and a parsed
+ * `Stated(250)` compares equal to itself however it was spelled — which is the comparison §8.4
+ * says is not the one to make. `dev.eryalabs.nenya.settlement.FeeTermAgreement` compares the pair.
  *
  * ### No local policy limit lives here
  *

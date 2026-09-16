@@ -199,16 +199,20 @@ internal object SettlementTags {
  * - **§8.6's own rules** are here: one `payment` tag, one `payee` tag, the `lightning` medium, the
  *   BOLT-11 recogniser, and the payee-must-be-required rule §8.3 states about a zero amount.
  *
- * ### Two narrowings, stated rather than papered over
+ * ### Two narrowings of this **decode**, and where each is discharged
  *
- * - **§8.7 is not performed.** A `payee=fee` request MUST arrive in a gift wrap whose seal pubkey
- *   equals the fee recipient named in the signed fee term. This type publishes [sender] — §7.2's
- *   attributed key — and [feeRecipient] — §8.6's third element — so a caller holds both operands,
- *   and it compares neither: that comparison is `PaymentCheck.FEE_SEALING_KEY`, one third of §9.2
- *   check 6, and it stays in the not-performed set.
- * - **§8.5 is not performed.** "Fees settle only at settlement" makes the state a precondition, and
- *   nothing here reads an order's state. That is `PaymentCheck.FEE_STATE_PRECONDITION`, also
- *   unchanged.
+ * - **§8.7 is not performed here.** A `payee=fee` request MUST arrive in a gift wrap whose seal
+ *   pubkey equals the fee recipient named in the signed fee term. This type publishes [sender] —
+ *   §7.2's attributed key — and [feeRecipient] — §8.6's third element — and compares neither,
+ *   because the operand §8.7 actually names is the recipient in the **signed fee term**, which is
+ *   a sequence of raw tags across §8.4's points and not something [decode]'s [FeeSplit] holds:
+ *   `FeeSplit` carries the basis points and not the recipient. `Settlement.checkFeePaymentRequest`
+ *   is where that comparison is made, and it takes both.
+ * - **§8.5 is not performed here either, and MUST NOT be.** "Fees settle only at settlement" makes
+ *   the state a precondition of a fee **payment**, not of a fee payment **request**: §8.5 says in
+ *   as many words that a rule refusing this message while the order is still `committed` would make
+ *   `awaiting_payment` unreachable for every fee-bearing order. The precondition bites on the
+ *   `kind:17`, in `Settlement.verifyFeeReceipt`.
  *
  * Pure computation: no clock, no randomness, no I/O. The clock is read one step later, by
  * [AcceptedPaymentRequest.accept], which is where §17 item 6's second value comes from.

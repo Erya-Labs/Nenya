@@ -350,11 +350,12 @@ public object Capabilities {
                 "dev.eryalabs.nenya.money.FeeSplit",
                 "dev.eryalabs.nenya.money.FeeTerm",
                 "dev.eryalabs.nenya.order.OrderMachine",
+                "dev.eryalabs.nenya.settlement.FeeTermAgreement",
+                "dev.eryalabs.nenya.settlement.FeeTermPoint",
             ),
             notPerformed = setOf(
                 SeamCapability.BIP340_VERIFICATION,
                 SeamCapability.RELAY_REQUEST,
-                PaymentCheck.FEE_TERM_MATCH,
             ),
             note = "Done: the fee is computed by §8.3's published 64-bit decomposition and " +
                 "checked against BigInteger over a sampled corpus, so it does not overflow; a " +
@@ -363,11 +364,21 @@ public object Capabilities {
                 "earlier (§8.5); a payee whose computed amount is 0 requires no invoice (§8.3), " +
                 "which is the clause that deadlocks an order when it is missed; §8.6's two " +
                 "invoices are two payees and there is no combined-invoice shape to refuse " +
-                "because there is none to build. Not done: `requires a signed fee term` needs " +
-                "BIP-340 verification, which this library does not have; §8.1's reachability " +
-                "check on a named fee recipient needs a relay query; and §8.4's consistency " +
-                "check against a receipt is PaymentCheck.FEE_TERM_MATCH, which needs the " +
-                "receipt codec.",
+                "because there is none to build. §8.4 is done too, and that is what changed " +
+                "here: the `(bps, recipient)` pair is compared over the **raw tag elements**, " +
+                "which is what byte-identical means, across all four points §8.4 marks REQUIRED " +
+                "and the three it marks OPTIONAL — with the MUST NOT on those three honoured, so " +
+                "a `payee=provider` message carrying no `fee` tag is accepted and one carrying a " +
+                "disagreeing tag is not. The answer names which point diverged and which half of " +
+                "the pair, because §8.4 requires a divergence be surfaced as a terms mismatch, " +
+                "and the point set is held equal to §8.4 parsed out of the document at test " +
+                "time. §8.7's sealing key is compared too, against the seal the `type=2` " +
+                "arrived under. Not done, and both constants stay: `requires a signed fee term` " +
+                "needs BIP-340 verification, which this library does not have — so the §8.7 " +
+                "binding is only as strong as the decryption the caller performed, and no " +
+                "signature behind any of these terms is verified by anybody here; and §8.1's " +
+                "reachability check on a named fee recipient needs a relay query, which nothing " +
+                "here opens a socket for.",
         ),
         ConformanceItem(
             number = 6,

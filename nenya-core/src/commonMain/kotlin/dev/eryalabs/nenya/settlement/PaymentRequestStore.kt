@@ -76,6 +76,31 @@ public sealed interface AcceptedPaymentRequest {
      */
     public val acceptedAt: Long
 
+    /**
+     * §7.2's attribution of the `type=2` this record was minted from: the **seal's** pubkey, in
+     * §4.3's canonical lowercase.
+     *
+     * §8.7 binds a fee invoice to its recipient through the transport and nothing else — "a
+     * `type=2` payment request with `["payee", "fee", ...]` MUST arrive in a gift wrap whose seal
+     * (`kind:13`) `pubkey` equals the fee-recipient pubkey named in the signed fee term" — so the
+     * operand of that comparison is a property of the message the invoice arrived in, and a store
+     * that kept the invoice and threw the sender away could never make it again.
+     *
+     * That is exactly the position §9.2 check 5 is in with the clock reading, and the same
+     * conclusion: [Settlement.verifyFeeReceipt] performs §8.7 against **this** field, because a
+     * fee *receipt* is authored by the buyer (§9.2's own worked example says so) and its own seal
+     * is therefore never the fee recipient's. See that function's note.
+     *
+     * That makes this field a **security operand** and not only a record, and what it does not
+     * change is worth stating: an injected store is still the embedding client's own persistence,
+     * so a store that hands back a fabricated `sealedBy` defeats §8.7 exactly as a store that
+     * hands back a fabricated invoice defeats check 1. Both are the client lying to itself, which
+     * §13 puts outside what this library defends against. What is guaranteed is narrower and is
+     * the part that matters against a counterparty: the only records [accept] mints carry the key
+     * **this library** read off the attributed rumor.
+     */
+    public val sealedBy: String
+
     public companion object {
 
         /**
@@ -130,7 +155,7 @@ public sealed interface AcceptedPaymentRequest {
                         "it is broken, and no acceptance moment can honestly be recorded from it",
                 )
             }
-            val record = Record(request.order, request.payee, request.invoice, seconds)
+            val record = Record(request.order, request.payee, request.invoice, seconds, request.sender)
             into.store(record)
             return record
         }
@@ -146,16 +171,18 @@ public sealed interface AcceptedPaymentRequest {
             override val payee: Payee,
             override val invoice: Bolt11Reference,
             override val acceptedAt: Long,
+            override val sealedBy: String,
         ) : AcceptedPaymentRequest {
 
             /**
-             * Names the payee role and nothing else — not the order id, not the invoice, not even
-             * the acceptance time.
+             * Names the payee role and nothing else — not the order id, not the invoice, not the
+             * sealing key and not even the acceptance time.
              *
              * §12 item 11 and STOP RULE 14 name the order id alongside key material and preimages,
-             * and §12 item 1 keeps an invoice out of anything public. The clock reading is left out
-             * too: it is a timestamp of this user's activity on one order, which is the correlation
-             * handle §7.1 randomises gift-wrap timestamps to deny.
+             * §12 item 1 keeps an invoice out of anything public and §12 item 2 the counterparty
+             * pubkey. The clock reading is left out too: it is a timestamp of this user's activity
+             * on one order, which is the correlation handle §7.1 randomises gift-wrap timestamps
+             * to deny.
              */
             override fun toString(): String = "AcceptedPaymentRequest(payee=${payee.token})"
         }

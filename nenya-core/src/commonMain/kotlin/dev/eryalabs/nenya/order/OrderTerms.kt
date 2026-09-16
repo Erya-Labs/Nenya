@@ -129,9 +129,16 @@ public class OrderTerms(
      * and §8.1's reachability check, belong to the tag codec. So an acceptance echoing the same
      * basis points with a **different** fee recipient compares equal here. §8.4 requires the fee
      * pair to be byte-identical at all four points it appears, and §8.7 binds the fee invoice to
-     * the named recipient's key; a caller that holds the recipient pubkey MUST compare it itself
-     * until the codec lands. Of the three narrowings on this method it is the only one on the
-     * path a payment takes.
+     * the named recipient's key; neither is this method's, and a caller that advances an order on
+     * this comparison alone has performed neither. Of the three narrowings on this method it is the
+     * only one on the path a payment takes.
+     *
+     * Where they **are** performed, since the narrowing above is no longer the whole story:
+     * `dev.eryalabs.nenya.settlement.FeeTermAgreement` compares the raw `(bps, recipient)` tags
+     * across every point §8.4 names, and `Settlement.checkFeePaymentRequest` and
+     * `Settlement.verifyFeeReceipt` refuse a divergence as the terms mismatch §8.4 requires. This
+     * method is unchanged and stays deliberately narrower: it answers §7.6's question about parsed
+     * terms, and §8.4's question is about bytes.
      *
      * [equals] remains full value equality over all three fields — it is the whole terms object,
      * and two orders differing only in acceptance deadline are two different orders.
