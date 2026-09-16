@@ -84,9 +84,18 @@ public enum class PaymentCheck {
 
     /**
      * §9.2 check 1 — the BOLT-11 string is byte-identical to the one in the stored `type=2`
-     * payment request for the same order and payee. Needs no parser; it needs the persisted
-     * store of accepted payment requests that §17 item 6 requires, which nothing in this
-     * library yet has anywhere to keep.
+     * payment request for the same order and payee — **and** the provenance of the payment
+     * hash check 3 compares against, which is the 256-bit `p` tagged field parsed out of that
+     * invoice. Two obligations under one constant, which is why it is not named
+     * `PREIMAGE_HASH`; see [PREIMAGE_HASH_COMPARISON].
+     *
+     * The comparison needs no parser, and
+     * [dev.eryalabs.nenya.settlement.Settlement.verify] performs it against the persisted
+     * store of accepted payment requests that §17 item 6 requires — recording it in **that**
+     * result's own performed-set. The provenance still needs a BOLT-11 parser this library does
+     * not have, so a bare [VerifiedPayment.verify] performs neither obligation, this constant
+     * stays in `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED`, and
+     * [VerifiedPayment.CHECKS_PERFORMED_HERE] MUST NOT be widened to claim otherwise.
      */
     INVOICE_IDENTITY,
 

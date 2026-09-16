@@ -377,6 +377,8 @@ public object Capabilities {
                 "dev.eryalabs.nenya.payment.VerifiedPayment",
                 "dev.eryalabs.nenya.payment.Payee",
                 "dev.eryalabs.nenya.order.OrderMachine",
+                "dev.eryalabs.nenya.settlement.PaymentRequestStore",
+                "dev.eryalabs.nenya.settlement.Settlement",
             ),
             notPerformed = setOf(
                 PaymentCheck.INVOICE_IDENTITY,
@@ -386,11 +388,30 @@ public object Capabilities {
             note = "The first half holds in full: `paid` is reachable only on a VerifiedPayment " +
                 "per required payee, VerifiedPayment is producible only by hashing a preimage " +
                 "here, and the suite's LyingWallet reports every payment settled and moves no " +
-                "order. The second half does not: §17 also requires the payment requests **and " +
-                "their acceptance timestamps** be persisted, and this library has nowhere to " +
-                "keep them — which is exactly why checks 1, 4 and 5 are absent. A provider who " +
-                "sends a receipt for ten times `price_msat` is caught by check 4 and by nothing " +
-                "here, and the order carries that fact forward to whatever reads it.",
+                "order. The persistence half now has a shape, which is less than having been " +
+                "persisted: PaymentRequestStore is an injected interface keyed by (order, payee) " +
+                "holding the BOLT-11 string verbatim alongside the value the injected clock held " +
+                "at the moment the request was accepted — and with a fail-closed clock the request " +
+                "is not accepted at all rather than stored against a fabricated time. The " +
+                "implementation this library ships is in-memory and survives no restart; §17 item " +
+                "6 is about what an implementation has KEPT, so a client that needs that has to " +
+                "implement the interface. On that store, " +
+                "§9.2 check 1 IS performed: Settlement.verify compares the receipt's BOLT-11 " +
+                "string byte-identically against the stored one and rejects a receipt for which " +
+                "nothing was stored. **INVOICE_IDENTITY stays in this set anyway, and that is a " +
+                "statement rather than an oversight.** The constant carries two things — check 1's " +
+                "comparison, and the provenance of the payment hash check 3 compares against, " +
+                "which is the 256-bit `p` field parsed out of the invoice — and only the first is " +
+                "closed: this library recognises the shape of a BOLT-11 string and parses no field " +
+                "of one, so the payment hash is still a caller-supplied parameter. Nor is the " +
+                "settlement result wired into OrderMachine, so an order can still reach `paid` on " +
+                "a bare VerifiedPayment that performed no check 1; this item is the one that " +
+                "governs reaching `paid`. A caller that wants the machine-readable record of what " +
+                "the store path did reads Settlement.checksPerformed, which composes check 1 with " +
+                "T3's two rather than redefining VerifiedPayment's global claim. Checks 4 and 5 " +
+                "remain absent for want of a BOLT-11 parser: a provider who sends a receipt for " +
+                "ten times `price_msat` is caught by check 4 and by nothing here, and the order " +
+                "carries that fact forward to whatever reads it.",
         ),
         ConformanceItem(
             number = 7,
