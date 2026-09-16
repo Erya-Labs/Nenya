@@ -89,31 +89,61 @@ class CapabilitySurfaceTest : PortableCapabilitySurfaceTest() {
     }
 
     /**
-     * The control that proves the anchor discriminates, and the mutation T12 names: claim §17
-     * item 4 — the §7.2 seal/rumor check and the `kind:10050` publication, neither of which this
-     * library does — as performed, and the evidence anchor must refuse it.
+     * The control that proves the anchor discriminates, and the mutation T12 names: claim an item
+     * as performed with nothing to point at, and the evidence anchor must refuse it.
+     *
+     * Built from §17 item 4's real values with its evidence classes emptied, which is what the item
+     * looked like before §7.2's equality check existed. The item itself is [ConformanceStatus.PARTIAL]
+     * now; the shape this control is about — a status claiming work with no class in the main output
+     * tree to name — is unchanged, and is still the mutation T12 asks for.
      */
     @Test
     fun `an item claimed performed with no class to name fails the evidence anchor`() {
         val real = Capabilities.item(4) ?: fail("§17 item 4 is not published")
-        assertEquals(ConformanceStatus.NOT_PERFORMED_HERE, real.status)
+        assertEquals(ConformanceStatus.PARTIAL, real.status)
 
         val flipped = ConformanceItem(
             number = real.number,
             status = ConformanceStatus.PERFORMED_HERE,
             specSections = real.specSections,
-            evidenceClasses = real.evidenceClasses,
-            notPerformed = real.notPerformed,
+            evidenceClasses = emptySet(),
+            notPerformed = emptySet(),
             note = real.note,
         )
 
         val problem = evidenceProblem(flipped)
         assertNotNull(
             problem,
-            "flipping item 4 to PERFORMED_HERE must fail the evidence anchor: there is no " +
-                "gift-wrap machinery in this library for it to name",
+            "claiming PERFORMED_HERE with no class to name must fail the evidence anchor",
         )
         assertTrue("class" in problem, "the refusal must name the missing evidence: $problem")
+    }
+
+    /**
+     * §17 item 4's other half, which the same item's `PARTIAL` must not quietly drop.
+     *
+     * §7.2's pubkey-equality check is performed here; §7.1's encryption, the **decryption** — which
+     * is the caller's — and §7.3's `kind:10050` publication are not, and nothing in the channel
+     * package changes that: it opens no socket and encrypts nothing. Dropping one of the three from
+     * the item's `notPerformed` set would be the §17 over-claim in miniature, and T12's union rule
+     * is one-directional — it requires every constant an item names to be in the union, not that an
+     * item keeps naming one. So this is the direction that would otherwise go unchecked.
+     */
+    @Test
+    fun `item 4 still names every seam capability its partial status does not perform`() {
+        val item = Capabilities.item(4) ?: fail("§17 item 4 is not published")
+
+        assertEquals(
+            setOf(
+                SeamCapability.NIP44_ENCRYPTION,
+                SeamCapability.NIP44_DECRYPTION,
+                SeamCapability.RELAY_PUBLISH,
+            ),
+            item.notPerformed,
+            "§7.2's equality check is done here and none of these three is; an item that claimed " +
+                "otherwise would be reporting an unverified thing as verified (§17)",
+        )
+        assertNull(evidenceProblem(item), "and the classes it names must be in the main output tree")
     }
 
     /** The other direction: an item claiming nothing was done while pointing at work that was. */

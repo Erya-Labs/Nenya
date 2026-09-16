@@ -313,19 +313,34 @@ public object Capabilities {
         ),
         ConformanceItem(
             number = 4,
-            status = ConformanceStatus.NOT_PERFORMED_HERE,
+            status = ConformanceStatus.PARTIAL,
             specSections = setOf("7.2", "7.3"),
-            evidenceClasses = emptySet(),
+            evidenceClasses = setOf(
+                "dev.eryalabs.nenya.channel.AttributedRumor",
+                "dev.eryalabs.nenya.channel.Attribution",
+                "dev.eryalabs.nenya.channel.RumorKind",
+                "dev.eryalabs.nenya.channel.OrderMessageKind",
+            ),
             notPerformed = setOf(
                 SeamCapability.NIP44_ENCRYPTION,
                 SeamCapability.NIP44_DECRYPTION,
                 SeamCapability.RELAY_PUBLISH,
             ),
-            note = "Neither half is done. §7.2's seal/rumor pubkey equality check needs a " +
-                "decrypted seal, and this library decrypts nothing — the NIP-44 seams answer " +
-                "Unavailable. §7.3's `kind:10050` publication needs a relay, and this library " +
-                "opens no socket. There is no gift-wrap machinery here at all, so there is also " +
-                "no type that could be mistaken for the result of one of these checks.",
+            note = "Done: §7.2's pubkey-equality check, which §7.2 requires even of an " +
+                "implementation that cannot verify the seal's signature — a rumor whose claimed " +
+                "`pubkey` is not the seal's is discarded, no value is produced for it, and every " +
+                "message that survives is reported as authenticated-by-decryption only. " +
+                "Attribution has exactly one constant, so there is none for signature-verified. " +
+                "§7.4's envelope with it: the four rumor kinds and the six `type` values are held " +
+                "equal to §7.4's own tables parsed at test time, an unimplemented `type` lands in " +
+                "a sink rather than on the nearest known value, `type=4` is readable and " +
+                "unemittable, and the required-tag rule and its one `type=6` exception are both " +
+                "enforced. The gift wrap's ephemeral pubkey is unrepresentable: the entry point " +
+                "takes the seal's key and the rumor, and there is no parameter it could arrive " +
+                "in. Not done, and all three constants stay: §7.1's encryption is forbidden " +
+                "here, the **decryption was the caller's** — this library was handed a rumor and " +
+                "a pubkey and takes no position on where they came from — and §7.3's " +
+                "`kind:10050` publication needs a relay, which nothing here opens a socket to.",
         ),
         ConformanceItem(
             number = 5,

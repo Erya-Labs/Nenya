@@ -65,6 +65,9 @@ internal object MainClasses {
     private val MIN_CLASSES: Map<String, Int> = mapOf(
         "dev.eryalabs.nenya" to 1,
         "dev.eryalabs.nenya.bid" to 8,
+        // Added by the §7.2/§7.4 channel package, which did not exist at 6432814; pinned at the
+        // count it compiled to when it was written, on the same terms as every entry above.
+        "dev.eryalabs.nenya.channel" to 18,
         "dev.eryalabs.nenya.conformance" to 4,
         "dev.eryalabs.nenya.delivery" to 14,
         "dev.eryalabs.nenya.listing" to 14,
