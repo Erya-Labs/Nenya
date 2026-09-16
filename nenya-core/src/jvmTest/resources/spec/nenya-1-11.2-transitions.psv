@@ -27,22 +27,22 @@
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
 
-1523 | — | proposed
-1524 | proposed | accepted
-1525 | proposed | cancelled
-1526 | proposed | expired
-1527 | accepted | committed
-1528 | accepted | cancelled
-1528 | accepted | expired
-1529 | committed | awaiting_payment
-1530 | committed | cancelled
-1530 | committed | expired
-1530 | committed | disputed
-1531 | awaiting_payment | paid
-1532 | awaiting_payment | cancelled
-1532 | awaiting_payment | expired
-1532 | awaiting_payment | disputed
-1533 | paid | released
-1534 | paid | disputed
-1535 | released | settled
-1536 | released | disputed
+1551 | — | proposed
+1552 | proposed | accepted
+1553 | proposed | cancelled
+1554 | proposed | expired
+1555 | accepted | committed
+1556 | accepted | cancelled
+1556 | accepted | expired
+1557 | committed | awaiting_payment
+1558 | committed | cancelled
+1558 | committed | expired
+1558 | committed | disputed
+1559 | awaiting_payment | paid
+1560 | awaiting_payment | cancelled
+1560 | awaiting_payment | expired
+1560 | awaiting_payment | disputed
+1561 | paid | released
+1562 | paid | disputed
+1563 | released | settled
+1564 | released | disputed

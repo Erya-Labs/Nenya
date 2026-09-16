@@ -91,13 +91,17 @@ public class EventId private constructor(value: ByteArray) {
          * This is the write half of §17 item 1 and the recomputation half of its read rule. It
          * enforces §4.3's four bounds on the way past, because it serialises to get the bytes.
          *
-         * @throws WireException naming whichever bound [WireEvent.canonicalSerialisation]
+         * Text with no UTF-8 encoding — an unpaired surrogate in `content` or a tag value — is
+         * refused as [WireRejection.UNPAIRED_SURROGATE] and never hashed with a substitute
+         * character, so JVM and JavaScript builds agree on every id they compute.
+         *
+         * @throws WireException naming whichever rule [WireEvent.canonicalSerialisation]
          *   refused.
          */
         public fun of(event: WireEvent, limits: WireLimits = WireLimits.DEFAULT): EventId {
             val serialisation = event.canonicalSerialisation(limits)
             return EventId(
-                sha256(serialisation.toByteArray(Charsets.UTF_8)),
+                sha256(wireUtf8(serialisation) { "the canonical serialisation" }),
             )
         }
 

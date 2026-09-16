@@ -21,7 +21,7 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.2`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.3`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
 **Revision history**
@@ -31,6 +31,7 @@ nothing in it is deployed, and the identifiers it reserves are not registered.
 | `1.0` | 2026-09-09 | First published revision. Eight items left OPEN. |
 | `1.1` | 2026-09-09 | `OPEN-1`, `OPEN-2` and `OPEN-3` **closed** by the maintainer. The request kind is fixed at `30404`; the fee basis-point rule is fixed at "legal 0–10000, mandatory disclosure, no protocol ceiling below 10000"; public bidding is the default. Five items remain open (`OPEN-4`–`OPEN-8`), keeping their original numbers. |
 | `1.2` | 2026-09-09 | Consistency repair, no new wire semantics. Canonical JSON escaping (§4.1) aligned with the deployed ecosystem — the seven shortcut escapes, every other character below `0x20` as `\u00XX` — recorded as a deliberate, reasoned deviation from NIP-01's literal wording. Twenty internal contradictions resolved, chiefly: the fee-invoice deadlock (§8.5 vs §11.2), the zero-`fee_msat` deadlock (§8.3 vs §11.1), the simultaneously mandatory and optional `fee` tag (§7.5 vs §8.1), the undefined "release deadline" (§11.2), the unbound `kind:15` release (§7.4, §10.3), and the `m`/`file-type` identity (§10.1 vs §10.3). `kind:16` `type=6` assigned to the private bid, closing the §6.1 interop hole; `item` given a normative row in §5.3. The confirmation floor above `500` bps (§8.1) is recorded as a **standing disclosure duty, promoted from interim as part of the `OPEN-2` closure**. `OPEN-8` broadened to cover `type=6`; new `OPEN-9` (registering `30404`) gives the previously unnumbered publication question a number. Two example timestamps corrected (§6, §7.5). |
+| `1.3` | 2026-09-16 | Text with no UTF-8 encoding (§4.1). A `content` or tag value containing an unpaired UTF-16 surrogate MUST now be **rejected**, never serialised with a substituted replacement character: platforms substitute differently (`?` on the JVM, U+FFFD in JavaScript), so substitution gave one event two ids. Stated in §4.1, cross-referenced from §4.3, and added to §18's event-id vectors. |
 
 Revision `1.1` changes no tag meaning, no fee arithmetic, no evidence rule and no state, so
 the `["nenya", "1"]` version tag is unchanged and revision `1.0` and revision `1.1` are wire
@@ -51,6 +52,13 @@ precisely rather than burying:
   private bid therefore degrades to *not received*, never to a misparsed order message. That
   is the same failure a missing `kind:10050` produces (§7.3), and it is why §17 requires the
   public bidding path.
+
+Revision `1.3` changes no tag meaning, no fee arithmetic, no evidence rule and no state; it
+makes a rule of §4.1's that was already implied — the id is over UTF-8 bytes, and some strings
+have none — explicit. The `["nenya", "1"]` version tag is unchanged. It changes no computed id:
+an event it newly rejects is one whose id no two implementations could agree on, because its
+serialisation has no UTF-8 encoding and every substitute byte sequence was an implementation
+accident rather than NIP-01.
 
 Some decisions are still **not yet made**. They are marked `OPEN-n` inline and indexed in
 §16.2; the ones already closed are recorded with their rationale in §16.1. An OPEN item is a
@@ -249,6 +257,21 @@ listing, bid or order produces — the two readings are byte-identical and the d
 unobservable. Implementations SHOULD carry a test vector for each of the seven shortcuts and
 at least one for a `\u00XX` control character, per §18.
 
+**Text with no UTF-8 encoding MUST be rejected.** The id is over UTF-8 bytes, so every string
+value must be a sequence of Unicode scalar values. A `content` or tag value containing an
+**unpaired UTF-16 surrogate** — a high surrogate (`U+D800`–`U+DBFF`) not immediately followed by
+a low one, a low surrogate (`U+DC00`–`U+DFFF`) not immediately preceded by a high one, or a
+pair in the wrong order — has no UTF-8 encoding. Such a value arrives easily: a JSON string
+may spell it as a `\uD800`-style escape, and common JSON parsers expand that without complaint.
+An implementation MUST reject an event carrying one, whether computing its id or checking a
+claimed one, and MUST NOT substitute a replacement character (`?`, `U+FFFD`) for the
+unpaired unit, drop it, or hash the unit's own three-byte encoding. The reason is
+interoperability: platforms substitute differently — the JVM's encoder writes `?`,
+JavaScript's writes `U+FFFD` — so any substitution gives the same event different ids in
+different implementations. A correctly paired astral character (for example `U+1F3A8`, the
+pair `U+D83C U+DFA8`) is not affected: it is emitted verbatim under rule 3 as its four UTF-8
+bytes.
+
 Implementations MUST compute the id themselves and MUST reject any received event whose
 `id` does not match its recomputed value, **before any other processing**. Signatures are
 BIP-340 Schnorr over secp256k1.
@@ -307,6 +330,11 @@ exponential, or signed form.
 
 **Tag shape.** A tag is an array of one or more strings. Implementations MUST reject an
 event containing a non-string or `null` tag element, or an empty tag array.
+
+**Text.** Every string value in an event — `content` and every tag value — MUST have a UTF-8
+encoding. An implementation MUST reject an event whose `content` or tag value contains an
+unpaired UTF-16 surrogate, and MUST NOT substitute a replacement character for it (§4.1).
+Byte bounds below are measured in UTF-8 bytes, so such a value has no size to check either.
 
 **Duplicate tags.** For any tag this document marks with cardinality `1` or `0–1`, an event
 carrying more than one occurrence MUST be **rejected**, not resolved by taking the first,
@@ -1959,7 +1987,7 @@ externally-authored vectors rather than to the implementer's own understanding.
 
 | Area | Vector source |
 |---|---|
-| Event id serialisation | NIP-01 examples plus hand-built cases covering all seven shortcut escapes, at least one `\u00XX` control character (§4.1), a `0x7f` DEL emitted verbatim, non-BMP characters, empty tags, and empty content. Ids for the hand-built cases SHOULD be cross-checked against `nostr-tools` and `go-nostr` rather than against the implementer's own reading of NIP-01 |
+| Event id serialisation | NIP-01 examples plus hand-built cases covering all seven shortcut escapes, at least one `\u00XX` control character (§4.1), a `0x7f` DEL emitted verbatim, non-BMP characters, empty tags, and empty content; plus negative controls for text with no UTF-8 encoding — a lone high surrogate, a lone low surrogate and a reversed pair, each rejected (§4.1) rather than hashed. Ids for the hand-built cases SHOULD be cross-checked against `nostr-tools` and `go-nostr` rather than against the implementer's own reading of NIP-01 |
 | Schnorr signatures | the BIP-340 CSV (19 cases), including the invalid ones |
 | NIP-44 encryption | `nip44.vectors.json` (128 cases), SHA-256 `269ed0f69e4c192512cc779e78c555090cebc7c785b609e338a62afc3ce25040` |
 | Gift wrap round trip | the two worked gift wraps in NIP-17's Examples section |

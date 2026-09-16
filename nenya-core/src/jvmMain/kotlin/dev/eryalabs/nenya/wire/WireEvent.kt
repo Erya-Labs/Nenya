@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.wire
 
 import dev.eryalabs.nenya.collections.readOnlyListOf
+import dev.eryalabs.nenya.text.strictUtf8OrNull
 
 /**
  * Why an event, a bound or an event-id check was refused (§4.1, §4.3).
@@ -82,6 +83,18 @@ public enum class WireRejection {
      * every event, and a caller that reached one did so by arithmetic rather than on purpose.
      */
     NON_POSITIVE_LIMIT,
+
+    /**
+     * §4.1: `content` or a tag value carries an **unpaired UTF-16 surrogate** — half of a pair, or
+     * a pair in the wrong order — which is not a character and has no UTF-8 encoding, so the event
+     * has no id. §4.1 requires rejecting it rather than substituting a replacement character.
+     *
+     * Substitution is not a safe default because platforms substitute differently: the JVM's
+     * encoder writes `?` and JavaScript's writes U+FFFD, so the same event would hash to two
+     * different ids and one client would call the other's events forged. A JSON parser produces
+     * such a string readily from a `\uD800`-style escape.
+     */
+    UNPAIRED_SURROGATE,
 
     /**
      * §4.1's central rule: the claimed `id` is not the recomputed one. The event MUST be
@@ -353,17 +366,19 @@ public class WireEvent(
      * loud rather than implied: an event this function accepts at 65 000 bytes is over §4.3's
      * 64 KiB once a relay sees it.
      *
-     * ### One thing the caller owes
+     * ### Text with no UTF-8 encoding is refused, not substituted
      *
      * A `String` may hold an unpaired surrogate, which is not a character and has no UTF-8
-     * encoding; the JDK emits `?` for one, which would change this event's id without changing
-     * this event. Such a value cannot come from decoding valid UTF-8, only from a `\uD800`-style
-     * escape a JSON parser expanded, so it is the caller's parser that owes the rejection —
-     * stated here rather than silently absorbed.
+     * encoding. The JVM's encoder emits `?` for one and JavaScript's emits U+FFFD, so encoding
+     * leniently would give this event a different id on each platform. §4.1 requires rejecting
+     * it: every tag value and `content` is checked as it is measured, before its byte bound, and
+     * the refusal is [WireRejection.UNPAIRED_SURROGATE]. Such a value cannot come from decoding
+     * valid UTF-8, only from a `\uD800`-style escape a JSON parser expanded, which a web client's
+     * `JSON.parse` does without complaint.
      *
-     * @throws WireException [WireRejection.TOO_MANY_TAGS], [WireRejection.TAG_VALUE_TOO_LONG],
-     *   [WireRejection.CONTENT_TOO_LONG] or [WireRejection.SERIALISED_EVENT_TOO_LARGE], naming
-     *   which bound was exceeded.
+     * @throws WireException [WireRejection.TOO_MANY_TAGS], [WireRejection.UNPAIRED_SURROGATE],
+     *   [WireRejection.TAG_VALUE_TOO_LONG], [WireRejection.CONTENT_TOO_LONG] or
+     *   [WireRejection.SERIALISED_EVENT_TOO_LARGE], naming which rule was broken.
      */
     public fun canonicalSerialisation(limits: WireLimits = WireLimits.DEFAULT): String {
         if (tags.size > limits.maxTagsPerEvent) {
@@ -375,7 +390,7 @@ public class WireEvent(
         }
         for ((index, tag) in tags.withIndex()) {
             for (value in tag) {
-                val bytes = value.toByteArray(Charsets.UTF_8).size
+                val bytes = wireUtf8(value) { "a value of tag $index" }.size
                 if (bytes > limits.maxTagValueBytes) {
                     throw WireException(
                         WireRejection.TAG_VALUE_TOO_LONG,
@@ -385,7 +400,7 @@ public class WireEvent(
                 }
             }
         }
-        val contentBytes = content.toByteArray(Charsets.UTF_8).size
+        val contentBytes = wireUtf8(content) { "content" }.size
         if (contentBytes > limits.maxContentBytes) {
             throw WireException(
                 WireRejection.CONTENT_TOO_LONG,
@@ -414,7 +429,7 @@ public class WireEvent(
         out.append(']')
         val serialisation = out.toString()
 
-        val serialisedBytes = serialisation.toByteArray(Charsets.UTF_8).size
+        val serialisedBytes = wireUtf8(serialisation) { "the canonical serialisation" }.size
         if (serialisedBytes > limits.maxSerialisedEventBytes) {
             throw WireException(
                 WireRejection.SERIALISED_EVENT_TOO_LARGE,
@@ -544,6 +559,23 @@ internal fun encodeLowerHex(bytes: ByteArray): String {
     }
     return out.toString()
 }
+
+/**
+ * The UTF-8 bytes of [text] — the only way this package turns a `String` into bytes it measures
+ * or hashes — or [WireRejection.UNPAIRED_SURROGATE] when [text] has no UTF-8 encoding (§4.1).
+ *
+ * Delegates to the common `strictUtf8OrNull`, which never substitutes, so the JVM and JavaScript
+ * builds refuse the same strings and hash the rest to the same bytes. [what] names the field for
+ * the message and is built only on refusal; the message never carries the text itself.
+ * `@JvmSynthetic` for the reason [encodeLowerHex] gives.
+ */
+@JvmSynthetic
+internal inline fun wireUtf8(text: String, what: () -> String): ByteArray =
+    strictUtf8OrNull(text) ?: throw WireException(
+        WireRejection.UNPAIRED_SURROGATE,
+        "${what()} carries an unpaired UTF-16 surrogate, which has no UTF-8 encoding; §4.1 requires " +
+            "rejecting it rather than substituting a replacement character, which would change the id",
+    )
 
 /** Lowercase, per §4.1 rule 2 and §4.3. An uppercase digit here is a wire-visible defect. */
 private const val HEX_DIGITS: String = "0123456789abcdef"
