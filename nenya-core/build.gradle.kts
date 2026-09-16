@@ -2,25 +2,32 @@ import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.multiplatform)
 }
 
 kotlin {
+    // The published surface is a contract for third-party clients. Explicit API
+    // mode forces every public declaration to carry an explicit visibility and
+    // return type, so nothing leaks into the ABI by accident. Applies to every target.
+    explicitApi()
     jvmToolchain(17)
-    compilerOptions {
-        // The published surface is a contract for third-party clients. Explicit API
-        // mode forces every public declaration to carry an explicit visibility and
-        // return type, so nothing leaks into the ABI by accident.
-        explicitApi()
+
+    // JVM only for now: sources live in src/jvmMain and src/jvmTest, and nothing is
+    // in commonMain yet. No js() target, so no Node, Yarn or npm is ever needed.
+    jvm()
+
+    sourceSets {
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
+        }
+        jvmTest.dependencies {
+            implementation(libs.junit)
+            implementation(libs.kotlin.test.junit)
+        }
     }
 }
 
-dependencies {
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlin.test.junit)
-}
-
-tasks.test {
+tasks.named<Test>("jvmTest") {
     useJUnit()
     testLogging { events("failed") }
 }

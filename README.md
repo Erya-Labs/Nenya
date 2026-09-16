@@ -184,10 +184,10 @@ signer are all equally valid behind the `NostrSigner` seam. Nenya does not know 
 where the secret lives.
 
 ```
-nenya-core/src/main/kotlin/dev/eryalabs/nenya/   implementation
-nenya-core/src/test/kotlin/dev/eryalabs/nenya/   tests
-nenya-core/src/test/resources/                   test vectors and fixtures
-spec/                                            the microstandard
+nenya-core/src/jvmMain/kotlin/dev/eryalabs/nenya/   implementation
+nenya-core/src/jvmTest/kotlin/dev/eryalabs/nenya/   tests
+nenya-core/src/jvmTest/resources/                   test vectors and fixtures
+spec/                                               the microstandard
 ```
 
 Package root: `dev.eryalabs.nenya`. The published API runs with Kotlin's `explicitApi()` on,
@@ -202,7 +202,7 @@ Requires a JDK 17 toolchain. Nothing else — no Android SDK, no emulator, no ne
 no relay.
 
 ```sh
-./gradlew :nenya-core:test     # unit tests
+./gradlew :nenya-core:jvmTest  # unit tests (JVM target)
 ./gradlew :nenya-core:build    # compile, test, assemble
 ```
 
