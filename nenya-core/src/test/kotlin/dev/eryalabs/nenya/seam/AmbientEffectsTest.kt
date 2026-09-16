@@ -39,7 +39,17 @@ import kotlin.test.fail
  */
 class AmbientEffectsTest {
 
-    private companion object {
+    /**
+     * `internal` rather than `private` so the sweeps in other packages can reuse [codeLines] and
+     * [mainSources] instead of growing a second comment stripper.
+     *
+     * This one was fixed twice — once for a line that *closes* a block comment and once for a
+     * block comment that opens and closes on one line, both of which it used to discard whole —
+     * and a second copy would start out with both defects. §5.2's "expose `30404` once" sweep
+     * (`KindConstantTest`) is the first caller; the queue's T9 says in as many words not to write
+     * another.
+     */
+    internal companion object {
 
         const val MAIN: String = "src/main/kotlin"
 
