@@ -181,24 +181,34 @@ tasks.named<Test>("jvmTest") {
 // ---------------------------------------------------------------------------------
 // Test-count floor. On Gradle 8.13 a Test task that discovers ZERO tests still
 // reports BUILD SUCCESSFUL, so a misplaced test tree (or a source-set rename during
-// the multiplatform conversion) would pass while running nothing. Every Test task
+// the multiplatform conversion) would pass while running nothing. Every test task
 // therefore re-reads its OWN JUnit XML after it runs and fails the build when the
-// result directory is empty or fewer tests executed than `nenya.minTests`
-// (root gradle.properties). The location comes from the task, never a hardcoded
-// path, so the guard survives `test` becoming `jvmTest`. JDK XML parser only.
+// result directory is empty or fewer tests executed than its floor (root
+// gradle.properties). The location comes from the task, never a hardcoded path, so
+// the guard survives `test` becoming `jvmTest`. JDK XML parser only.
+//
+// Two floors, because the two kinds of test task run different suites:
+//   - JVM Test tasks (jvmTest) run commonTest AND jvmTest: floor `nenya.minTests`.
+//   - Kotlin/JS test tasks (jsNodeTest) run commonTest only, and are NOT Gradle `Test`
+//     tasks (KotlinJsTest extends AbstractTestTask), so the JVM floor never reached
+//     them: floor `nenya.minJsTests`. Neither runs in the loop gate.
 // ---------------------------------------------------------------------------------
 val minTestsProperty: Provider<String> = providers.gradleProperty("nenya.minTests")
+val minJsTestsProperty: Provider<String> = providers.gradleProperty("nenya.minJsTests")
 
-tasks.withType<Test>().configureEach {
+tasks.withType<AbstractTestTask>().configureEach {
     val taskPath = path
+    val isJvm = this is Test
+    val propertyName = if (isJvm) "nenya.minTests" else "nenya.minJsTests"
+    val floorProperty = if (isJvm) minTestsProperty else minJsTestsProperty
     doLast {
         // Read from the task at execution time: a provider mapped off this output property
         // at configuration time loses its task association and Gradle refuses to query it.
-        val xmlDir = (this as Test).reports.junitXml.outputLocation.get().asFile
-        val floorText = minTestsProperty.orNull
-            ?: throw GradleException("$taskPath: Gradle property nenya.minTests is not set (expected in the root gradle.properties)")
+        val xmlDir = (this as AbstractTestTask).reports.junitXml.outputLocation.get().asFile
+        val floorText = floorProperty.orNull
+            ?: throw GradleException("$taskPath: Gradle property $propertyName is not set (expected in the root gradle.properties)")
         val floor = floorText.trim().toIntOrNull()
-            ?: throw GradleException("$taskPath: nenya.minTests must be an integer, was '$floorText'")
+            ?: throw GradleException("$taskPath: $propertyName must be an integer, was '$floorText'")
         val dir = xmlDir
         val results = dir.listFiles { f -> f.isFile && f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
             ?.sortedBy { it.name }
