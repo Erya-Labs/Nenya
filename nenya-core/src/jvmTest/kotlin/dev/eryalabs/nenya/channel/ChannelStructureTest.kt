@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.channel
 
+import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.tag.TagLimits
 import dev.eryalabs.nenya.wire.CheckedEvent
@@ -63,6 +64,17 @@ class ChannelStructureTest {
             "ChannelRejection",
             "ChannelException",
             "ChannelVocabulary",
+            // §7.5 and §7.6.
+            "OrderProposal",
+            "OrderProposal\$Companion",
+            "OrderStatusMessage",
+            "OrderStatusMessage\$Companion",
+            "Acceptance",
+            "Acceptance\$Accepted",
+            "Acceptance\$CounterProposal",
+            "Acceptance\$NotAnAcceptance",
+            "SignedTerms",
+            "ChannelTerms",
         )
 
         /**
@@ -94,6 +106,15 @@ class ChannelStructureTest {
          */
         val FORBIDDEN_NAMES = Regex("""(?i)wrap|ephemeral|subject""")
 
+        /** A member whose name says it answers §7.6's "were these terms accepted". */
+        val ACCEPTANCE_ANSWER = Regex("""(?i)^(is|was|has)?accept""")
+
+        /** A member whose name says it hands back an order `status` (§11.1). */
+        val STATUS_SHAPED = Regex("""(?i)status|state""")
+
+        /** `Any`'s three, which every class declares and none of which answers anything. */
+        val OBJECT_METHODS: Set<String> = setOf("toString", "equals", "hashCode")
+
         fun mainClasses(): List<Class<*>> {
             val loader = ChannelStructureTest::class.java.classLoader
             val urls = loader.getResources(PACKAGE.replace('.', '/')).toList()
@@ -107,8 +128,9 @@ class ChannelStructureTest {
                 ?: fail("${directory.absolutePath} is not a readable directory")
             assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
             // The class files this package compiled to when it was written, pinned as a floor so a
-            // partial output directory goes red instead of sweeping less than it claims.
-            val pinned = 18
+            // partial output directory goes red instead of sweeping less than it claims. Raised
+            // from 18 by §7.5's and §7.6's types; a floor is only ever raised.
+            val pinned = 28
             assertTrue(
                 files.size >= pinned,
                 "${directory.absolutePath} holds ${files.size} class file(s); at least $pinned were pinned",
@@ -358,6 +380,85 @@ class ChannelStructureTest {
             }
         }
         assertTrue(inspected > 20, "the sweep inspected only $inspected members, which is not the package")
+    }
+
+    /**
+     * §7.6's answer is a sealed type, and never a `Boolean` or a status-shaped `String`.
+     *
+     * §7.6 names three outcomes with three different correct responses — settle in, re-propose with
+     * a new order id, or ignore — and a `Boolean` collapses the second into the third. A
+     * status-shaped `String` hands back a decision that has already been decoded once, which is the
+     * shape STOP RULE 12 and §11.1 both exist to prevent.
+     *
+     * The sweep is by *name*, over every published member of the package whose name says it answers
+     * the acceptance question, so a second one added later is caught rather than assumed absent —
+     * and it is asserted non-empty, because a regex that matched nothing would pass over a codec
+     * that returned `boolean` from every one of them.
+     */
+    @Test
+    fun `the answer to whether terms were accepted is a sealed type, not a Boolean or a String`() {
+        val answers = mutableListOf<String>()
+        for (type in publishedClasses()) {
+            for (executable in publishedExecutables(type)) {
+                val method = executable as? Method ?: continue
+                if (method.name in OBJECT_METHODS) continue
+                if (!ACCEPTANCE_ANSWER.containsMatchIn(method.name)) continue
+                answers += label(type, method)
+                assertEquals(
+                    "$PACKAGE.Acceptance",
+                    method.genericReturnType.typeName,
+                    "${label(type, method)} answers §7.6 and must return the sealed type",
+                )
+            }
+        }
+
+        assertEquals(
+            setOf("OrderProposal.accepts"),
+            answers.toSet(),
+            "the set of members answering §7.6 must match the pinned list exactly; a new one may " +
+                "be the same question asked in a looser shape, and a missing one means the sweep " +
+                "stopped seeing the package",
+        )
+        // And nothing on the answer type itself hands a caller a bare verdict back out: no member
+        // of Acceptance or its cases returns a Boolean or a String at all.
+        val cases = publishedClasses().filter { it.name.startsWith("$PACKAGE.Acceptance") }
+        assertTrue(cases.size > 1, "the sweep must find the sealed type and its cases; found $cases")
+        for (type in cases) {
+            for (executable in publishedExecutables(type)) {
+                val method = executable as? Method ?: continue
+                if (method.name in OBJECT_METHODS) continue
+                val returned = method.genericReturnType.typeName
+                assertFalse(
+                    returned == "boolean" || returned == "java.lang.Boolean" ||
+                        returned == String::class.java.name,
+                    "${label(type, method)} returns $returned; §7.6's outcome is the type itself",
+                )
+            }
+        }
+    }
+
+    /**
+     * §11.1's vocabulary crossing the wire boundary: a decoded order `status` is an `OrderState`
+     * and never the token a stranger wrote.
+     *
+     * The conflation §11.1 forbids — one `status` codec serving both the order and the listing
+     * vocabularies — is reachable through a `String` accessor and through nothing else, because a
+     * caller holding the raw token has to decide for itself which vocabulary to read it under.
+     */
+    @Test
+    fun `a decoded status is an OrderState and never the raw token`() {
+        val type = mainClasses().single { it.name == "$PACKAGE.OrderStatusMessage" }
+        val status = type.methods.single { it.name == "getStatus" && '$' !in it.name }
+
+        assertEquals(OrderState::class.java.name, status.genericReturnType.typeName)
+        for (executable in publishedExecutables(type)) {
+            val method = executable as? Method ?: continue
+            assertFalse(
+                method.genericReturnType.typeName == String::class.java.name &&
+                    STATUS_SHAPED.containsMatchIn(method.name),
+                "${method.name} hands a status token back as a String",
+            )
+        }
     }
 
     @Test

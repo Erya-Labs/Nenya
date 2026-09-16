@@ -104,6 +104,76 @@ public enum class ChannelRejection {
     /** §7.4 reserves `type=4` for GammaMarkets shipping: Nenya v1 MUST NOT emit it. */
     RESERVED_TYPE,
 
+    /**
+     * §7.5's decoder was handed a rumor that is not a `kind:16` `type=1`.
+     *
+     * The caller's mistake rather than the peer's, and its own constant for the reason
+     * [MALFORMED_SEAL_PUBKEY] has one: a `type=2` is a perfectly well-formed message that this
+     * entry point has nothing to say about, and reporting it as malformed would send a reader
+     * looking for a bug in the sender's implementation.
+     */
+    NOT_A_PROPOSAL,
+
+    /** §7.6's decoder was handed a rumor that is not a `kind:16` `type=3`. See [NOT_A_PROPOSAL]. */
+    NOT_A_STATUS_UPDATE,
+
+    /**
+     * An `amount_msat` or `amount` value that is not §4.4's canonical decimal.
+     *
+     * Strict rather than permissive, and that is §7.6's byte-identity rule reaching down into the
+     * parse: `["amount_msat", "090000000"]` and `["amount_msat", "90000000"]` are not
+     * byte-identical, so a codec that read the first as the second would call a counter-proposal an
+     * acceptance. §4.3 requires rejecting a malformed value rather than repairing it.
+     */
+    MALFORMED_AMOUNT,
+
+    /**
+     * An `amount_msat` or `amount` above §4.4's supply cap.
+     *
+     * Its own constant rather than [MALFORMED_AMOUNT], and the one that matters on the `amount`
+     * side: §7.5's cross-check is `amount × 1000 = amount_msat`, a multiplication on a number a
+     * stranger chose. `Long` multiplication wraps silently onto a *positive* value, and because
+     * 1000 does not divide 2⁶⁴ evenly a crafted `amount` can be congruent to a legitimate
+     * `amount_msat` and compare **equal**, walking straight through the one clause §7.5 wrote to
+     * prevent a 1000× disagreement. `Msat.ofSat` bounds before it multiplies, so the crafted value
+     * is refused here instead — which is why the reason exists and is asserted by name.
+     */
+    AMOUNT_ABOVE_SUPPLY,
+
+    /**
+     * §7.5's `amount × 1000 ≠ amount_msat`: "the implementation MUST reject the message. It MUST
+     * NOT prefer one and continue."
+     *
+     * The clause an implementer resolves by taking the more specific field and shipping a silent
+     * 1000× disagreement with its peer, so the refusal is named rather than folded into
+     * [MALFORMED_AMOUNT].
+     */
+    AMOUNT_DISAGREEMENT,
+
+    /**
+     * §7.5's two deadlines, inverted: `expiration` at or after `deliver_by`.
+     *
+     * §7.5 requires `expiration` be **strictly** earlier when both are present and requires the
+     * proposal be rejected otherwise — "an order that can still be accepted after its own delivery
+     * deadline has passed is incoherent, and it puts the provider in a state where acceptance and
+     * `expired` are simultaneously correct".
+     *
+     * Refused **here**, before [dev.eryalabs.nenya.order.OrderTerms] is constructed, so the answer
+     * a caller gets is this package's named rejection and never the `OrderStateException` that
+     * type's `init` throws for the same reason one layer down.
+     */
+    DEADLINES_INVERTED,
+
+    /**
+     * A `type=3` naming a different `order` id than the proposal it was offered against.
+     *
+     * Not a counter-proposal: §7.6's counter-proposal is a message *about this order* carrying
+     * altered terms, and the correct response to it is a new `type=1` with a new order id. A status
+     * update about some other order is not about this one at all, and answering "counter-proposal"
+     * would tell the caller to re-propose on the strength of a message it must ignore.
+     */
+    DIFFERENT_ORDER,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 
@@ -188,11 +258,43 @@ internal object ChannelVocabulary {
     /** §7.4's own `type` row. REQUIRED on a `kind:16` and on nothing else. */
     const val TYPE: String = ChannelTags.TYPE
 
+    /** §7.5's own `amount_msat` row, which is not in §5.3's table. REQUIRED on a `type=1`. */
+    const val AMOUNT_MSAT: String = ChannelTags.AMOUNT_MSAT
+
+    /** §7.5's GammaMarkets compatibility `amount` row, in satoshis. A MAY, and not in §5.3's table. */
+    const val AMOUNT: String = ChannelTags.AMOUNT
+
     /** §5.3's `image` row, which carries §4.3's fifth resource bound. */
     const val IMAGE: String = "image"
 
     /** §5.3's `price` row, whose fourth element is NIP-99's recurring form. */
     const val PRICE: String = "price"
+
+    /** §5.3's `item` row — §7.5's listing coordinate and quantity. REQUIRED on a `type=1`. */
+    const val ITEM: String = "item"
+
+    /** §5.3's and §8.1's `fee` row. A MAY on a proposal, and §8.1's read rule governs its absence. */
+    const val FEE: String = "fee"
+
+    /** §5.3's `deliver_by` row — §7.5's deadline for **release**. */
+    const val DELIVER_BY: String = "deliver_by"
+
+    /** §5.3's `expiration` row — §7.5's deadline for **acceptance**, a different deadline. */
+    const val EXPIRATION: String = "expiration"
+
+    /** §5.3's `status` row, whose vocabulary on a `type=3` is §11.1's and never §5.2's. */
+    const val STATUS: String = "status"
+
+    /**
+     * NIP-17's `subject`, which §7.4 makes display metadata on any rumor and forbids deriving any
+     * term or state from.
+     *
+     * A name and nothing more: it is in this package's readable set because §7.4 says it MAY appear
+     * on any rumor and §4.3 requires it round-trip, and there is deliberately no accessor anywhere
+     * in this package that hands a caller its value as a decoded term. `ChannelStructureTest`
+     * asserts that by reflection over every published member's name.
+     */
+    const val SUBJECT: String = "subject"
 
     /**
      * §7.4's fenced required-tags block, in the order it prints them.

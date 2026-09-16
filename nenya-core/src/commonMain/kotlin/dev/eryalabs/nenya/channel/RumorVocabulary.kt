@@ -176,11 +176,11 @@ public enum class Attribution(
 /**
  * The §7.4 tag names this package reads, kept **out** of `NenyaTags` on purpose.
  *
- * `NenyaTags` is held *equal* to §5.3's table parsed at test time, and `order` and `type` are not
- * rows in it — they are §7.4's, as `payee`, `payment`, `amount_msat` and `amount` are §8.6's and
- * §9.2's. Adding one to `NenyaTags` would turn `TagVocabularyTest` red for a reason that has
- * nothing to do with the tag: the table would no longer equal the document. So §7.4's names live
- * here, exactly as §6's NIP-22 scope tags live in `BidVocabulary`.
+ * `NenyaTags` is held *equal* to §5.3's table parsed at test time, and `order`, `type`,
+ * `amount_msat` and `amount` are not rows in it — they are §7.4's and §7.5's, as `payee` and
+ * `payment` are §8.6's. Adding one to `NenyaTags` would turn `TagVocabularyTest` red for a reason
+ * that has nothing to do with the tag: the table would no longer equal the document. So those names
+ * live here, exactly as §6's NIP-22 scope tags live in `BidVocabulary`.
  *
  * The tags that **are** in §5.3 — `p`, `nenya`, `item`, `fee`, `expiration`, `deliver_by`,
  * `status` — are read through T9, whose Encoding column §5.3 makes universal across listings, bids
@@ -195,6 +195,25 @@ public object ChannelTags {
 
     /** §7.4's `["type", "<n>"]`, which discriminates a `kind:16`. */
     public const val TYPE: String = "type"
+
+    /**
+     * §7.5's `["amount_msat", "<msat>"]` — "the price in millisatoshis, what the provider receives".
+     *
+     * The authoritative amount of a proposal, and the one §8.3's arithmetic runs on. Read in
+     * §4.4's **strict** canonical decimal form, because §7.6 compares it byte-identically and a
+     * codec that read `090000000` as `90000000` would call a counter-proposal an acceptance.
+     */
+    public const val AMOUNT_MSAT: String = "amount_msat"
+
+    /**
+     * §7.5's `["amount", "<sats>"]` — the GammaMarkets compatibility tag, denominated in satoshis.
+     *
+     * A MAY: an implementation that *required* it would refuse conformant peers, and one that
+     * preferred it over [AMOUNT_MSAT] on a disagreement ships the silent 1000× divergence §7.5
+     * wrote its cross-check to prevent. It is read only in order to be checked against
+     * [AMOUNT_MSAT], and never as the price.
+     */
+    public const val AMOUNT: String = "amount"
 
     /**
      * §7.4's `order` tag for [id], in §4.3's canonical lowercase hex.
