@@ -263,13 +263,22 @@ public interface Wallet : Seam {
  * never against a counterparty's `created_at`, because gift-wrap timestamps are deliberately
  * randomised into the past (§7.1) and a `created_at` is a claim in any case.
  *
- * ### This library has no opinion about what the clock says
+ * ### This library has one opinion about what the clock says: it is not before 1970
  *
  * A clock reporting 1970 and a clock reporting 3000 are both simply *used*. §4.6 makes the
- * injected clock authoritative; a library that second-guessed it would be substituting an
- * ambient time it is not allowed to read. The one tolerance §4.6 does grant — MAY reject a
- * *public* event whose `created_at` is implausibly far in the future — is a rule about an
- * event, not about the clock, and MUST NOT be applied to a gift wrap or a seal.
+ * injected clock authoritative; a library that second-guessed a plausible reading would be
+ * substituting an ambient time it is not allowed to read. The one tolerance §4.6 does grant —
+ * MAY reject a *public* event whose `created_at` is implausibly far in the future — is a rule
+ * about an event, not about the clock, and MUST NOT be applied to a gift wrap or a seal.
+ *
+ * A **negative** reading is different in kind. §4.3 fixes every timestamp as a non-negative
+ * integer, so a clock answering before 1970 is not reporting an unusual time — it is broken, and
+ * no deadline can honestly be evaluated against it. This library treats it exactly as it treats
+ * every other injected part that answers something it cannot use (a randomness source returning
+ * the wrong number of bytes, a wallet's claim, an unavailable seam): it **fails closed**. Nothing
+ * advances or expires on such a reading, and the refusal names the reason —
+ * `TransitionRejection.CLOCK_READING_BEFORE_EPOCH` from the order machine, and
+ * `ListingActivity.CANNOT_SAY` from a listing, never `ACTIVE` and never `EXPIRED`.
  *
  * ### Named `NenyaClock` rather than `Clock`
  *
@@ -284,9 +293,11 @@ public interface NenyaClock : Seam {
      * The current time, as the embedding client understands it, in **unix seconds** — the unit
      * of nostr's `created_at` and of every §4.3 timestamp this reading is compared against.
      *
-     * Any `Long` is used as given, including a negative one (a reading before 1970) and
-     * [Long.MAX_VALUE]; the deadline arithmetic that consumes it is overflow-checked rather than
-     * relying on the clock to stay in a plausible range.
+     * Any non-negative `Long` is used as given, up to and including [Long.MAX_VALUE]; the
+     * deadline arithmetic that consumes it is overflow-checked rather than relying on the clock
+     * to stay in a plausible range. A **negative** reading (before 1970) is refused where it is
+     * consumed: the clock is broken, and nothing advances, expires or is recorded on it — see
+     * this interface's note.
      */
     public fun now(): SeamAnswer<Long>
 

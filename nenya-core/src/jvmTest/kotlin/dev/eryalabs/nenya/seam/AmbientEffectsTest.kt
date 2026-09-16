@@ -153,6 +153,13 @@ class AmbientEffectsTest {
             "kotlin.js.Date",
         )
 
+        /**
+         * The type-name matcher the sweep below applies to every code line: which of
+         * [FORBIDDEN_TYPES] [line] names. One function, so the control that probes it exercises the
+         * very matcher the sweep runs rather than a copy of it.
+         */
+        fun typesNamedIn(line: String): List<String> = FORBIDDEN_TYPES.filter { line.contains(it) }
+
         /** The files this task adds, asserted by name. Several `.kt` files already existed. */
         val EXPECTED_SEAM_SOURCES: Set<String> = setOf("SeamAnswer.kt", "Seams.kt", "OrderId.kt")
 
@@ -316,8 +323,8 @@ class AmbientEffectsTest {
 
         for (file in mainSources()) {
             for ((number, line) in codeLines(file)) {
-                for (type in FORBIDDEN_TYPES) {
-                    if (line.contains(type)) offences += "${file.path}:$number names $type — $line"
+                for (type in typesNamedIn(line)) {
+                    offences += "${file.path}:$number names $type — $line"
                 }
             }
         }
@@ -370,21 +377,42 @@ class AmbientEffectsTest {
      * `Date.now()` — passed the sweep. Each line below is one such read and must be caught; the two
      * after it must not be, or the new patterns are simply matching everything. In memory, like
      * the stripper control above, so no probe file can outlive the test.
+     *
+     * Each probe names the pattern that must catch it, and there is one probe per **alternation**,
+     * not per pattern: a pattern such as `measureTime and friends` is five spellings, and a probe
+     * of one of them says nothing about a typo in the other four. Naming the pattern also stops a
+     * probe being satisfied by some unrelated, broader pattern that happens to match it.
      */
     @Test
     fun `every common-Kotlin and JavaScript spelling of an ambient effect is caught`() {
+        val measure = "measureTime and friends"
+        val hrtime = "performance.now or process.hrtime"
+        val crypto = "Web Crypto or node:crypto randomness"
+        val unseeded = "an unseeded random()/shuffled()"
         val ambient = listOf(
-            "val a = TimeSource.Monotonic.markNow()",
-            "val b = kotlin.time.Clock.System.now()",
-            "val c = Clock.System.now()",
-            "val d = Random.Default",
-            "val e = listOf(1, 2).shuffled(Random)",
-            "val f = listOf(1, 2).random()",
-            "val g = Date.now()",
-            "val h = js(\"performance.now()\")",
-            "val i = measureTime { }",
-            "val j = Uuid.random()",
-            "val k = js(\"crypto.getRandomValues(new Uint8Array(32))\")",
+            "TimeSource.Monotonic" to "val a = TimeSource.Monotonic.markNow()",
+            "Clock.System (kotlin.time or kotlinx-datetime)" to "val b = kotlin.time.Clock.System.now()",
+            "Clock.System (kotlin.time or kotlinx-datetime)" to "val c = Clock.System.now()",
+            "the unseeded Random companion or Random.Default" to "val d = Random.Default",
+            "the unseeded Random companion or Random.Default" to "val e = listOf(1, 2).shuffled(Random)",
+            unseeded to "val f = listOf(1, 2).random()",
+            unseeded to "val f2 = listOf(1, 2).randomOrNull()",
+            unseeded to "val f3 = listOf(1, 2).shuffled()",
+            unseeded to "val f4 = mutableListOf(1, 2).shuffle()",
+            "Date.now" to "val g = Date.now()",
+            hrtime to "val h = js(\"performance.now()\")",
+            hrtime to "val h2 = js(\"process.hrtime.bigint()\")",
+            measure to "val i = measureTime { }",
+            measure to "val i2 = measureTimedValue { 1 }",
+            measure to "val i3 = measureTimeMillis { }",
+            measure to "val i4 = measureNanoTime { }",
+            measure to "val i5 = getTimeMillis()",
+            measure to "val i6 = getTimeNanos()",
+            "Uuid.random" to "val j = Uuid.random()",
+            crypto to "val k = js(\"crypto.getRandomValues(new Uint8Array(32))\")",
+            crypto to "val k2 = js(\"crypto.randomUUID()\")",
+            crypto to "val k3 = js(\"crypto.randomBytes(32)\")",
+            crypto to "val k4 = js(\"crypto.randomInt(6)\")",
         )
         val innocent = listOf(
             "val seeded = Random(42)",
@@ -393,16 +421,29 @@ class AmbientEffectsTest {
         fun caught(line: String): List<String> =
             FORBIDDEN.filter { (_, pattern) -> pattern.containsMatchIn(line) }.map { it.first }
 
-        for (line in ambient) {
-            assertTrue(caught(line).isNotEmpty(), "the sweep must catch this ambient read: $line")
+        val names = FORBIDDEN.map { it.first }.toSet()
+        for ((pattern, line) in ambient) {
+            assertTrue(pattern in names, "probe names a pattern FORBIDDEN does not carry: $pattern")
+            assertTrue(
+                pattern in caught(line),
+                "the pattern '$pattern' must itself catch this ambient read: $line (caught by ${caught(line)})",
+            )
         }
         for (line in innocent) {
             assertEquals(emptyList(), caught(line), "the sweep must not flag this line: $line")
         }
-        assertTrue(
-            codeLines(listOf("import kotlin.js.Date")).single().second.contains("kotlin.js.Date") &&
-                "kotlin.js.Date" in FORBIDDEN_TYPES,
-            "the JavaScript Date type must be banned by name as well",
+
+        // The type half: run the sweep's own matcher over the stripped line, not a list lookup.
+        val importLine = codeLines(listOf("import kotlin.js.Date")).single().second
+        assertEquals(
+            listOf("kotlin.js.Date"),
+            typesNamedIn(importLine),
+            "the JavaScript Date type must be caught by name by the matcher the sweep runs",
+        )
+        assertEquals(
+            emptyList(),
+            typesNamedIn("import dev.eryalabs.nenya.seam.NenyaClock"),
+            "and the matcher must not flag an innocent import",
         )
     }
 

@@ -151,6 +151,16 @@ public enum class TransitionRejection {
     CLOCK_UNAVAILABLE,
 
     /**
+     * The injected [NenyaClock] answered a **negative** reading — a time before 1970. §4.3 fixes
+     * every timestamp as a non-negative integer, so such a clock is broken rather than merely
+     * unusual, and this library fails closed on it exactly as it does on an unavailable one:
+     * nothing expires, nothing is disputed and no `paidAt` is recorded against a time no deadline
+     * can honestly be compared with. Distinct from [CLOCK_UNAVAILABLE] because the remedy
+     * differs — that one means "inject a clock", this one means "the clock injected is wrong".
+     */
+    CLOCK_READING_BEFORE_EPOCH,
+
+    /**
      * A `type=1` reached an order that already exists. §11.2's genesis row is the only one with
      * no from-state, and §7.6 says a counter-proposal is a **new** proposal with a **new** order
      * id — never a second set of terms on this one.
@@ -294,7 +304,8 @@ public sealed interface Order {
 
     /**
      * The injected clock's reading at the moment the order became `paid`, in unix seconds, or
-     * `null` if it had none to give.
+     * `null` if it had none to give — including when it answered a negative reading, which this
+     * library refuses as a broken clock rather than recording (see `NenyaClock`). Never negative.
      *
      * Recorded for exactly one purpose: §11.2 says that where the accepted terms carry no
      * `deliver_by`, an implementation MUST apply a release timeout of its own and MUST NOT leave
@@ -352,7 +363,8 @@ public sealed interface Order {
  * is evaluated against it and never against a counterparty's `created_at`, because gift-wrap
  * timestamps are deliberately randomised into the past (§7.1). Both parameters take defaults so a
  * test can pin them, and the clock's default fails closed: an order under it simply never expires,
- * and says `CLOCK_UNAVAILABLE` when asked, rather than expiring against an ambient clock.
+ * and says `CLOCK_UNAVAILABLE` when asked, rather than expiring against an ambient clock. A clock
+ * that answers a negative reading fails closed the same way, and says `CLOCK_READING_BEFORE_EPOCH`.
  *
  * @param clock §4.6's authoritative clock.
  * @param releaseTimeoutSeconds §11.2's own-release timeout, as a number of seconds, applied only
@@ -657,7 +669,10 @@ public class OrderMachine(
             "these terms carry no `expiration`, so §11.2's `→ expired` rows have no deadline to " +
                 "fire on; §7.5 does not make the tag REQUIRED and this library does not invent one",
         )
-        val now = reading() ?: return clockUnavailable(order)
+        val now = when (val clockNow = reading()) {
+            is ClockReading.At -> clockNow.unixSeconds
+            is ClockReading.Refused -> return clockRefusal(order, clockNow)
+        }
         return if (now < deadline) {
             refuse(
                 order,
@@ -679,13 +694,16 @@ public class OrderMachine(
      * says so rather than substituting a time from somewhere §4.6 does not permit.
      */
     private fun releaseDeadline(order: Order): OrderOutcome {
-        val now = reading() ?: return clockUnavailable(order)
+        val now = when (val clockNow = reading()) {
+            is ClockReading.At -> clockNow.unixSeconds
+            is ClockReading.Refused -> return clockRefusal(order, clockNow)
+        }
         val paidAt = order.paidAt
         val deadline = order.terms.deliverBy
             ?: paidAt?.let { at ->
-                // The injected clock is the embedding client's, so `paidAt` can be any `Long` it
-                // chose — including one so late that adding the timeout overflows. Plain `+` would
-                // wrap silently to a large negative deadline that every clock reading has already
+                // The injected clock is the embedding client's, so `paidAt` can be any
+                // non-negative `Long` it chose — including one so late that adding the timeout
+                // overflows. Plain `+` would wrap silently to a large negative deadline that every clock reading has already
                 // passed, disputing the order on the spot; that silent wrap is the bug class
                 // `Msat` refuses too. `on` is documented total over every pair (§11.2), so the
                 // overflow is not thrown either: a deadline beyond `Long.MAX_VALUE` is a deadline
@@ -805,7 +823,9 @@ public class OrderMachine(
         return advance(
             order.with(
                 state = OrderState.PAID,
-                paidAt = reading(),
+                // A broken or silent clock records nothing here rather than a time: the refusal is
+                // raised when a deadline is next evaluated, which reads the clock afresh.
+                paidAt = (reading() as? ClockReading.At)?.unixSeconds,
                 paymentChecksPerformed = event.receipts.flatMapTo(LinkedHashSet()) { it.checksPerformed },
                 paymentChecksNotPerformedHere =
                     event.receipts.flatMapTo(LinkedHashSet()) { it.checksNotPerformedHere },
@@ -865,24 +885,49 @@ public class OrderMachine(
     // ------------------------------------------------------------------ small shared pieces
 
     /**
-     * §4.6's clock reading, or `null` when the seam declined.
+     * §4.6's clock reading, or the refusal it earns: [TransitionRejection.CLOCK_UNAVAILABLE] when
+     * the seam declined, [TransitionRejection.CLOCK_READING_BEFORE_EPOCH] when it answered a
+     * negative number of unix seconds. A negative reading is never compared with a deadline —
+     * the clock is broken, and §4.3 has no timestamp before 1970 for it to be right about.
      *
      * The only place in this file a time comes from. There is no parameter on any of
      * [OrderMachine]'s methods that accepts a time — no `Long` of unix seconds at all — which is
      * what makes "a counterparty's `created_at` never drives a deadline" structural rather than a
      * rule to remember.
      */
-    private fun reading(): Long? = when (val answer = clock.now()) {
-        is SeamAnswer.Provided -> answer.value
-        is SeamAnswer.Unavailable -> null
+    private fun reading(): ClockReading = when (val answer = clock.now()) {
+        is SeamAnswer.Unavailable -> ClockReading.Unavailable
+        is SeamAnswer.Provided ->
+            if (answer.value < 0L) ClockReading.BeforeEpoch else ClockReading.At(answer.value)
     }
 
-    private fun clockUnavailable(order: Order): OrderOutcome = refuse(
-        order,
-        TransitionRejection.CLOCK_UNAVAILABLE,
-        "the injected clock answered unavailable, and §4.6 makes it authoritative for every " +
-            "deadline; there is no ambient fallback",
-    )
+    /** The refusal a deadline check returns when [reading] found no usable time. */
+    private fun clockRefusal(order: Order, refused: ClockReading.Refused): OrderOutcome = when (refused) {
+        ClockReading.Unavailable -> refuse(
+            order,
+            TransitionRejection.CLOCK_UNAVAILABLE,
+            "the injected clock answered unavailable, and §4.6 makes it authoritative for every " +
+                "deadline; there is no ambient fallback",
+        )
+        ClockReading.BeforeEpoch -> refuse(
+            order,
+            TransitionRejection.CLOCK_READING_BEFORE_EPOCH,
+            "the injected clock answered a time before 1970; §4.3 timestamps are non-negative, so " +
+                "the clock is broken and no deadline is evaluated against it",
+        )
+    }
+
+    /**
+     * What [reading] found: a usable time, or which of the two refusals a deadline check returns
+     * instead. Objects and a `Long`, deliberately no `String`: `OrderStructureTest` pins every
+     * member of this package that takes one.
+     */
+    private sealed interface ClockReading {
+        class At(val unixSeconds: Long) : ClockReading
+        sealed interface Refused : ClockReading
+        object Unavailable : Refused
+        object BeforeEpoch : Refused
+    }
 
     private fun noCommitment(order: Order): OrderOutcome = refuse(
         order,

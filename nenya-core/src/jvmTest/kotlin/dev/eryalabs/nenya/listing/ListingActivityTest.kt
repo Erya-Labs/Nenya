@@ -80,6 +80,28 @@ class ListingActivityTest {
     }
 
     /**
+     * A clock answering before 1970 is broken (§4.3 has no negative timestamp), and a broken clock
+     * is not compared with a deadline in either direction. Before this rule `-1` was used as given
+     * and every listing with an `expiration` read [ListingActivity.ACTIVE] under it — a deadline
+     * reported unexpired on a reading nobody could trust. Zero is a real reading and is used.
+     */
+    @Test
+    fun `a clock reading before 1970 cannot say, and never active or expired`() {
+        for (reading in listOf(-1L, Long.MIN_VALUE)) {
+            for (expiration in listOf(0L, DEADLINE)) {
+                assertEquals(
+                    ListingActivity.CANNOT_SAY,
+                    listing(expiration).activity(clockAt(reading)),
+                    "expiration $expiration, reading $reading",
+                )
+            }
+        }
+        assertEquals(ListingActivity.EXPIRED, listing(0L).activity(clockAt(0L)))
+        assertEquals(ListingActivity.ACTIVE, listing(DEADLINE).activity(clockAt(0L)))
+        assertEquals(ListingActivity.ACTIVE, listing(expiration = null).activity(clockAt(-1L)))
+    }
+
+    /**
      * The stated narrowing: a listing carrying no `expiration` has no deadline to evaluate, so the
      * clock is not consulted and the answer is [ListingActivity.ACTIVE] even when it is silent.
      * §5.6's rule is about an event "whose `expiration` has passed"; there is no such field here,

@@ -336,6 +336,55 @@ class OrderControlsTest {
         assertEquals(OrderState.PROPOSED, refusal.order.state)
     }
 
+    /**
+     * A clock answering before 1970 is broken, and this library fails closed on it just as it does
+     * on a silent one — with its own reason, because "inject a clock" and "the clock you injected
+     * is wrong" are different fixes. Every deadline edge is probed: `→ expired` from `proposed`,
+     * `paid → disputed` on `deliver_by`, and `paid → disputed` on the own-release timeout, where a
+     * paid order under the broken clock must also have recorded no `paidAt`.
+     *
+     * Before this rule the reading was used as given, so `-1` compared below every deadline and
+     * came back `DEADLINE_NOT_PASSED` — the right state for the wrong reason, which is exactly what
+     * asserting the reason rather than the state catches.
+     */
+    @Test
+    fun `a clock reading before 1970 advances and expires nothing and says why`() {
+        for (reading in listOf(-1L, Long.MIN_VALUE)) {
+            val broken = OrderMachine(FakeClock(reading))
+            val orders = OrderFixtures.orders()
+
+            for (state in listOf(OrderState.PROPOSED, OrderState.ACCEPTED, OrderState.PAID)) {
+                val refusal = OrderFixtures.refusal(broken, orders.getValue(state), OrderEvent.ClockChecked)
+                assertEquals(TransitionRejection.CLOCK_READING_BEFORE_EPOCH, refusal.reason, "at $state, reading $reading")
+                assertEquals(state, refusal.order.state, "at $state, reading $reading")
+            }
+
+            val noDeliverBy = OrderTerms.of(
+                OrderFixtures.PRICE,
+                FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+                expiration = OrderFixtures.EXPIRATION,
+                deliverBy = null,
+            )
+            val awaiting = OrderFixtures.orders(noDeliverBy).getValue(OrderState.AWAITING_PAYMENT)
+            val paid = OrderFixtures.advanced(broken, awaiting, OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()))
+            assertEquals(OrderState.PAID, paid.state, "verified receipts still move the order; no deadline is involved")
+            assertEquals(null, paid.paidAt, "a broken clock's reading must not be recorded as the time of payment")
+            val refusal = OrderFixtures.refusal(broken, paid, OrderEvent.ClockChecked)
+            assertEquals(TransitionRejection.CLOCK_READING_BEFORE_EPOCH, refusal.reason, "reading $reading")
+            assertEquals(OrderState.PAID, refusal.order.state)
+        }
+
+        assertEquals(
+            OrderState.EXPIRED,
+            OrderFixtures.advanced(
+                OrderMachine(FakeClock(OrderFixtures.AFTER_DEADLINES)),
+                OrderFixtures.orders().getValue(OrderState.PROPOSED),
+                OrderEvent.ClockChecked,
+            ).state,
+            "and the refusal is about the sign of the reading, not about the clock being a fake",
+        )
+    }
+
     /** Terms carrying no `expiration` have no `→ expired` edge to fire, and the refusal says so. */
     @Test
     fun `terms with no expiration expire on nothing`() {
@@ -612,7 +661,7 @@ class OrderControlsTest {
 
     /**
      * §11.2 says the transition function is total over every `(state, event)` pair, and the clock
-     * is the embedding client's — so `paidAt` can be any `Long` it chose, including
+     * is the embedding client's — so `paidAt` can be any non-negative `Long` it chose, including
      * `Long.MAX_VALUE`, where adding the release timeout overflows. Unchecked, the sum wraps to a
      * large negative deadline that every reading has passed, and the order would be disputed on
      * the spot; the refusal below is what proves the overflow was caught instead.
@@ -737,6 +786,8 @@ class OrderControlsTest {
             { OrderEvent.ChatMessage(Party.BUYER, createdAt = -1L) },
             { OrderEvent.ShippingUpdate(Party.PROVIDER, createdAt = -1L) },
             { OrderEvent.PaymentRequestsReceived(emptySet(), createdAt = -1L) },
+            { OrderEvent.DeliveryCommitted(OrderFixtures.blob.commitment, Party.PROVIDER, createdAt = -1L) },
+            { OrderEvent.DeliverableReleased(OrderFixtures.matchingRelease(), Party.PROVIDER, createdAt = Long.MIN_VALUE) },
         )
         for (build in rumors) {
             val failure = assertFailsWith<OrderStateException> { build() }

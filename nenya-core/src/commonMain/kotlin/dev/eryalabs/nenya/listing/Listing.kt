@@ -52,7 +52,11 @@ public enum class ListingActivity {
     /** The injected clock has reached or passed the `expiration`. §5.6: inactive, whatever the relay says. */
     EXPIRED,
 
-    /** No clock was injected, so this library will not say. **Never** rounded to [ACTIVE] (§17). */
+    /**
+     * No clock was injected, or the injected clock answered a negative reading (before 1970, which
+     * §4.3 has no timestamp for, so the clock is broken), so this library will not say. **Never**
+     * rounded to [ACTIVE] or [EXPIRED] (§17).
+     */
     CANNOT_SAY,
 }
 
@@ -202,7 +206,9 @@ public class Listing internal constructor(
      * consulted: there is no deadline to evaluate, so there is nothing for an unavailable clock to
      * be unable to say. A listing that carries one is [ListingActivity.CANNOT_SAY] when the clock
      * is silent — never [ListingActivity.ACTIVE], which would report a deadline as unexpired that
-     * this library never looked at.
+     * this library never looked at. The same holds when the clock answers a negative reading: a
+     * time before 1970 is no §4.3 timestamp, the clock is broken, and a broken clock is not
+     * compared with a deadline in either direction.
      *
      * **`created_at` is not consulted, and that is §4.6.** A counterparty's `created_at` is a
      * claim; gift-wrap timestamps are deliberately randomised into the past (§7.1); and a listing
@@ -223,7 +229,8 @@ public class Listing internal constructor(
         return when (val reading = clock.now()) {
             is SeamAnswer.Unavailable -> ListingActivity.CANNOT_SAY
             is SeamAnswer.Provided ->
-                if (reading.value >= deadline) ListingActivity.EXPIRED
+                if (reading.value < 0L) ListingActivity.CANNOT_SAY
+                else if (reading.value >= deadline) ListingActivity.EXPIRED
                 else ListingActivity.ACTIVE
         }
     }
