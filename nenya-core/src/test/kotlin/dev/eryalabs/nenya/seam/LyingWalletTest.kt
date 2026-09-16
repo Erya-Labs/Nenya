@@ -221,10 +221,17 @@ internal object SeamReflection {
     const val PACKAGE: String = "dev.eryalabs.nenya.seam"
 
     /** Every class Gradle wrote for `src/main/kotlin`'s copy of this package. */
-    fun mainClasses(): List<Class<*>> = classesIn("/classes/kotlin/main/")
+    fun mainClasses(): List<Class<*>> = classesIn("/classes/kotlin/main/", MIN_MAIN_CLASSES)
 
     /** Every class Gradle wrote for `src/test/kotlin`'s copy — where the fakes live. */
-    fun testClasses(): List<Class<*>> = classesIn("/classes/kotlin/test/")
+    fun testClasses(): List<Class<*>> = classesIn("/classes/kotlin/test/", MIN_TEST_CLASSES)
+
+    /**
+     * The class files each output directory held for this package at commit 6432814, pinned as
+     * floors: a partial directory after a source-layout move must go red, not sweep the remainder.
+     */
+    private const val MIN_MAIN_CLASSES: Int = 33
+    private const val MIN_TEST_CLASSES: Int = 30
 
     fun publishedClasses(): List<Class<*>> =
         mainClasses().filter { Modifier.isPublic(it.modifiers) && !it.isSynthetic }
@@ -269,7 +276,7 @@ internal object SeamReflection {
         else -> false
     }
 
-    private fun classesIn(marker: String): List<Class<*>> {
+    private fun classesIn(marker: String, pinned: Int): List<Class<*>> {
         val loader = SeamReflection::class.java.classLoader
         val urls = loader.getResources(PACKAGE.replace('.', '/')).toList()
         val chosen = urls.firstOrNull { it.path.contains(marker) }
@@ -281,6 +288,10 @@ internal object SeamReflection {
         val files = directory.listFiles { file: File -> file.name.endsWith(".class") }
             ?: fail("${directory.absolutePath} is not a readable directory")
         assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
+        assertTrue(
+            files.size >= pinned,
+            "${directory.absolutePath} holds ${files.size} class file(s); at least $pinned were pinned",
+        )
         return files.map { Class.forName("$PACKAGE.${it.name.removeSuffix(".class")}", false, loader) }
     }
 }

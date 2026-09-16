@@ -78,6 +78,13 @@ class DeliveryStructureTest {
             val files = directory.listFiles { file: File -> file.name.endsWith(".class") }
                 ?: fail("${directory.absolutePath} is not a readable directory")
             assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
+            // The class files this package compiled to at commit 6432814, pinned as a floor so a
+            // partial output directory after a source-layout move goes red instead of sweeping less.
+            val pinned = 14
+            assertTrue(
+                files.size >= pinned,
+                "${directory.absolutePath} holds ${files.size} class file(s); at least $pinned were pinned",
+            )
             return files.map { Class.forName("$PACKAGE.${it.name.removeSuffix(".class")}", false, loader) }
         }
 

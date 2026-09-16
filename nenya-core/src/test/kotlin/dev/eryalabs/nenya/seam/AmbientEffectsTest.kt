@@ -53,6 +53,9 @@ class AmbientEffectsTest {
 
         const val MAIN: String = "src/main/kotlin"
 
+        /** The `.kt` files under [MAIN] at commit 6432814, pinned as a floor for [mainSources]. */
+        const val MIN_MAIN_SOURCES: Int = 27
+
         /**
          * Every way this library could learn the time or draw a random number without being
          * given one. Each is a regex over a non-comment source line.
@@ -108,7 +111,16 @@ class AmbientEffectsTest {
                         "would pass over anything at all.",
                 )
             }
-            return root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            val sources = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            // A directory that exists but holds fewer sources than it did is the quiet failure: after
+            // code moves to another source root, both sweeps here and KindConstantTest's would pass
+            // over whatever was left behind. 27 is the main tree at commit 6432814, a floor.
+            assertTrue(
+                sources.size >= MIN_MAIN_SOURCES,
+                "${root.absolutePath} holds ${sources.size} .kt file(s); at least $MIN_MAIN_SOURCES " +
+                    "were pinned. A sweep over part of the main tree passes over the rest.",
+            )
+            return sources
         }
 
         /**

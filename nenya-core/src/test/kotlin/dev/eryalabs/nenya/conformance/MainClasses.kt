@@ -39,9 +39,42 @@ internal object MainClasses {
         val files = directory.listFiles { file: File -> file.name.endsWith(".class") }
             ?: fail("${directory.absolutePath} is not a readable directory")
         assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
+        val floor = MIN_CLASSES[packageName] ?: 1
+        assertTrue(
+            files.size >= floor,
+            "${directory.absolutePath} holds ${files.size} class file(s) for $packageName; at least " +
+                "$floor were pinned. A sweep over a partial output directory passes while checking " +
+                "less than it claims",
+        )
         return files.sortedBy { it.name }
             .map { Class.forName("$packageName.${it.name.removeSuffix(".class")}", false, loader) }
     }
+
+    /**
+     * The class files each package compiled to at commit 6432814, pinned as a floor.
+     *
+     * A floor, not an exact count: a package that grows stays green. It exists for the source
+     * layout move to Kotlin Multiplatform — if part of a package lands in an output directory these
+     * sweeps do not read, [of] must go red rather than sweep the remainder. Lower an entry only in
+     * the same commit that deliberately removes classes, saying which. A package not listed here
+     * still needs at least one class.
+     */
+    private val MIN_CLASSES: Map<String, Int> = mapOf(
+        "dev.eryalabs.nenya" to 1,
+        "dev.eryalabs.nenya.bid" to 8,
+        "dev.eryalabs.nenya.conformance" to 4,
+        "dev.eryalabs.nenya.delivery" to 14,
+        "dev.eryalabs.nenya.listing" to 14,
+        "dev.eryalabs.nenya.money" to 10,
+        "dev.eryalabs.nenya.order" to 37,
+        "dev.eryalabs.nenya.payment" to 16,
+        "dev.eryalabs.nenya.seam" to 33,
+        "dev.eryalabs.nenya.tag" to 30,
+        "dev.eryalabs.nenya.wire" to 12,
+    )
+
+    /** Root plus the ten sub-packages that existed at commit 6432814, pinned as a floor. */
+    private const val MIN_PACKAGES: Int = 11
 
     /** Those of [of] a client can name. */
     fun published(packageName: String): List<Class<*>> =
@@ -94,10 +127,17 @@ internal object MainClasses {
             ?: fail("${directory.absolutePath} is not a readable directory")
         val packages = listOf(ROOT) + children.map { "$ROOT.${it.name}" }.sorted()
         assertTrue(
-            packages.size > 5,
-            "only ${packages.size} package(s) found under ${directory.absolutePath}; that is not " +
-                "this library, and a sweep over it would prove nothing",
+            packages.size >= MIN_PACKAGES,
+            "only ${packages.size} package(s) found under ${directory.absolutePath}, at least " +
+                "$MIN_PACKAGES were pinned; that is not this library, and a sweep over it would " +
+                "prove less than it claims",
         )
+        for (pinned in MIN_CLASSES.keys) {
+            assertTrue(
+                pinned in packages,
+                "$pinned is not among the packages found under ${directory.absolutePath}: $packages",
+            )
+        }
         return packages
     }
 
