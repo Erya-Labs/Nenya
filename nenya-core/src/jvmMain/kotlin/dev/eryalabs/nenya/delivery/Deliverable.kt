@@ -1,6 +1,6 @@
 package dev.eryalabs.nenya.delivery
 
-import java.security.MessageDigest
+import dev.eryalabs.nenya.crypto.constantTimeEquals
 
 /**
  * Why a deliverable value, a release identity check (§10.3) or a buyer verification step
@@ -167,7 +167,7 @@ public class DeliverableHash private constructor(value: ByteArray) {
     public fun toHex(): String = encodeLowerHex(value)
 
     override fun equals(other: Any?): Boolean =
-        other is DeliverableHash && MessageDigest.isEqual(value, other.value)
+        other is DeliverableHash && constantTimeEquals(value, other.value)
 
     override fun hashCode(): Int = value.contentHashCode()
 

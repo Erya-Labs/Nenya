@@ -1,8 +1,9 @@
 package dev.eryalabs.nenya.payment
 
+import dev.eryalabs.nenya.crypto.constantTimeEquals
+import dev.eryalabs.nenya.crypto.sha256
 import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.money.Msat
-import java.security.MessageDigest
 
 /**
  * The two payee roles §8.6 defines, in the tokens it writes them in.
@@ -231,12 +232,13 @@ public sealed interface VerifiedPayment {
 
         /**
          * §9.2 check 3, computed here: `SHA-256(preimage)` against [paymentHash], with
-         * `java.security.MessageDigest` and nothing else — no secp256k1, no external
+         * this library's own FIPS 180-4 SHA-256 and nothing else — no secp256k1, no external
          * library, no network.
          *
-         * The comparison is [MessageDigest.isEqual], which is length-constant-time on every
-         * JDK since 7u; the two operands are both 32 bytes so the property is free here, but
-         * it costs nothing to not have to think about it.
+         * The comparison is `constantTimeEquals`, which compares every byte with no early
+         * exit, as `java.security.MessageDigest.isEqual` has on every JDK since 7u; the two
+         * operands are both 32 bytes so the property is free here, but it costs nothing to
+         * not have to think about it.
          *
          * ### [payee] is a caller assertion, and the layer above must not leave it that way
          *
@@ -257,8 +259,8 @@ public sealed interface VerifiedPayment {
          *   cannot be handed a status string or a boolean to be talked round by.
          */
         public fun verify(payee: Payee, paymentHash: PaymentHash, preimage: Preimage): VerifiedPayment {
-            val computed = MessageDigest.getInstance("SHA-256").digest(preimage.bytes())
-            if (!MessageDigest.isEqual(computed, paymentHash.bytes())) {
+            val computed = sha256(preimage.bytes())
+            if (!constantTimeEquals(computed, paymentHash.bytes())) {
                 throw PaymentException(
                     PaymentRejection.PREIMAGE_MISMATCH,
                     "the SHA-256 of this preimage is not the payment hash it was checked against " +

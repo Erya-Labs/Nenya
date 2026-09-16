@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.delivery
 
-import java.security.MessageDigest
+import dev.eryalabs.nenya.crypto.constantTimeEquals
+import dev.eryalabs.nenya.crypto.sha256
 
 /**
  * One of §10's obligations, named so that what this library did and did not do is
@@ -34,14 +35,14 @@ public enum class DeliveryCheck {
 
     /**
      * §10.4 step 1 — `SHA-256(served bytes)` equals `x`, computed here with
-     * `java.security.MessageDigest`. Performed here.
+     * this library's own FIPS 180-4 SHA-256. Performed here.
      */
     SERVED_BYTES_HASH,
 
     /**
      * §10.4 step 3 — `SHA-256(plaintext bytes)` equals `ox`, computed here with
-     * `java.security.MessageDigest`. Performed here, and it is the one §11.3 invariant 4 turns
-     * on: `settled` is reachable only after the buyer's *own* hash computation.
+     * this library's own FIPS 180-4 SHA-256. Performed here, and it is the one §11.3
+     * invariant 4 turns on: `settled` is reachable only after the buyer's *own* hash computation.
      */
     PLAINTEXT_BYTES_HASH,
 
@@ -212,8 +213,8 @@ public sealed interface ServedBytesVerified {
                         "were supplied; §10.4 requires refusing a blob whose length disagrees with size",
                 )
             }
-            val digest = MessageDigest.getInstance("SHA-256").digest(servedBytes)
-            if (!MessageDigest.isEqual(digest, commitment.x.bytes())) {
+            val digest = sha256(servedBytes)
+            if (!constantTimeEquals(digest, commitment.x.bytes())) {
                 throw DeliveryException(
                     DeliveryRejection.SERVED_BYTES_MISMATCH,
                     "the SHA-256 of the served bytes is not the commitment's x (§10.4 step 1); this " +
@@ -336,8 +337,8 @@ public sealed interface DeliveryEvidence {
             plaintextBytes: ByteArray,
         ): DeliveryEvidence {
             val commitment = servedBytes.commitment
-            val digest = MessageDigest.getInstance("SHA-256").digest(plaintextBytes)
-            if (!MessageDigest.isEqual(digest, commitment.ox.bytes())) {
+            val digest = sha256(plaintextBytes)
+            if (!constantTimeEquals(digest, commitment.ox.bytes())) {
                 throw DeliveryException(
                     DeliveryRejection.PLAINTEXT_BYTES_MISMATCH,
                     "the SHA-256 of the plaintext is not the commitment's ox (§10.4 step 3); the " +

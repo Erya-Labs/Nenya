@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.wire
 
-import java.security.MessageDigest
+import dev.eryalabs.nenya.crypto.constantTimeEquals
+import dev.eryalabs.nenya.crypto.sha256
 
 /**
  * A nostr event id — 32 bytes, read from or written as 64 hex characters (§4.1, §4.3).
@@ -49,7 +50,7 @@ public class EventId private constructor(value: ByteArray) {
     public fun toHex(): String = encodeLowerHex(value)
 
     override fun equals(other: Any?): Boolean =
-        other is EventId && MessageDigest.isEqual(value, other.value)
+        other is EventId && constantTimeEquals(value, other.value)
 
     override fun hashCode(): Int = value.contentHashCode()
 
@@ -85,7 +86,7 @@ public class EventId private constructor(value: ByteArray) {
 
         /**
          * §4.1: `SHA-256(UTF-8 bytes of the canonical serialisation)`, computed here with
-         * `java.security.MessageDigest`.
+         * this library's own FIPS 180-4 SHA-256 (`dev.eryalabs.nenya.crypto.sha256`).
          *
          * This is the write half of §17 item 1 and the recomputation half of its read rule. It
          * enforces §4.3's four bounds on the way past, because it serialises to get the bytes.
@@ -96,7 +97,7 @@ public class EventId private constructor(value: ByteArray) {
         public fun of(event: WireEvent, limits: WireLimits = WireLimits.DEFAULT): EventId {
             val serialisation = event.canonicalSerialisation(limits)
             return EventId(
-                MessageDigest.getInstance("SHA-256").digest(serialisation.toByteArray(Charsets.UTF_8)),
+                sha256(serialisation.toByteArray(Charsets.UTF_8)),
             )
         }
 

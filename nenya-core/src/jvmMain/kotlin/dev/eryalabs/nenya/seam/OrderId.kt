@@ -1,6 +1,6 @@
 package dev.eryalabs.nenya.seam
 
-import java.security.MessageDigest
+import dev.eryalabs.nenya.crypto.constantTimeEquals
 
 /**
  * Why a seam refused to produce a value.
@@ -122,7 +122,7 @@ public class OrderId private constructor(value: ByteArray) {
     public fun toHex(): String = encodeLowerHex(value)
 
     override fun equals(other: Any?): Boolean =
-        other is OrderId && MessageDigest.isEqual(value, other.value)
+        other is OrderId && constantTimeEquals(value, other.value)
 
     override fun hashCode(): Int = value.contentHashCode()
 

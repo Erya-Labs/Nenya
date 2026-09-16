@@ -1,6 +1,6 @@
 package dev.eryalabs.nenya.payment
 
-import java.security.MessageDigest
+import dev.eryalabs.nenya.crypto.constantTimeEquals
 
 /**
  * Why a payment-evidence value was refused.
@@ -106,7 +106,7 @@ public class PaymentHash private constructor(value: ByteArray) {
     public fun toHex(): String = encodeLowerHex(value)
 
     override fun equals(other: Any?): Boolean =
-        other is PaymentHash && MessageDigest.isEqual(value, other.value)
+        other is PaymentHash && constantTimeEquals(value, other.value)
 
     override fun hashCode(): Int = value.contentHashCode()
 
@@ -190,7 +190,7 @@ public class Preimage private constructor(value: ByteArray) {
     public fun bytes(): ByteArray = value.copyOf()
 
     override fun equals(other: Any?): Boolean =
-        other is Preimage && MessageDigest.isEqual(value, other.value)
+        other is Preimage && constantTimeEquals(value, other.value)
 
     override fun hashCode(): Int = value.contentHashCode()
 

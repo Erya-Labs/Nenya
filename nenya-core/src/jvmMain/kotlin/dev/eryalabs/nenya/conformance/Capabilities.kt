@@ -253,8 +253,8 @@ public object Capabilities {
             ),
             notPerformed = emptySet(),
             note = "§4.1's canonical serialisation is emitted byte for byte and the id is " +
-                "recomputed with MessageDigest; nothing downstream reads an event that did not " +
-                "pass that check, because every decoder takes a CheckedEvent. §4.3's hex, " +
+                "recomputed with this library's own FIPS 180-4 SHA-256; nothing downstream " +
+                "reads an event that did not pass that check, because every decoder takes a CheckedEvent. §4.3's hex, " +
                 "timestamp, tag-shape, duplicate, unknown-tag and resource rules are all " +
                 "enforced, the fifth bound in the tag layer where the `image` vocabulary lives. " +
                 "One narrowing, stated rather than papered over: there is no JSON parser here " +
@@ -389,7 +389,8 @@ public object Capabilities {
                 DeliveryCheck.COMMITMENT_CARRIES_NO_KEY,
                 DeliveryCheck.SERVED_BYTES_PROVENANCE,
             ),
-            note = "`x` and `ox` are both computed here with MessageDigest, in §10.4's order, " +
+            note = "`x` and `ox` are both computed here with this library's own FIPS 180-4 " +
+                "SHA-256, in §10.4's order, " +
                 "enforced by the type system rather than by a comment — there is no way to " +
                 "reach the `ox` check without having passed the `x` check. §10.3's " +
                 "four-operand identity check is implemented as its own call. What is missing is " +
