@@ -35,7 +35,7 @@ class DeliveryVerificationTest {
         assertEquals(
             SpecAnchor.publishedNip44Digest(),
             computed,
-            "the vendored ${vectors.absolutePath} does not hash to the digest §18 publishes; either " +
+            "the vendored ${vectors.location} does not hash to the digest §18 publishes; either " +
                 "the file was swapped or SHA-256 on this JVM is not SHA-256",
         )
         assertTrue(vectors.length() > 0L, "the vendored vector file must not be empty")

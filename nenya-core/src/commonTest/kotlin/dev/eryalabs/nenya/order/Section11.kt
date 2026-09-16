@@ -1,7 +1,7 @@
 package dev.eryalabs.nenya.order
 
 import dev.eryalabs.nenya.SpecAnchor
-import java.io.File
+import dev.eryalabs.nenya.VendoredFile
 import kotlin.test.fail
 
 /**
@@ -12,10 +12,10 @@ import kotlin.test.fail
  * tests run against, so a specification revision that changed any of them turns the suite
  * red instead of leaving a stale copy agreeing with itself.
  *
- * Every accessor fails loudly — naming the absolute path it read and what it expected to
- * find — so a wrong working directory or a restructured section cannot make a test pass
- * vacuously. Gradle runs the tests with the module directory as the working directory, so
- * the specification is one level up; [SpecAnchor] owns that path and reports it on failure.
+ * Every accessor fails loudly — naming the file it read and what it expected to find — so a
+ * wrong path or a restructured section cannot make a test pass vacuously. The files are
+ * compiled into the tests as text (see [SpecAnchor]); [SpecAnchor] owns the specification path
+ * and reports it on failure.
  */
 internal object Section11 {
 
@@ -27,7 +27,7 @@ internal object Section11 {
     /** §11.2's genesis row has no from-state: an order comes into existence at `proposed`. */
     internal const val GENESIS: String = "—"
 
-    private const val TRANSITIONS_PATH: String = "src/jvmTest/resources/spec/nenya-1-11.2-transitions.psv"
+    private const val TRANSITIONS_PATH: String = "nenya-core/src/commonTest/resources/spec/nenya-1-11.2-transitions.psv"
 
     private const val STATES_HEADING: String = "### 11.1 States"
 
@@ -99,14 +99,8 @@ internal object Section11 {
 
     /** The transcribed table, in file order, so duplicate lines remain visible. */
     internal fun transcribed(): List<Transition> {
-        val file = File(TRANSITIONS_PATH)
-        if (!file.isFile) {
-            fail(
-                "the transcribed §11.2 table was expected at ${file.absolutePath} but is not " +
-                    "there. The tests run with the module directory as the working directory; " +
-                    "this one is ${File(".").absoluteFile.normalize()}.",
-            )
-        }
+        // A missing path fails inside VendoredFile, naming every file that was generated.
+        val file = VendoredFile(TRANSITIONS_PATH)
         val rows = file.readLines()
             .map { it.trim() }
             .filter { line -> line.isNotEmpty() && !line.startsWith("#") }
@@ -114,17 +108,17 @@ internal object Section11 {
                 val parts = line.split("|").map { it.trim() }
                 if (parts.size != 3) {
                     fail(
-                        "every data line of ${file.absolutePath} is " +
+                        "every data line of ${file.location} is " +
                             "`<spec line> | <from> | <to>`; this one has ${parts.size} " +
                             "field(s): $line",
                     )
                 }
                 val lineNumber = parts[0].toIntOrNull()
-                    ?: fail("the first field of ${file.absolutePath} is a spec line number: $line")
+                    ?: fail("the first field of ${file.location} is a spec line number: $line")
                 Transition(lineNumber, parts[1], parts[2])
             }
         if (rows.isEmpty()) {
-            fail("${file.absolutePath} carries no data lines at all")
+            fail("${file.location} carries no data lines at all")
         }
         return rows
     }
@@ -137,7 +131,7 @@ internal object Section11 {
         return specLines[number - 1]
     }
 
-    internal fun specPath(): String = SpecAnchor.specFile().absolutePath
+    internal fun specPath(): String = SpecAnchor.specFile().location
 
     /**
      * The data rows of the first `|`-delimited block after [heading], each with its 1-based

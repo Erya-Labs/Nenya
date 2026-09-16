@@ -31,7 +31,7 @@ internal object Section41 {
         val all = SpecAnchor.specFile().readLines()
         val start = all.indexOfFirst { it.trim() == HEADING }
         if (start < 0) {
-            fail("no line reading \"$HEADING\" in ${SpecAnchor.specFile().absolutePath}")
+            fail("no line reading \"$HEADING\" in ${SpecAnchor.specFile().location}")
         }
         val after = all.drop(start + 1).indexOfFirst { it.startsWith("### ") }
         val end = if (after < 0) all.size else start + 1 + after

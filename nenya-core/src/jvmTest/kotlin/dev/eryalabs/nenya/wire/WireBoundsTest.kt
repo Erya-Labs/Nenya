@@ -45,7 +45,7 @@ class WireBoundsTest {
             )
             val found = patterns.mapValues { (what, pattern) ->
                 val match = pattern.find(text)
-                    ?: fail("§4.3 publishes no bound matching \"$what\" in ${SpecAnchor.specFile().absolutePath}")
+                    ?: fail("§4.3 publishes no bound matching \"$what\" in ${SpecAnchor.specFile().location}")
                 match.groupValues[1].toInt()
             }
             assertEquals(4, found.size, "§4.3's four generic bounds must all have been found")

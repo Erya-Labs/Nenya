@@ -27,7 +27,7 @@ import kotlin.test.fail
  * 4. **Rows with no encoding.** `g` and `location` carry Card. `0` and an em dash in the Encoding
  *    column, and `item` carries Side `neither`. "No encoding" is a case, not a parse failure.
  *
- * Every accessor fails loudly, naming the absolute path it read, so a wrong working directory
+ * Every accessor fails loudly, naming the file it read, so a wrong path
  * cannot make a test pass vacuously.
  */
 internal object Section53 {
@@ -109,7 +109,7 @@ internal object Section53 {
         return matches.single().toInt()
     }
 
-    internal fun specPath(): String = SpecAnchor.specFile().absolutePath
+    internal fun specPath(): String = SpecAnchor.specFile().location
 
     /**
      * A markdown table row split into cells on **unescaped** `|`, each trimmed, with `\|`

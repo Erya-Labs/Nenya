@@ -188,7 +188,7 @@ nenya-core/src/commonMain/kotlin/dev/eryalabs/nenya/ implementation shared by JV
 nenya-core/src/jvmMain/kotlin/dev/eryalabs/nenya/    implementation still JVM-bound
 nenya-core/src/commonTest/kotlin/dev/eryalabs/nenya/ tests run on every target
 nenya-core/src/jvmTest/kotlin/dev/eryalabs/nenya/    JVM-only tests
-nenya-core/src/jvmTest/resources/                    test vectors and fixtures
+nenya-core/src/commonTest/resources/                 test vectors and fixtures (compiled into common tests as constants)
 spec/                                               the microstandard
 ```
 

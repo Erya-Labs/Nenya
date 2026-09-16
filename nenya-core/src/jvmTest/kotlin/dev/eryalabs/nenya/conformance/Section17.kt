@@ -78,7 +78,7 @@ internal object Section17 {
                     "human and not something to route around.",
             )
 
-    internal fun specPath(): String = SpecAnchor.specFile().absolutePath
+    internal fun specPath(): String = SpecAnchor.specFile().location
 
     private fun readItems(): List<Item> {
         val headingIndex = specLines.indexOfFirst { it.trim() == HEADING }

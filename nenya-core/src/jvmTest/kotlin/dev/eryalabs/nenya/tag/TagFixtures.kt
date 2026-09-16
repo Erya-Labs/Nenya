@@ -40,7 +40,7 @@ internal object TagFixtures {
     /** A fixed, non-round timestamp, so a codec that emitted a constant would be visible. */
     const val CREATED_AT: Long = 1_767_225_600L
 
-    private const val BIP340_VECTORS: String = "src/jvmTest/resources/vectors/bip340-vectors.csv"
+    private const val BIP340_VECTORS: String = "src/commonTest/resources/vectors/bip340-vectors.csv"
 
     /** The BIP-340 reference vector file has nineteen data rows. */
     private const val BIP340_ROWS: Int = 19

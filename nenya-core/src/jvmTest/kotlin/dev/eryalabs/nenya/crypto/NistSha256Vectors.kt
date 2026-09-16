@@ -7,7 +7,7 @@ import kotlin.test.fail
 
 /**
  * Reader for the NIST CAVP SHA-256 byte-oriented response files vendored under
- * `src/jvmTest/resources/vectors/nist-sha256/` (see `vectors/PROVENANCE.md`).
+ * `src/commonTest/resources/vectors/nist-sha256/` (see `vectors/PROVENANCE.md`).
  *
  * Deliberately shares no code with the implementation: hex is decoded here by hand, and
  * nothing in this file hashes anything. Files are opened by path from the module directory,
@@ -15,8 +15,8 @@ import kotlin.test.fail
  */
 internal object NistSha256Vectors {
 
-    const val DIRECTORY: String = "src/jvmTest/resources/vectors/nist-sha256"
-    const val PROVENANCE: String = "src/jvmTest/resources/vectors/PROVENANCE.md"
+    const val DIRECTORY: String = "src/commonTest/resources/vectors/nist-sha256"
+    const val PROVENANCE: String = "src/commonTest/resources/vectors/PROVENANCE.md"
 
     /** One `Len` / `Msg` / `MD` triple. [bits] is NIST's `Len`, always a whole number of bytes here. */
     class MessageVector(val bits: Int, val message: ByteArray, val digest: ByteArray)

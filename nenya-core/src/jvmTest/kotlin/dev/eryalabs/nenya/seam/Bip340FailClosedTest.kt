@@ -25,7 +25,7 @@ import kotlin.test.fail
  * and invalid" — the distinction §17's last paragraph requires an implementation's UI to draw.
  *
  * Nothing here is typed. The keys, messages and signatures come from
- * `src/jvmTest/resources/vectors/bip340-vectors.csv`, vendored from the BIP-340 reference vectors
+ * `src/commonTest/resources/vectors/bip340-vectors.csv`, vendored from the BIP-340 reference vectors
  * and externally authored; the CSV's header names its columns, so this file parses **by name**
  * rather than indexing blind, and asserts it found all nineteen data rows so a broken reader
  * cannot pass with zero.
@@ -34,7 +34,7 @@ class Bip340FailClosedTest {
 
     private companion object {
 
-        const val VECTORS: String = "src/jvmTest/resources/vectors/bip340-vectors.csv"
+        const val VECTORS: String = "src/commonTest/resources/vectors/bip340-vectors.csv"
 
         /** The BIP-340 reference vector file has nineteen data rows, nine of them valid. */
         const val EXPECTED_ROWS: Int = 19

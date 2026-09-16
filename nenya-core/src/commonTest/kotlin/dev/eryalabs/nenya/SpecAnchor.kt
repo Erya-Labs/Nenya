@@ -1,8 +1,6 @@
 package dev.eryalabs.nenya
 
-import java.io.File
 import kotlin.test.assertEquals
-import kotlin.test.fail
 
 /**
  * The one fixture in this repository that nobody here authored.
@@ -31,19 +29,20 @@ import kotlin.test.fail
  * for a reason unrelated to any code under test. Within the row the assertion is unchanged and
  * still exact: one row naming the file, one backticked digest on it.
  *
- * Every accessor here fails loudly with the absolute path it looked at, so a wrong working
- * directory cannot make a test pass vacuously.
+ * Every accessor here fails loudly naming the file it read, so a wrong path cannot make a test
+ * pass vacuously.
  */
 internal object SpecAnchor {
 
     /**
-     * Gradle runs the tests with the module directory as the working directory, so the
-     * specification is one level up. Confirmed rather than assumed: [specFile] reports the
-     * absolute path it tried when it cannot find it.
+     * Paths from the repository root. A common test cannot open a file (on JavaScript there is no
+     * working directory that holds it), so both files are compiled into [VendoredTestFiles] by
+     * `:nenya-core:generateVendoredTestFiles`, and `VendoredTestFilesTest` proves on the JVM that
+     * each constant is its file on disk byte for byte.
      */
-    private const val SPEC_PATH: String = "../spec/NENYA-1.md"
+    private const val SPEC_PATH: String = "spec/NENYA-1.md"
 
-    private const val NIP44_VECTORS_PATH: String = "src/jvmTest/resources/vectors/nip44.vectors.json"
+    private const val NIP44_VECTORS_PATH: String = "nenya-core/src/commonTest/resources/vectors/nip44.vectors.json"
 
     /** The file name §18's row names, and the name of the file this helper hands back. */
     private const val NIP44_VECTORS_NAME: String = "nip44.vectors.json"
@@ -51,9 +50,9 @@ internal object SpecAnchor {
     /** `SHA-256 ` then a backticked lowercase digest — the §18 table cell and nothing else. */
     private val PUBLISHED_DIGEST = Regex("SHA-256 `([0-9a-f]{64})`")
 
-    fun specFile(): File = required(SPEC_PATH, "the NENYA-1 specification")
+    fun specFile(): VendoredFile = VendoredFile(SPEC_PATH)
 
-    fun nip44VectorsFile(): File = required(NIP44_VECTORS_PATH, "the vendored NIP-44 test vectors")
+    fun nip44VectorsFile(): VendoredFile = VendoredFile(NIP44_VECTORS_PATH)
 
     /** The SHA-256 §18 publishes for `nip44.vectors.json`, in lowercase hex. */
     fun publishedNip44Digest(): String {
@@ -63,27 +62,36 @@ internal object SpecAnchor {
             1,
             rows.size,
             "§18 must carry exactly one row naming $NIP44_VECTORS_NAME alongside a backticked " +
-                "SHA-256 digest; found ${rows.size} in ${spec.absolutePath}",
+                "SHA-256 digest; found ${rows.size} in ${spec.location}",
         )
         val matches = PUBLISHED_DIGEST.findAll(rows.single()).map { it.groupValues[1] }.toList()
         assertEquals(
             1,
             matches.size,
             "the §18 row for $NIP44_VECTORS_NAME must publish exactly one digest; found " +
-                "${matches.size} in ${spec.absolutePath}",
+                "${matches.size} in ${spec.location}",
         )
         return matches.single()
     }
+}
 
-    private fun required(path: String, what: String): File {
-        val file = File(path)
-        if (!file.isFile) {
-            fail(
-                "$what was expected at ${file.absolutePath} but is not there. The tests run with " +
-                    "the module directory as the working directory; this one is " +
-                    "${File(".").absoluteFile.normalize()}.",
-            )
-        }
-        return file
-    }
+/**
+ * A vendored file as a common test sees it: the text compiled into [VendoredTestFiles], read with
+ * the semantics the tests used on `java.io.File`. An unknown [path] fails at construction, naming
+ * the files that do exist, so a wrong path can never read as empty text.
+ */
+internal class VendoredFile(val path: String) {
+
+    val text: String = VendoredTestFiles.text(path)
+
+    /** Where the text came from, for failure messages. */
+    val location: String get() = "$path (compiled into VendoredTestFiles from the repository root)"
+
+    /** The file's bytes: its text in UTF-8, which `VendoredTestFilesTest` proves are the file's bytes. */
+    fun readBytes(): ByteArray = TestText.utf8(text)
+
+    fun length(): Long = readBytes().size.toLong()
+
+    /** `java.io.File.readLines()` semantics: no empty entry after the final line terminator. */
+    fun readLines(): List<String> = TestText.lines(text)
 }
