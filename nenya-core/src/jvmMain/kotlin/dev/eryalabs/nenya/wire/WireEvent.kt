@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.wire
 
+import dev.eryalabs.nenya.collections.readOnlyListOf
+
 /**
  * Why an event, a bound or an event-id check was refused (§4.1, §4.3).
  *
@@ -273,7 +275,7 @@ public class WireEvent(
                 "created_at is $createdAt; §4.3 fixes a timestamp as a non-negative integer",
             )
         }
-        this.tags = java.util.Collections.unmodifiableList(
+        this.tags = readOnlyListOf(
             tags.mapIndexed { index, tag ->
                 // Kotlin is right that this cannot be null and wrong that it therefore cannot
                 // happen, for the reason the element check below gives: `"tags":[null]` is what a
@@ -307,7 +309,7 @@ public class WireEvent(
                         )
                     }
                 }
-                java.util.Collections.unmodifiableList(values)
+                readOnlyListOf(values)
             },
         )
     }

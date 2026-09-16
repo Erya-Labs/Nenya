@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.conformance
 
+import dev.eryalabs.nenya.collections.readOnlyListOf
+import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
 import dev.eryalabs.nenya.payment.PaymentCheck
@@ -144,7 +146,7 @@ public class ConformanceItem internal constructor(
          * in [Capabilities] are wrapped for the same reason, and `WireEvent.tags` before them.
          */
         fun <T> unmodifiable(values: Set<T>): Set<T> =
-            java.util.Collections.unmodifiableSet(LinkedHashSet(values))
+            readOnlySetOf(values)
     }
 }
 
@@ -239,7 +241,7 @@ public object Capabilities {
      * human wrote. Everything that would make a wrong claim cheap — the section references, the
      * evidence classes, the not-performed constants — is checked against something else.
      */
-    public val ITEMS: List<ConformanceItem> = java.util.Collections.unmodifiableList(listOf(
+    public val ITEMS: List<ConformanceItem> = readOnlyListOf(listOf(
         ConformanceItem(
             number = 1,
             status = ConformanceStatus.PERFORMED_HERE,
@@ -519,5 +521,5 @@ public object Capabilities {
     }
 
     private fun <T> unmodifiable(values: List<T>): Set<T> =
-        java.util.Collections.unmodifiableSet(LinkedHashSet(values))
+        readOnlySetOf(values)
 }

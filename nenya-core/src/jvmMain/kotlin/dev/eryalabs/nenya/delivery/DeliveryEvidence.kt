@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.delivery
 
+import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.crypto.constantTimeEquals
 import dev.eryalabs.nenya.crypto.sha256
 
@@ -287,7 +288,7 @@ public sealed interface DeliveryEvidence {
 
         /** §10.4 steps 1 and 3, and §10.4's size rule — everything this library computes itself. */
         public val CHECKS_PERFORMED_HERE: Set<DeliveryCheck> =
-            java.util.Collections.unmodifiableSet(
+            readOnlySetOf(
                 linkedSetOf(
                     DeliveryCheck.SERVED_BYTES_SIZE,
                     DeliveryCheck.SERVED_BYTES_HASH,
@@ -301,7 +302,7 @@ public sealed interface DeliveryEvidence {
          * key-absence rule and §10.2's parameters.
          */
         public val CHECKS_NOT_PERFORMED_HERE: Set<DeliveryCheck> =
-            java.util.Collections.unmodifiableSet(
+            readOnlySetOf(
                 linkedSetOf(
                     DeliveryCheck.GCM_AUTHENTICATION,
                     DeliveryCheck.SERVED_BYTES_PROVENANCE,

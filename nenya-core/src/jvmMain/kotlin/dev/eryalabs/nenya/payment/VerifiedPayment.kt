@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.payment
 
+import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.crypto.constantTimeEquals
 import dev.eryalabs.nenya.crypto.sha256
 import dev.eryalabs.nenya.money.FeeSplit
@@ -198,7 +199,7 @@ public sealed interface VerifiedPayment {
          * itself, and the same for both payees.
          */
         public val CHECKS_PERFORMED_HERE: Set<PaymentCheck> =
-            java.util.Collections.unmodifiableSet(
+            readOnlySetOf(
                 linkedSetOf(PaymentCheck.PREIMAGE_SHAPE, PaymentCheck.PREIMAGE_HASH_COMPARISON),
             )
 
@@ -209,7 +210,7 @@ public sealed interface VerifiedPayment {
          * obligation as "not performed" would be a different false statement.
          */
         public val CHECKS_NOT_PERFORMED_FOR_PROVIDER: Set<PaymentCheck> =
-            java.util.Collections.unmodifiableSet(
+            readOnlySetOf(
                 linkedSetOf(
                     PaymentCheck.INVOICE_IDENTITY,
                     PaymentCheck.INVOICE_AMOUNT,
@@ -219,7 +220,7 @@ public sealed interface VerifiedPayment {
 
         /** The provider's three, plus check 6's three fee-receipt obligations (§9.2). */
         public val CHECKS_NOT_PERFORMED_FOR_FEE: Set<PaymentCheck> =
-            java.util.Collections.unmodifiableSet(
+            readOnlySetOf(
                 linkedSetOf(
                     PaymentCheck.INVOICE_IDENTITY,
                     PaymentCheck.INVOICE_AMOUNT,
