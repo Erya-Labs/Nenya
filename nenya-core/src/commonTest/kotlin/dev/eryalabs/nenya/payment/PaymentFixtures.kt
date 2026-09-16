@@ -1,15 +1,16 @@
 package dev.eryalabs.nenya.payment
 
-import java.security.MessageDigest
-import java.util.Random
+import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.oracleSha256
 
 /**
  * The generator behind every preimage fixture in this package.
  *
  * This is not a scratch file: the queue's Definition of done forbids a hash, a preimage or
  * any other encoded value appearing in a test as something somebody typed out. Every fixture
- * here is therefore *computed* — the preimage bytes by a `java.util.Random` pinned to [SEED],
- * and the payment hash by `java.security.MessageDigest`. A reviewer can change [SEED], re-run
+ * here is therefore *computed* — the preimage bytes by `java.util.Random`'s algorithm
+ * ([JdkRandom]) pinned to [SEED], and the payment hash by the platform's SHA-256 ([oracleSha256],
+ * `MessageDigest` on the JVM). A reviewer can change [SEED], re-run
  * the suite, and every property must still hold.
  *
  * The one fixture that is *not* generated here is the externally-authored anchor: the SHA-256
@@ -20,15 +21,15 @@ import java.util.Random
 internal object PaymentFixtures {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random` is
-     * deliberate: its algorithm is specified by the JDK, so this file produces the same 32-byte
-     * runs on any JVM a reviewer re-runs it on.
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm rather than
+     * `kotlin.random` is deliberate: it is specified by the JDK, so this file produces the same
+     * 32-byte runs on any JVM a reviewer re-runs it on — and, as [JdkRandom], on JavaScript.
      */
     const val SEED: Long = 20260910L
 
     /** A run of distinct preimages, in lowercase hex — the form §9.2 check 2 requires. */
     fun preimageHex(count: Int): List<String> {
-        val random = Random(SEED)
+        val random = JdkRandom(SEED)
         val bytes = ByteArray(Preimage.BYTE_LENGTH)
         return List(count) {
             random.nextBytes(bytes)
@@ -42,12 +43,12 @@ internal object PaymentFixtures {
     /**
      * The payment hash a real invoice would commit to for [preimage]: `SHA-256(preimage)`,
      * computed here rather than typed. Deliberately built through [PaymentHash.ofHex] from
-     * hex, so the fixture path and the production path share no code beyond `MessageDigest`.
+     * hex, so the fixture path and the production path share no code beyond the platform SHA-256.
      */
     fun paymentHashOf(preimage: Preimage): PaymentHash =
         PaymentHash.ofHex(lowerHex(sha256(preimage.bytes())))
 
-    fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
+    fun sha256(bytes: ByteArray): ByteArray = oracleSha256(bytes)
 
     /** §4.3's canonical form: lowercase, unpadded. */
     fun lowerHex(bytes: ByteArray): String {

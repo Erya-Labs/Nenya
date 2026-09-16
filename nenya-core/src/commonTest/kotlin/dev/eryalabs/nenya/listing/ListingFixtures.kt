@@ -1,12 +1,13 @@
 package dev.eryalabs.nenya.listing
 
+import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.TestText
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.wire.CheckedEvent
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.WireEvent
-import java.util.Random
 
 /**
  * The generator behind every listing fixture in this package.
@@ -15,7 +16,7 @@ import java.util.Random
  * a test as something somebody typed out, so nothing here is: the pubkeys are SHA-256 digests of a
  * per-index label (`TagFixtures.pubkeyFor`), the uppercase ones come from the vendored,
  * externally-authored BIP-340 vector file, and every event id under test is computed by
- * `MessageDigest` inside T8. A reviewer can change [SEED], re-run the suite, and every property
+ * the platform's own SHA-256 inside T8. A reviewer can change [SEED], re-run the suite, and every property
  * must still hold.
  *
  * ### Why it is a second generator rather than T9's
@@ -39,7 +40,8 @@ import java.util.Random
 internal object ListingFixtures {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random`, for the
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm ([JdkRandom], identical on
+     * the JVM and JavaScript) rather than `kotlin.random`, for the
      * reason `WireFixtures` gives: its algorithm is specified by the JDK, so this file produces the
      * same runs on any JVM a reviewer re-runs it on.
      */
@@ -67,7 +69,7 @@ internal object ListingFixtures {
         }
         add("é")
         add("中")
-        add(String(Character.toChars(0x1F600)))
+        add(TestText.codePoint(0x1F600))
         add("ordinary")
         add("wss://relay.example.invalid")
     }
@@ -146,11 +148,11 @@ internal object ListingFixtures {
      * `ListingPropertyTest` asserts the whole corpus decodes before it asserts anything about ids.
      */
     fun listings(count: Int): List<Fixture> {
-        val random = Random(SEED)
+        val random = JdkRandom(SEED)
         return List(count) { index -> listing(random, index, KINDS[index % KINDS.size]) }
     }
 
-    private fun listing(random: Random, index: Int, kind: Int): Fixture {
+    private fun listing(random: JdkRandom, index: Int, kind: Int): Fixture {
         val request = kind == NenyaKind.REQUEST
         val tags = mutableListOf<List<String>>()
         tags += listOf("d", "listing-$index-${hostile(random, 1)}")
@@ -175,7 +177,7 @@ internal object ListingFixtures {
      * and specifically not `active`. Both have to be in the corpus or the round-trip property
      * never reaches the branch that reads them.
      */
-    private fun statusTag(random: Random, kind: Int): List<String>? {
+    private fun statusTag(random: JdkRandom, kind: Int): List<String>? {
         val vocabulary = ListingStatusCodec.vocabulary(kind).mapNotNull { it.token }.sorted()
         return when (random.nextInt(vocabulary.size + 2)) {
             0 -> null
@@ -184,7 +186,7 @@ internal object ListingFixtures {
         }
     }
 
-    private fun addOptionalTags(random: Random, index: Int, tags: MutableList<List<String>>) {
+    private fun addOptionalTags(random: JdkRandom, index: Int, tags: MutableList<List<String>>) {
         if (random.nextBoolean()) tags += listOf("summary", hostile(random, 2))
         if (random.nextBoolean()) tags += listOf("published_at", (CREATED_AT - random.nextInt(99999)).toString())
         if (random.nextBoolean()) tags += listOf("m", "image/png")
@@ -205,14 +207,14 @@ internal object ListingFixtures {
     }
 
     /** §8.1's two arities, both generated, with zero drawn deliberately rather than by chance. */
-    private fun feeTag(random: Random, index: Int): List<String> {
+    private fun feeTag(random: JdkRandom, index: Int): List<String> {
         val bps = if (random.nextInt(4) == 0) 0 else 1 + random.nextInt(FeeTerm.MAX_BASIS_POINTS)
         return if (bps == 0) listOf("fee", "0")
         else listOf("fee", bps.toString(), TagFixtures.pubkeyFor(index + 7))
     }
 
     /** §4.4's eight permissive-on-read unit tokens, all of them, on satoshi-exact values. */
-    private fun priceTag(random: Random): List<String> {
+    private fun priceTag(random: JdkRandom): List<String> {
         val satoshis = random.nextInt(1_000_000).toLong()
         return when (random.nextInt(8)) {
             0 -> listOf("price", satoshis.toString(), "SAT")
@@ -233,7 +235,7 @@ internal object ListingFixtures {
         return "$whole.${fraction.toString().padStart(8, '0')}"
     }
 
-    private fun addUnknownTags(random: Random, index: Int, tags: MutableList<List<String>>) {
+    private fun addUnknownTags(random: JdkRandom, index: Int, tags: MutableList<List<String>>) {
         repeat(1 + random.nextInt(3)) {
             val name = UNKNOWN_NAMES[random.nextInt(UNKNOWN_NAMES.size)]
             val elements = 1 + random.nextInt(3)
@@ -249,7 +251,7 @@ internal object ListingFixtures {
      * thousand times. §4.1 forbids reordering tags on the way out and the id property is what would
      * catch a codec that did.
      */
-    private fun MutableList<List<String>>.shuffleTail(random: Random) {
+    private fun MutableList<List<String>>.shuffleTail(random: JdkRandom) {
         for (position in size - 1 downTo 1) {
             val other = random.nextInt(position + 1)
             val swap = this[position]
@@ -258,7 +260,7 @@ internal object ListingFixtures {
         }
     }
 
-    private fun hostile(random: Random, maxPieces: Int): String {
+    private fun hostile(random: JdkRandom, maxPieces: Int): String {
         val out = StringBuilder()
         repeat(random.nextInt(maxPieces + 1)) {
             out.append(HOSTILE_PIECES[random.nextInt(HOSTILE_PIECES.size)])

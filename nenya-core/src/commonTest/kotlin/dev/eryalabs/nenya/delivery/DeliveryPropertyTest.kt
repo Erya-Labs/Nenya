@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.delivery
 
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -34,6 +35,7 @@ class DeliveryPropertyTest {
         const val CROSS: Int = 120
     }
 
+    @JsName("every_generated_blob_verifies_through_both_steps_against_its_own_commitment")
     @Test
     fun `every generated blob verifies through both steps against its own commitment`() {
         val blobs = DeliveryFixtures.blobs(SAMPLES)
@@ -51,6 +53,7 @@ class DeliveryPropertyTest {
         assertEquals(SAMPLES, verified, "a verifier that refused everything cannot pass this")
     }
 
+    @JsName("every_generated_blob_is_refused_against_a_neighbour_s_commitment")
     @Test
     fun `every generated blob is refused against a neighbour's commitment`() {
         val blobs = DeliveryFixtures.blobs(SAMPLES)
@@ -80,6 +83,7 @@ class DeliveryPropertyTest {
         assertEquals(SAMPLES, refused, "a verifier that accepted everything cannot pass this")
     }
 
+    @JsName("every_generated_blob_s_plaintext_is_refused_against_a_neighbour_s_ox")
     @Test
     fun `every generated blob's plaintext is refused against a neighbour's ox`() {
         val blobs = DeliveryFixtures.blobs(SAMPLES)
@@ -104,6 +108,7 @@ class DeliveryPropertyTest {
         assertEquals(SAMPLES, refused, "a step-3 check that accepted everything cannot pass this")
     }
 
+    @JsName("no_blob_verifies_against_any_other_blob_s_commitment_in_either_step")
     @Test
     fun `no blob verifies against any other blob's commitment, in either step`() {
         val blobs = DeliveryFixtures.blobs(CROSS)
@@ -153,6 +158,7 @@ class DeliveryPropertyTest {
         assertEquals(CROSS * CROSS - CROSS, refusedPlaintext, "every off-diagonal pair, at step 3")
     }
 
+    @JsName("x_and_ox_are_never_interchangeable")
     @Test
     fun `x and ox are never interchangeable`() {
         val blobs = DeliveryFixtures.blobs(SAMPLES)
@@ -182,6 +188,7 @@ class DeliveryPropertyTest {
         assertEquals(SAMPLES, distinct)
     }
 
+    @JsName("every_generated_release_matches_its_own_commitment_on_all_four_operands_and_no_other")
     @Test
     fun `every generated release matches its own commitment on all four operands and no other`() {
         val blobs = DeliveryFixtures.blobs(CROSS)

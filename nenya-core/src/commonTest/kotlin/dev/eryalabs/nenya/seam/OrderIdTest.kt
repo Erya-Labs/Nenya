@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.seam
 
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -65,6 +66,7 @@ class OrderIdTest {
         }
     }
 
+    @JsName("two_orders_with_identical_coordinate_price_and_clock_reading_get_different_ids")
     @Test
     fun `two orders with identical coordinate, price and clock reading get different ids`() {
         val clock = FakeClock(FAR_PAST)
@@ -83,6 +85,7 @@ class OrderIdTest {
         assertNotEquals(first.toHex(), second.toHex())
     }
 
+    @JsName("minting_draws_exactly_thirty_two_bytes_in_one_call")
     @Test
     fun `minting draws exactly thirty-two bytes, in one call`() {
         val randomness = RecordingRandomness()
@@ -97,6 +100,7 @@ class OrderIdTest {
         )
     }
 
+    @JsName("the_default_randomness_mints_nothing_at_all")
     @Test
     fun `the default randomness mints nothing at all`() {
         val refused = assertFailsWith<SeamException> { OrderId.mint() }
@@ -109,6 +113,7 @@ class OrderIdTest {
         )
     }
 
+    @JsName("a_source_returning_thirty_one_bytes_is_refused_never_padded_out_to_length")
     @Test
     fun `a source returning thirty-one bytes is refused, never padded out to length`() {
         val refused = assertFailsWith<SeamException> { OrderId.mint(WrongLengthRandomness(31)) }
@@ -121,6 +126,7 @@ class OrderIdTest {
         )
     }
 
+    @JsName("a_source_returning_thirty_three_bytes_is_refused_never_truncated_to_length")
     @Test
     fun `a source returning thirty-three bytes is refused, never truncated to length`() {
         val refused = assertFailsWith<SeamException> { OrderId.mint(WrongLengthRandomness(33)) }
@@ -128,6 +134,7 @@ class OrderIdTest {
         assertEquals(SeamRejection.RANDOMNESS_WRONG_LENGTH, refused.reason)
     }
 
+    @JsName("a_source_returning_nothing_is_refused_and_not_treated_as_an_empty_id")
     @Test
     fun `a source returning nothing is refused, and not treated as an empty id`() {
         val refused = assertFailsWith<SeamException> { OrderId.mint(WrongLengthRandomness(0)) }
@@ -135,6 +142,7 @@ class OrderIdTest {
         assertEquals(SeamRejection.RANDOMNESS_WRONG_LENGTH, refused.reason)
     }
 
+    @JsName("a_clock_far_in_the_past_and_one_far_in_the_future_are_both_simply_used")
     @Test
     fun `a clock far in the past and one far in the future are both simply used`() {
         for (instant in listOf(FAR_PAST, FAR_FUTURE)) {
@@ -151,6 +159,7 @@ class OrderIdTest {
         }
     }
 
+    @JsName("an_order_id_never_appears_in_its_own_string_representation")
     @Test
     fun `an order id never appears in its own string representation`() {
         val id = OrderId.mint(RecordingRandomness())
@@ -167,6 +176,7 @@ class OrderIdTest {
         assertEquals(OrderId.HEX_LENGTH, hex.length)
     }
 
+    @JsName("a_minted_id_round_trips_through_its_canonical_lowercase_hex")
     @Test
     fun `a minted id round-trips through its canonical lowercase hex`() {
         val id = OrderId.mint(RecordingRandomness())
@@ -178,6 +188,7 @@ class OrderIdTest {
         assertTrue(id.bytes().contentEquals(OrderId.ofHex(hex).bytes()))
     }
 
+    @JsName("an_uppercase_order_id_is_accepted_and_normalised")
     @Test
     fun `an uppercase order id is accepted and normalised`() {
         val id = OrderId.mint(RecordingRandomness())
@@ -195,6 +206,7 @@ class OrderIdTest {
         assertEquals(hex, read.toHex(), "and the canonical form it emits is lowercase")
     }
 
+    @JsName("a_hex_order_id_of_the_wrong_length_is_refused_rather_than_padded")
     @Test
     fun `a hex order id of the wrong length is refused rather than padded`() {
         val hex = OrderId.mint(RecordingRandomness()).toHex()
@@ -209,6 +221,7 @@ class OrderIdTest {
         }
     }
 
+    @JsName("a_non_hex_order_id_is_refused_as_not_hex_which_is_a_different_fix_from_wrong_length")
     @Test
     fun `a non-hex order id is refused as not hex, which is a different fix from wrong length`() {
         val hex = OrderId.mint(RecordingRandomness()).toHex()
@@ -219,6 +232,7 @@ class OrderIdTest {
         assertEquals(SeamRejection.NOT_HEX, refused.reason)
     }
 
+    @JsName("a_rejection_message_never_carries_the_value_it_rejected")
     @Test
     fun `a rejection message never carries the value it rejected`() {
         val hex = OrderId.mint(RecordingRandomness()).toHex()
@@ -242,6 +256,7 @@ class OrderIdTest {
      * implementation that cycled through a handful of values; ten thousand from the pinned
      * generator would not.
      */
+    @JsName("ten_thousand_minted_ids_are_all_distinct_and_all_canonical")
     @Test
     fun `ten thousand minted ids are all distinct and all canonical`() {
         val randomness = RecordingRandomness()
@@ -264,6 +279,7 @@ class OrderIdTest {
     }
 
     /** A fixed source proves the id really is the bytes it was handed, and not a digest of them. */
+    @JsName("the_minted_id_is_exactly_the_bytes_the_source_provided")
     @Test
     fun `the minted id is exactly the bytes the source provided`() {
         val bytes = SeamFixtures.bytes(OrderId.BYTE_LENGTH, stream = 3L)
@@ -274,6 +290,7 @@ class OrderIdTest {
     }
 
     /** And it copies them, so the source cannot rewrite an id it already handed out. */
+    @JsName("the_minted_id_does_not_alias_the_source_s_array")
     @Test
     fun `the minted id does not alias the source's array`() {
         val bytes = SeamFixtures.bytes(OrderId.BYTE_LENGTH, stream = 4L)
@@ -296,6 +313,7 @@ class OrderIdTest {
      * `id.bytes()[0] = 0` silently rewrites an id that has already been put in an `["order", ...]`
      * tag, and two ids that were equal stop being equal.
      */
+    @JsName("the_bytes_handed_out_are_a_copy_so_a_caller_cannot_rewrite_an_id_it_was_given")
     @Test
     fun `the bytes handed out are a copy, so a caller cannot rewrite an id it was given`() {
         val id = OrderId.mint(RecordingRandomness())
@@ -322,6 +340,7 @@ class OrderIdTest {
      * collide. Two *different* order ids comparing equal is cross-thread confusion an attacker can
      * grind for, so the control is a near miss rather than a random pair.
      */
+    @JsName("two_ids_differing_by_a_single_nibble_are_not_equal_at_either_end_or_in_the_middle")
     @Test
     fun `two ids differing by a single nibble are not equal, at either end or in the middle`() {
         val id = OrderId.mint(RecordingRandomness())
@@ -360,6 +379,7 @@ class OrderIdTest {
      * this is the §7.4 correlation rule failing from the other end. `MessageDigest.isEqual` also
      * keeps the comparison constant-time, which a `contentHashCode` comparison does not.
      */
+    @JsName("two_distinct_ids_that_share_a_32_bit_content_hash_are_still_not_equal")
     @Test
     fun `two distinct ids that share a 32-bit content hash are still not equal`() {
         val plain = ByteArray(OrderId.BYTE_LENGTH)
@@ -394,6 +414,7 @@ class OrderIdTest {
      * the package ever puts an `OrderId` in a hash-based collection — while making every
      * `HashMap<OrderId, …>` silently miss every lookup.
      */
+    @JsName("equal_ids_hash_equally_so_an_order_id_can_key_a_hash_based_collection")
     @Test
     fun `equal ids hash equally, so an order id can key a hash-based collection`() {
         val id = OrderId.mint(RecordingRandomness())
@@ -413,6 +434,7 @@ class OrderIdTest {
      * The 10 000-sample distinctness floor above dedupes on `toHex` strings, so it never calls
      * `equals` at all. This runs the same claim through the equality relation itself.
      */
+    @JsName("ten_thousand_minted_ids_are_pairwise_distinct_under_equals_not_merely_under_their_hex")
     @Test
     fun `ten thousand minted ids are pairwise distinct under equals, not merely under their hex`() {
         val randomness = RecordingRandomness()

@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.seam
 
-import java.io.File
+import dev.eryalabs.nenya.VendoredFile
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -34,7 +35,7 @@ class Bip340FailClosedTest {
 
     private companion object {
 
-        const val VECTORS: String = "src/commonTest/resources/vectors/bip340-vectors.csv"
+        const val VECTORS: String = "nenya-core/src/commonTest/resources/vectors/bip340-vectors.csv"
 
         /** The BIP-340 reference vector file has nineteen data rows, nine of them valid. */
         const val EXPECTED_ROWS: Int = 19
@@ -44,16 +45,10 @@ class Bip340FailClosedTest {
         val rows: List<Bip340Row> by lazy { readVectors() }
 
         fun readVectors(): List<Bip340Row> {
-            val file = File(VECTORS)
-            if (!file.isFile) {
-                fail(
-                    "the vendored BIP-340 vectors were expected at ${file.absolutePath} but are not " +
-                        "there. The tests run with the module directory as the working directory; " +
-                        "this one is ${File(".").absoluteFile.normalize()}.",
-                )
-            }
+            // A missing path fails inside VendoredFile, naming every file that was generated.
+            val file = VendoredFile(VECTORS)
             val lines = file.readLines().filter { it.isNotBlank() }
-            assertTrue(lines.size >= 2, "${file.absolutePath} carries no data rows")
+            assertTrue(lines.size >= 2, "${file.location} carries no data rows")
 
             val headers = lines.first().split(",").map { it.trim() }
             fun column(name: String): Int = headers.indexOf(name).also {
@@ -92,8 +87,8 @@ class Bip340FailClosedTest {
         fun hex(text: String): ByteArray {
             assertTrue(text.length % 2 == 0, "a hex cell must have an even length; '$text' does not")
             return ByteArray(text.length / 2) { i ->
-                val high = Character.digit(text[2 * i], 16)
-                val low = Character.digit(text[2 * i + 1], 16)
+                val high = text[2 * i].digitToIntOrNull(16) ?: -1
+                val low = text[2 * i + 1].digitToIntOrNull(16) ?: -1
                 assertTrue(high >= 0 && low >= 0, "a hex cell must be hexadecimal")
                 ((high shl 4) or low).toByte()
             }
@@ -108,6 +103,7 @@ class Bip340FailClosedTest {
         val expectedValid: Boolean,
     )
 
+    @JsName("the_vectors_parse_by_column_name_all_nineteen_rows_of_them")
     @Test
     fun `the vectors parse by column name, all nineteen rows of them`() {
         assertEquals(
@@ -128,6 +124,7 @@ class Bip340FailClosedTest {
         )
     }
 
+    @JsName("every_valid_row_comes_back_unavailable_and_specifically_never_valid")
     @Test
     fun `every valid row comes back unavailable, and specifically never valid`() {
         val valid = rows.filter { it.expectedValid }
@@ -146,6 +143,7 @@ class Bip340FailClosedTest {
         }
     }
 
+    @JsName("every_invalid_row_comes_back_unavailable_too_and_specifically_not_invalid")
     @Test
     fun `every invalid row comes back unavailable too, and specifically not INVALID`() {
         val invalid = rows.filter { !it.expectedValid }
@@ -170,6 +168,7 @@ class Bip340FailClosedTest {
      * of "it never says valid". [OptimisticSecp256k1Ops] is an implementation of the same
      * interface that does say it, over the same vectors.
      */
+    @JsName("the_seam_type_can_express_a_verdict_so_the_default_s_refusal_to_give_one_means_something")
     @Test
     fun `the seam type can express a verdict, so the default's refusal to give one means something`() {
         val optimistic = OptimisticSecp256k1Ops()
@@ -181,6 +180,7 @@ class Bip340FailClosedTest {
         }
     }
 
+    @JsName("the_capability_surface_names_bip_340_verification_as_something_this_library_does_not_do")
     @Test
     fun `the capability surface names BIP-340 verification as something this library does not do`() {
         val answer = Secp256k1Ops.FAIL_CLOSED.verifySchnorr(

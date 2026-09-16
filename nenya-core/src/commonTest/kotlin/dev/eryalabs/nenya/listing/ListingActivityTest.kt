@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.listing
 import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.tag.NenyaKind
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -36,6 +37,7 @@ class ListingActivityTest {
         }
     }
 
+    @JsName("an_expired_listing_is_inactive_even_though_the_relay_served_it")
     @Test
     fun `an expired listing is inactive even though the relay served it`() {
         val listing = listing(DEADLINE)
@@ -49,6 +51,7 @@ class ListingActivityTest {
         assertEquals(ListingActivity.ACTIVE, listing.activity(clockAt(DEADLINE - 1)))
     }
 
+    @JsName("the_named_second_is_itself_expired")
     @Test
     fun `the named second is itself expired`() {
         val listing = listing(DEADLINE)
@@ -57,6 +60,7 @@ class ListingActivityTest {
         assertEquals(ListingActivity.ACTIVE, listing.activity(clockAt(DEADLINE - 1)))
     }
 
+    @JsName("with_no_clock_the_answer_is_cannot_say_and_never_active")
     @Test
     fun `with no clock the answer is cannot say, and never active`() {
         val listing = listing(DEADLINE)
@@ -85,6 +89,7 @@ class ListingActivityTest {
      * and every listing with an `expiration` read [ListingActivity.ACTIVE] under it — a deadline
      * reported unexpired on a reading nobody could trust. Zero is a real reading and is used.
      */
+    @JsName("a_clock_reading_before_1970_cannot_say_and_never_active_or_expired")
     @Test
     fun `a clock reading before 1970 cannot say, and never active or expired`() {
         for (reading in listOf(-1L, Long.MIN_VALUE)) {
@@ -108,6 +113,7 @@ class ListingActivityTest {
      * and answering "cannot say" would make every listing unusable to a client that injected no
      * clock for a question that was never asked.
      */
+    @JsName("a_listing_with_no_expiration_is_active_without_the_clock_being_consulted")
     @Test
     fun `a listing with no expiration is active without the clock being consulted`() {
         val listing = listing(expiration = null)
@@ -121,6 +127,7 @@ class ListingActivityTest {
      * of the injected clock gets the **opposite** answer in both directions. One direction alone
      * would survive the mutation half the time.
      */
+    @JsName("a_counterparty_s_created_at_decides_nothing")
     @Test
     fun `a counterparty's created_at decides nothing`() {
         // The author's clock is ahead of ours: `created_at` is past the deadline and the injected
@@ -141,6 +148,7 @@ class ListingActivityTest {
         )
     }
 
+    @JsName("activity_is_about_the_deadline_and_the_status_tag_is_a_separate_axis")
     @Test
     fun `activity is about the deadline and the status tag is a separate axis`() {
         val sold = ListingFixtures.with(ListingFixtures.minimalOffer(), listOf("status", "sold"))

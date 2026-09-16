@@ -8,6 +8,7 @@ import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.tag.TagLimits
 import dev.eryalabs.nenya.tag.TagRejection
 import dev.eryalabs.nenya.wire.EventId
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,6 +34,7 @@ class ListingCodecTest {
         val LISTING_KINDS: List<Int> = ListingFixtures.KINDS
     }
 
+    @JsName("the_derived_required_set_is_the_one_s5_3_marks_must_and_differs_across_the_two_kinds")
     @Test
     fun `the derived required set is the one §5_3 marks MUST, and differs across the two kinds`() {
         val onRequests = Listing.requiredTags(NenyaKind.REQUEST)
@@ -55,6 +57,7 @@ class ListingCodecTest {
         assertEquals(listOf("item", "g", "location"), Listing.forbiddenTags(NenyaKind.REQUEST))
     }
 
+    @JsName("removing_each_required_tag_in_turn_is_refused_naming_that_tag")
     @Test
     fun `removing each REQUIRED tag in turn is refused naming that tag`() {
         for (kind in LISTING_KINDS) {
@@ -78,6 +81,7 @@ class ListingCodecTest {
         }
     }
 
+    @JsName("a_request_with_no_alt_is_refused_and_an_offer_with_no_alt_is_accepted")
     @Test
     fun `a request with no alt is refused and an offer with no alt is accepted`() {
         val request = ListingFixtures.without(ListingFixtures.minimalRequest(), "alt")
@@ -93,6 +97,7 @@ class ListingCodecTest {
         assertNull(offer.alt)
     }
 
+    @JsName("the_t_row_needs_nenya_and_exactly_one_side_token")
     @Test
     fun `the t row needs nenya and exactly one side token`() {
         val request = ListingFixtures.minimalRequest()
@@ -126,6 +131,7 @@ class ListingCodecTest {
         assertEquals("t", tooFew.tag)
     }
 
+    @JsName("a_listing_whose_side_token_disagrees_with_its_kind_is_refused")
     @Test
     fun `a listing whose side token disagrees with its kind is refused`() {
         // Legal at the tag layer — §5.3 asks only for exactly one of the pair — and a §5.2
@@ -148,6 +154,7 @@ class ListingCodecTest {
         )
     }
 
+    @JsName("an_item_tag_on_a_listing_is_refused_as_a_self_reference_and_not_as_an_unknown_tag")
     @Test
     fun `an item tag on a listing is refused as a self-reference and not as an unknown tag`() {
         val tags = ListingFixtures.with(
@@ -177,6 +184,7 @@ class ListingCodecTest {
      * looked only at single-occurrence rows would name no tag at all: the stranger who published
      * the event would be choosing whether this library could say what was wrong with it.
      */
+    @JsName("two_item_tags_on_a_listing_are_still_refused_as_a_self_reference_naming_the_tag")
     @Test
     fun `two item tags on a listing are still refused as a self-reference, naming the tag`() {
         val tags = ListingFixtures.minimalOffer() + List(2) {
@@ -195,6 +203,7 @@ class ListingCodecTest {
         )
     }
 
+    @JsName("g_and_location_are_refused_naming_the_tag")
     @Test
     fun `g and location are refused, naming the tag`() {
         for (name in listOf("g", "location")) {
@@ -207,6 +216,7 @@ class ListingCodecTest {
         }
     }
 
+    @JsName("a_duplicated_single_occurrence_tag_is_refused_naming_duplication_in_both_orderings")
     @Test
     fun `a duplicated single-occurrence tag is refused naming duplication, in both orderings`() {
         for (pair in listOf(listOf("50000", "60000"), listOf("60000", "50000"))) {
@@ -225,6 +235,7 @@ class ListingCodecTest {
         }
     }
 
+    @JsName("an_encoding_column_refusal_keeps_the_s5_3_reason_on_the_cause")
     @Test
     fun `an Encoding-column refusal keeps the §5_3 reason on the cause`() {
         val malformed = ListingFixtures.without(ListingFixtures.minimalOffer(), "price") +
@@ -258,6 +269,7 @@ class ListingCodecTest {
      * well-formed event this version does not implement, and calling it malformed would tell the
      * user a conformant NIP-99 client is broken.
      */
+    @JsName("a_recurring_nip_99_price_is_refused_as_unsupported_and_not_as_malformed")
     @Test
     fun `a recurring NIP-99 price is refused as unsupported and not as malformed`() {
         val recurring = ListingFixtures.without(ListingFixtures.minimalOffer(), "price") +
@@ -272,6 +284,7 @@ class ListingCodecTest {
         assertEquals(TagRejection.UNSUPPORTED, (refused.cause as TagException).reason)
     }
 
+    @JsName("s4_3_s_fifth_bound_is_injected_and_enforced_as_reject_never_truncate")
     @Test
     fun `§4_3's fifth bound is injected and enforced as reject-never-truncate`() {
         val images = List(3) { listOf("image", "https://example.invalid/$it.png") }
@@ -291,6 +304,7 @@ class ListingCodecTest {
         assertEquals(TagRejection.LIMIT_EXCEEDED, (refused.cause as TagException).reason)
     }
 
+    @JsName("a_bid_and_an_order_rumor_are_not_listings")
     @Test
     fun `a bid and an order rumor are not listings`() {
         for (kind in listOf(NenyaKind.PUBLIC_BID, NenyaKind.ORDER_MESSAGE, NenyaKind.CHAT)) {
@@ -307,6 +321,7 @@ class ListingCodecTest {
         }
     }
 
+    @JsName("a_decoded_listing_reports_s5_3_s_values_its_coordinate_and_its_unknown_tags")
     @Test
     fun `a decoded listing reports §5_3's values, its coordinate and its unknown tags`() {
         val feeRecipient = TagFixtures.pubkeyFor(9)
@@ -365,6 +380,7 @@ class ListingCodecTest {
         assertNotNull(listing.alt)
     }
 
+    @JsName("decode_then_encode_reproduces_the_identical_event_unknown_tags_and_tag_order_included")
     @Test
     fun `decode then encode reproduces the identical event, unknown tags and tag order included`() {
         val tags = ListingFixtures.minimalRequest() + listOf(
@@ -396,6 +412,7 @@ class ListingCodecTest {
      * coordinate and a counterparty pubkey is the one somebody later pastes into a log, and the
      * seam, wire and delivery packages each carry this control.
      */
+    @JsName("nothing_prints_the_publisher_s_values")
     @Test
     fun `nothing prints the publisher's values`() {
         val dValue = "a-d-value-nobody-should-see"
@@ -428,6 +445,7 @@ class ListingCodecTest {
      * ordinary — and a coordinate built by splitting without a limit would silently address a
      * different event.
      */
+    @JsName("a_d_value_containing_a_colon_survives_into_the_coordinate")
     @Test
     fun `a d value containing a colon survives into the coordinate`() {
         val dValue = "batch:2026-09:lighthouse"

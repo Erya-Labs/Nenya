@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.tag.NenyaTags
 import dev.eryalabs.nenya.wire.EventId
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -33,6 +34,7 @@ class ListingPropertyTest {
 
     private val corpus = ListingFixtures.listings(SAMPLES)
 
+    @JsName("every_generated_listing_decodes_and_re_encodes_to_the_identical_event_id")
     @Test
     fun `every generated listing decodes and re-encodes to the identical event id`() {
         assertEquals(SAMPLES, corpus.size)
@@ -81,6 +83,7 @@ class ListingPropertyTest {
      * change the id. Without this, "the id was unchanged" would be a fact about a codec that had
      * nothing to drop.
      */
+    @JsName("dropping_an_unknown_tag_changes_the_event_id")
     @Test
     fun `dropping an unknown tag changes the event id`() {
         val fixture = corpus.first { it.tags.any { tag -> NenyaTags.byName(tag[0]) == null } }
@@ -100,6 +103,7 @@ class ListingPropertyTest {
      * stopped producing requests, or `status` tags, or `expiration` tags, would leave every
      * property above green over a corpus that exercised one branch ten thousand times.
      */
+    @JsName("the_corpus_covers_both_listing_sides_every_status_case_and_s5_6_s_deadline")
     @Test
     fun `the corpus covers both listing sides, every status case and §5_6's deadline`() {
         val decoded = corpus.map { ListingFixtures.decode(it) }
@@ -143,6 +147,7 @@ class ListingPropertyTest {
      * §5.6 over the whole corpus: every listing carrying a deadline answers `expired` after it and
      * `active` before it, and **none** of them answers `active` when the clock is silent.
      */
+    @JsName("every_deadline_in_the_corpus_is_evaluated_against_the_injected_clock_and_never_without_one")
     @Test
     fun `every deadline in the corpus is evaluated against the injected clock and never without one`() {
         var withDeadline = 0

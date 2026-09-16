@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.seam
 
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -41,6 +42,7 @@ class SeamAnswerRedactionTest {
             """{"order":"${SeamFixtures.lowerHex(SeamFixtures.bytes(32, stream = 21L))}","status":"paid"}"""
     }
 
+    @JsName("a_decrypted_plaintext_wrapped_in_provided_is_not_printed")
     @Test
     fun `a decrypted plaintext wrapped in Provided is not printed`() {
         val answer: SeamAnswer<String> = SeamAnswer.Provided(decryptedPlaintext)
@@ -54,6 +56,7 @@ class SeamAnswerRedactionTest {
         assertTrue(answer.toString().contains("redacted"))
     }
 
+    @JsName("the_order_id_inside_a_decrypted_plaintext_does_not_survive_the_wrapper_either")
     @Test
     fun `the order id inside a decrypted plaintext does not survive the wrapper either`() {
         val orderIdHex = SeamFixtures.lowerHex(SeamFixtures.bytes(32, stream = 21L))
@@ -66,6 +69,7 @@ class SeamAnswerRedactionTest {
         )
     }
 
+    @JsName("a_signature_and_a_public_key_wrapped_in_provided_are_not_printed")
     @Test
     fun `a signature and a public key wrapped in Provided are not printed`() {
         val signer = FakeSigner()
@@ -82,6 +86,7 @@ class SeamAnswerRedactionTest {
      * usable in a diagnostic rather than merely safe. A `toString` returning a constant would pass
      * every assertion above and tell a reader nothing.
      */
+    @JsName("the_redacted_form_still_names_the_type_it_is_holding")
     @Test
     fun `the redacted form still names the type it is holding`() {
         assertTrue(SeamAnswer.Provided("x").toString().contains("String"))
@@ -93,6 +98,7 @@ class SeamAnswerRedactionTest {
     }
 
     /** A null value must not blow up the diagnostic path — a `toString` may never throw. */
+    @JsName("a_null_value_is_named_rather_than_thrown_on")
     @Test
     fun `a null value is named rather than thrown on`() {
         val answer: SeamAnswer<String?> = SeamAnswer.Provided(null)
@@ -105,6 +111,7 @@ class SeamAnswerRedactionTest {
      * is read from, so it must stay legible — and it carries no caller input to leak, because its
      * detail is authored in this library.
      */
+    @JsName("an_unavailable_answer_stays_legible_and_still_echoes_no_input")
     @Test
     fun `an unavailable answer stays legible, and still echoes no input`() {
         val secret = decryptedPlaintext

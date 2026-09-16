@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.delivery
 
 import dev.eryalabs.nenya.SpecAnchor
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -27,6 +28,7 @@ class DeliveryVerificationTest {
 
     // ---------------------------------------------------------------- the external anchor
 
+    @JsName("the_vendored_nip_44_vectors_hash_to_the_digest_the_specification_publishes")
     @Test
     fun `the vendored NIP-44 vectors hash to the digest the specification publishes`() {
         val vectors = SpecAnchor.nip44VectorsFile()
@@ -41,6 +43,7 @@ class DeliveryVerificationTest {
         assertTrue(vectors.length() > 0L, "the vendored vector file must not be empty")
     }
 
+    @JsName("the_vendored_vectors_verify_as_the_served_blob_the_specification_s_digest_commits_to")
     @Test
     fun `the vendored vectors verify as the served blob the specification's digest commits to`() {
         val vectors = SpecAnchor.nip44VectorsFile()
@@ -64,6 +67,7 @@ class DeliveryVerificationTest {
 
     // ------------------------------------------------- §10.3, the four operands, one by one
 
+    @JsName("a_release_matching_on_all_four_operands_is_accepted")
     @Test
     fun `a release matching on all four operands is accepted`() {
         val blob = DeliveryFixtures.blob()
@@ -71,6 +75,7 @@ class DeliveryVerificationTest {
         blob.commitment.checkReleaseIdentity(blob.matchingRelease())
     }
 
+    @JsName("a_release_whose_file_type_diverges_is_rejected_naming_file_type")
     @Test
     fun `a release whose file-type diverges is rejected naming file-type`() {
         val blob = DeliveryFixtures.blob()
@@ -85,6 +90,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.FILE_TYPE_MISMATCH, refused.reason)
     }
 
+    @JsName("a_release_whose_file_type_differs_only_in_case_is_rejected_because_s10_3_says_byte_identical")
     @Test
     fun `a release whose file-type differs only in case is rejected, because §10_3 says byte-identical`() {
         val blob = DeliveryFixtures.blob()
@@ -104,6 +110,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.FILE_TYPE_MISMATCH, refused.reason)
     }
 
+    @JsName("a_release_whose_x_diverges_is_rejected_naming_the_served_hash")
     @Test
     fun `a release whose x diverges is rejected naming the served hash`() {
         val (blob, other) = DeliveryFixtures.blobs(2)
@@ -118,6 +125,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.SERVED_HASH_MISMATCH, refused.reason)
     }
 
+    @JsName("a_release_whose_ox_diverges_is_rejected_naming_the_plaintext_hash")
     @Test
     fun `a release whose ox diverges is rejected naming the plaintext hash`() {
         val (blob, other) = DeliveryFixtures.blobs(2)
@@ -132,6 +140,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.PLAINTEXT_HASH_MISMATCH, refused.reason)
     }
 
+    @JsName("a_release_whose_size_diverges_is_rejected_naming_size")
     @Test
     fun `a release whose size diverges is rejected naming size`() {
         val blob = DeliveryFixtures.blob()
@@ -151,6 +160,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("a_release_with_no_file_type_tag_is_refused_rather_than_skipped")
     @Test
     fun `a release with no file-type tag is refused rather than skipped`() {
         val blob = DeliveryFixtures.blob()
@@ -174,6 +184,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("a_commitment_with_no_mime_type_is_refused_where_it_is_built")
     @Test
     fun `a commitment with no MIME type is refused where it is built`() {
         val blob = DeliveryFixtures.blob()
@@ -186,6 +197,7 @@ class DeliveryVerificationTest {
 
     // ------------------------------------------------------------ §4.3, reading x and ox
 
+    @JsName("an_x_of_sixty_three_hex_characters_is_rejected_as_the_wrong_length_never_padded")
     @Test
     fun `an x of sixty-three hex characters is rejected as the wrong length, never padded`() {
         val blob = DeliveryFixtures.blob()
@@ -200,6 +212,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("an_x_of_sixty_five_hex_characters_is_rejected_as_the_wrong_length_never_truncated")
     @Test
     fun `an x of sixty-five hex characters is rejected as the wrong length, never truncated`() {
         val blob = DeliveryFixtures.blob()
@@ -208,6 +221,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.WRONG_LENGTH, refused.reason)
     }
 
+    @JsName("a_non_hex_x_is_rejected_as_not_hex")
     @Test
     fun `a non-hex x is rejected as not hex`() {
         val blob = DeliveryFixtures.blob()
@@ -217,6 +231,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.NOT_HEX, refused.reason)
     }
 
+    @JsName("an_uppercase_x_is_accepted_and_normalised")
     @Test
     fun `an uppercase x is accepted and normalised`() {
         val blob = DeliveryFixtures.blob()
@@ -233,6 +248,7 @@ class DeliveryVerificationTest {
         assertEquals(lower, upper.toHex(), "the canonical form is lowercase whatever it was read in")
     }
 
+    @JsName("tohex_emits_lowercase_checked_against_a_digest_this_test_hexed_itself")
     @Test
     fun `toHex emits lowercase, checked against a digest this test hexed itself`() {
         val blob = DeliveryFixtures.blob()
@@ -250,6 +266,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("an_uppercase_x_in_a_release_still_matches_a_lowercase_commitment")
     @Test
     fun `an uppercase x in a release still matches a lowercase commitment`() {
         val blob = DeliveryFixtures.blob()
@@ -263,6 +280,7 @@ class DeliveryVerificationTest {
         blob.commitment.checkReleaseIdentity(release)
     }
 
+    @JsName("a_negative_size_is_refused_on_both_the_commitment_and_the_release")
     @Test
     fun `a negative size is refused on both the commitment and the release`() {
         val blob = DeliveryFixtures.blob()
@@ -280,6 +298,7 @@ class DeliveryVerificationTest {
 
     // --------------------------------------------------------- §10.4, the two hash checks
 
+    @JsName("the_committed_blob_verifies_through_both_steps_and_reports_what_it_checked")
     @Test
     fun `the committed blob verifies through both steps and reports what it checked`() {
         val blob = DeliveryFixtures.blob()
@@ -300,6 +319,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("served_bytes_that_are_not_the_committed_blob_are_refused_at_the_first_step")
     @Test
     fun `served bytes that are not the committed blob are refused at the first step`() {
         val blob = DeliveryFixtures.blob()
@@ -313,6 +333,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.SERVED_BYTES_MISMATCH, refused.reason)
     }
 
+    @JsName("plaintext_that_hashes_to_x_rather_than_ox_is_refused_at_the_second_step")
     @Test
     fun `plaintext that hashes to x rather than ox is refused at the second step`() {
         val blob = DeliveryFixtures.blob()
@@ -328,6 +349,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.PLAINTEXT_BYTES_MISMATCH, refused.reason)
     }
 
+    @JsName("plaintext_from_another_blob_is_refused_at_the_second_step")
     @Test
     fun `plaintext from another blob is refused at the second step`() {
         val (blob, other) = DeliveryFixtures.blobs(2)
@@ -339,6 +361,7 @@ class DeliveryVerificationTest {
         assertEquals(DeliveryRejection.PLAINTEXT_BYTES_MISMATCH, refused.reason)
     }
 
+    @JsName("bytes_whose_length_disagrees_with_the_declared_size_are_refused_naming_size")
     @Test
     fun `bytes whose length disagrees with the declared size are refused naming size`() {
         val blob = DeliveryFixtures.blob()
@@ -359,6 +382,7 @@ class DeliveryVerificationTest {
         }
     }
 
+    @JsName("a_declared_size_above_the_injected_bound_is_refused_as_limit_exceeded_never_truncated")
     @Test
     fun `a declared size above the injected bound is refused as limit exceeded, never truncated`() {
         val blob = DeliveryFixtures.blob()
@@ -379,6 +403,7 @@ class DeliveryVerificationTest {
         assertEquals(blob.commitment.sizeBytes, served.servedBytesLength)
     }
 
+    @JsName("the_default_bound_is_the_one_used_when_none_is_injected")
     @Test
     fun `the default bound is the one used when none is injected`() {
         val blob = DeliveryFixtures.blob()
@@ -408,6 +433,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("the_bound_the_verification_ran_under_is_carried_on_the_evidence_not_just_a_flag")
     @Test
     fun `the bound the verification ran under is carried on the evidence, not just a flag`() {
         val blob = DeliveryFixtures.blob()
@@ -434,6 +460,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("a_zero_size_deliverable_is_representable_and_this_library_does_not_refuse_it")
     @Test
     fun `a zero-size deliverable is representable and this library does not refuse it`() {
         val empty = ByteArray(0)
@@ -462,6 +489,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("a_commitment_whose_x_equals_its_ox_is_representable_and_this_library_does_not_refuse_it")
     @Test
     fun `a commitment whose x equals its ox is representable and this library does not refuse it`() {
         val blob = DeliveryFixtures.blob()
@@ -490,6 +518,7 @@ class DeliveryVerificationTest {
 
     // ------------------------------------------------------------- §17, the honesty record
 
+    @JsName("the_evidence_names_the_gcm_authentication_it_did_not_perform")
     @Test
     fun `the evidence names the GCM authentication it did not perform`() {
         val blob = DeliveryFixtures.blob()
@@ -515,6 +544,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("the_two_check_sets_are_disjoint_and_together_cover_the_vocabulary")
     @Test
     fun `the two check sets are disjoint and together cover the vocabulary`() {
         val performed = DeliveryEvidence.CHECKS_PERFORMED_HERE
@@ -532,6 +562,7 @@ class DeliveryVerificationTest {
         )
     }
 
+    @JsName("the_published_check_sets_cannot_be_mutated_by_a_caller")
     @Test
     fun `the published check sets cannot be mutated by a caller`() {
         @Suppress("UNCHECKED_CAST")
@@ -545,6 +576,7 @@ class DeliveryVerificationTest {
 
     // ------------------------------------------------------ §12 / STOP RULE 14, the leak controls
 
+    @JsName("no_string_representation_carries_a_commitment_hash")
     @Test
     fun `no string representation carries a commitment hash`() {
         val blob = DeliveryFixtures.blob()
@@ -567,6 +599,7 @@ class DeliveryVerificationTest {
         }
     }
 
+    @JsName("a_rejection_message_never_echoes_the_hash_it_refused")
     @Test
     fun `a rejection message never echoes the hash it refused`() {
         val blob = DeliveryFixtures.blob()
@@ -585,6 +618,7 @@ class DeliveryVerificationTest {
 
     // ------------------------------------------------------------------- the arrays are safe
 
+    @JsName("mutating_the_caller_s_array_afterwards_does_not_change_a_hash_already_read")
     @Test
     fun `mutating the caller's array afterwards does not change a hash already read`() {
         val blob = DeliveryFixtures.blob()

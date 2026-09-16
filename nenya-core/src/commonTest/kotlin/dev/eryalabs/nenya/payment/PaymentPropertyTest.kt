@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.payment
 
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,8 +14,8 @@ import kotlin.test.assertTrue
  * direction alone rules out the other implementation, which is why "10 000 preimages verify"
  * would be a weak floor on its own.
  *
- * Every fixture comes from [PaymentFixtures] — a `java.util.Random` on a pinned seed, hashed
- * with `MessageDigest`. Nothing here is typed.
+ * Every fixture comes from [PaymentFixtures] — `java.util.Random`'s algorithm on a pinned seed,
+ * hashed with the platform's own SHA-256. Nothing here is typed.
  */
 class PaymentPropertyTest {
 
@@ -23,6 +24,7 @@ class PaymentPropertyTest {
         const val SAMPLES: Int = 10_000
     }
 
+    @JsName("every_sampled_preimage_verifies_against_its_own_payment_hash")
     @Test
     fun `every sampled preimage verifies against its own payment hash`() {
         val preimages = PaymentFixtures.preimages(SAMPLES)
@@ -51,6 +53,7 @@ class PaymentPropertyTest {
         assertEquals(SAMPLES, verified)
     }
 
+    @JsName("every_sampled_preimage_is_refused_against_a_different_fixture_s_payment_hash")
     @Test
     fun `every sampled preimage is refused against a different fixture's payment hash`() {
         val preimages = PaymentFixtures.preimages(SAMPLES)
@@ -69,6 +72,7 @@ class PaymentPropertyTest {
         assertEquals(SAMPLES, refused, "a verifier that accepted anything would not reach this count")
     }
 
+    @JsName("every_sampled_preimage_is_refused_in_uppercase_and_accepted_in_lowercase")
     @Test
     fun `every sampled preimage is refused in uppercase and accepted in lowercase`() {
         val hexes = PaymentFixtures.preimageHex(SAMPLES)

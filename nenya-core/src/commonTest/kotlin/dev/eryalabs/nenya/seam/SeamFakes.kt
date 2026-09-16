@@ -1,7 +1,7 @@
 package dev.eryalabs.nenya.seam
 
+import dev.eryalabs.nenya.JdkRandom
 import dev.eryalabs.nenya.money.Msat
-import java.util.Random
 
 /**
  * The fakes behind every seam test in this package, and the generator behind every value they
@@ -16,16 +16,17 @@ import java.util.Random
  *
  * Every fixture is **computed**, never typed. The queue's Definition of done forbids a hash, a
  * key, a signature or any other encoded value appearing in a test as a literal somebody wrote
- * out, so the bytes here come from a `java.util.Random` pinned to [SeamFixtures.SEED] and the
+ * out, so the bytes here come from `java.util.Random`'s algorithm ([JdkRandom]) pinned to
+ * [SeamFixtures.SEED] and the
  * hex from [SeamFixtures.lowerHex]. A reviewer can change the seed, re-run the suite, and every
  * property must still hold.
  */
 internal object SeamFixtures {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random`
-     * because its algorithm is specified by the JDK, so this file produces the same runs on any
-     * JVM a reviewer re-runs it on. It lives in the **test** tree; the ambient-effects sweep
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm ([JdkRandom]) rather
+     * than `kotlin.random` because it is specified by the JDK, so this file produces the same runs
+     * on any JVM a reviewer re-runs it on, and on JavaScript. It lives in the **test** tree; the ambient-effects sweep
      * forbids either of them under every production source root.
      */
     const val SEED: Long = 20260910L
@@ -53,7 +54,7 @@ internal object SeamFixtures {
     /** [count] bytes from the pinned generator, offset by [stream] so two runs differ. */
     fun bytes(count: Int, stream: Long = 0L): ByteArray {
         val out = ByteArray(count)
-        Random(SEED + stream).nextBytes(out)
+        JdkRandom(SEED + stream).nextBytes(out)
         return out
     }
 }
@@ -148,7 +149,7 @@ internal class FakeClock(private val unixSeconds: Long) : NenyaClock {
  */
 internal class RecordingRandomness(seed: Long = SeamFixtures.SEED) : Randomness {
 
-    private val random = Random(seed)
+    private val random = JdkRandom(seed)
     private val counts = mutableListOf<Int>()
 
     /** One entry per call, holding the byte count asked for. */
