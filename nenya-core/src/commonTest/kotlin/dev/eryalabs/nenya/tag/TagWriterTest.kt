@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.tag
 
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,6 +34,7 @@ class TagWriterTest {
 
     // ------------------------------------------------------------------------------ §4.4 price
 
+    @JsName("a_price_is_written_strictly_in_satoshis_with_exactly_the_sat_token")
     @Test
     fun `a price is written strictly, in satoshis, with exactly the SAT token`() {
         assertEquals(listOf("price", "50000", "SAT"), TagWriter.price(Msat.ofSat(50_000)))
@@ -46,6 +48,7 @@ class TagWriterTest {
     }
 
     /** §4.4's "Never lossy" on the way out: an amount that is not whole satoshis is refused, not rounded. */
+    @JsName("a_price_that_is_not_a_whole_number_of_satoshis_is_refused_as_lossy")
     @Test
     fun `a price that is not a whole number of satoshis is refused as lossy`() {
         val refused = refusal { TagWriter.price(Msat.ofMsat(1_500)) }
@@ -65,6 +68,7 @@ class TagWriterTest {
      * The defect this file exists for. §8.1's absence has no wire form: it is written by emitting
      * no `fee` tag, and the stated `["fee", "0"]` is a different, signed thing.
      */
+    @JsName("an_absent_fee_term_has_no_wire_form_and_is_refused_rather_than_written")
     @Test
     fun `an absent fee term has no wire form and is refused rather than written`() {
         val refused = refusal { TagWriter.fee(FeeTerm.Absent) }
@@ -79,6 +83,7 @@ class TagWriterTest {
         )
     }
 
+    @JsName("both_fee_arities_are_written_and_neither_is_written_for_the_other_s_term")
     @Test
     fun `both fee arities are written and neither is written for the other's term`() {
         val recipient = TagFixtures.pubkeyFor(3)
@@ -104,6 +109,7 @@ class TagWriterTest {
     }
 
     /** §4.3: lowercase hex on write, whatever case the caller is holding. */
+    @JsName("a_fee_recipient_is_written_in_lowercase_hex")
     @Test
     fun `a fee recipient is written in lowercase hex`() {
         val uppercase = TagFixtures.uppercasePubkeys.first()
@@ -120,6 +126,7 @@ class TagWriterTest {
 
     // -------------------------------------------------------- §4.3 timestamps, §5.3 tokens, §4.5
 
+    @JsName("a_timestamp_is_written_as_a_non_negative_decimal_and_a_negative_one_is_refused")
     @Test
     fun `a timestamp is written as a non-negative decimal and a negative one is refused`() {
         assertEquals(listOf("expiration", "1759592000"), TagWriter.timestamp("expiration", 1_759_592_000L))
@@ -135,6 +142,7 @@ class TagWriterTest {
      * write — because relay tag indexes are byte-exact, so `["t", "Nenya"]` is simply invisible to
      * the `{"#t": ["nenya"]}` filter §5.5 builds the whole board on.
      */
+    @JsName("a_topic_is_lowercased_on_write_and_refused_when_it_carries_whitespace")
     @Test
     fun `a topic is lowercased on write and refused when it carries whitespace`() {
         assertEquals(listOf("t", "nenya"), TagWriter.topic("Nenya"))
@@ -147,6 +155,7 @@ class TagWriterTest {
         )
     }
 
+    @JsName("the_version_and_d_tags_are_written_as_section_4_point_5_and_5_point_3_fix_them")
     @Test
     fun `the version and d tags are written as section 4 point 5 and 5 point 3 fix them`() {
         assertEquals(listOf("nenya", "1"), TagWriter.version(1))
@@ -157,6 +166,7 @@ class TagWriterTest {
 
     // ------------------------------------------------------------------------- the value types
 
+    @JsName("the_value_types_write_the_arities_section_5_point_3_gives_them")
     @Test
     fun `the value types write the arities section 5 point 3 gives them`() {
         val pubkey = TagFixtures.pubkeyFor(5)
@@ -182,6 +192,7 @@ class TagWriterTest {
     }
 
     /** §4.3 again, on the constructors rather than on the parsers: uppercase in, lowercase out. */
+    @JsName("the_value_types_normalise_hex_on_construction")
     @Test
     fun `the value types normalise hex on construction`() {
         val uppercase = TagFixtures.uppercasePubkeys[2]
@@ -202,6 +213,7 @@ class TagWriterTest {
      * written from — and re-publishes byte-identically, so a client that authored an event can
      * hand it on without the codec rewriting its own bytes.
      */
+    @JsName("a_listing_written_by_the_writer_reads_back_with_the_same_values")
     @Test
     fun `a listing written by the writer reads back with the same values`() {
         val recipient = TagFixtures.pubkeyFor(6)
@@ -241,6 +253,7 @@ class TagWriterTest {
      * result reads back as [FeeTerm.Absent] and not as a stated zero, which is the round trip the
      * defect above broke.
      */
+    @JsName("omitting_the_fee_tag_round_trips_as_absent_and_not_as_a_stated_zero")
     @Test
     fun `omitting the fee tag round-trips as absent and not as a stated zero`() {
         val withoutFee = TagFixtures.minimalRequest()

@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.tag
 
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.WireEvent
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -31,6 +32,7 @@ class TagPropertyTest {
 
     private val corpus = TagFixtures.fixtures(SAMPLES)
 
+    @JsName("every_generated_tag_set_reads_re_publishes_byte_identically_and_keeps_its_event_id")
     @Test
     fun `every generated tag set reads, re-publishes byte-identically and keeps its event id`() {
         assertEquals(SAMPLES, corpus.size)
@@ -95,6 +97,7 @@ class TagPropertyTest {
      * **does** change the id. Without this, "the id was unchanged" would be a fact about a codec
      * that had nothing to drop.
      */
+    @JsName("dropping_an_unknown_tag_changes_the_event_id")
     @Test
     fun `dropping an unknown tag changes the event id`() {
         val fixture = corpus.first { it.tags.any { tag -> NenyaTags.byName(tag[0]) == null } }
@@ -124,6 +127,7 @@ class TagPropertyTest {
      * points, would leave the property above green over a corpus that exercised one branch ten
      * thousand times.
      */
+    @JsName("the_corpus_covers_every_context_both_fee_arities_and_all_eight_unit_tokens")
     @Test
     fun `the corpus covers every context, both fee arities and all eight unit tokens`() {
         val tags = corpus.flatMap { it.tags }

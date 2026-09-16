@@ -1,12 +1,14 @@
 package dev.eryalabs.nenya.tag
 
+import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.TestText
+import dev.eryalabs.nenya.VendoredFile
 import dev.eryalabs.nenya.money.FeeTerm
+import dev.eryalabs.nenya.oracleSha256
+import dev.eryalabs.nenya.utf8Bytes
 import dev.eryalabs.nenya.wire.CheckedEvent
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.WireEvent
-import java.io.File
-import java.security.MessageDigest
-import java.util.Random
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -17,7 +19,8 @@ import kotlin.test.fail
  * a test as something somebody typed out, so no pubkey, coordinate or event id here is typed: the
  * generated pubkeys are SHA-256 digests of a per-index label, the uppercase ones come from the
  * vendored, externally-authored BIP-340 vector file, and every event id under test is computed by
- * `MessageDigest` inside T8. A reviewer can change [SEED], re-run the suite, and every property
+ * the platform's own SHA-256 ([oracleSha256]) inside T8. A reviewer can change [SEED], re-run the
+ * suite, and every property
  * must still hold.
  *
  * ### Why the corpus carries hostile strings and unknown tags
@@ -31,7 +34,8 @@ import kotlin.test.fail
 internal object TagFixtures {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random`, for the
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm ([JdkRandom], identical on
+     * the JVM and JavaScript) rather than `kotlin.random`, for the
      * reason `WireFixtures` gives: its algorithm is specified by the JDK, so this file produces
      * the same runs on any JVM a reviewer re-runs it on.
      */
@@ -40,7 +44,7 @@ internal object TagFixtures {
     /** A fixed, non-round timestamp, so a codec that emitted a constant would be visible. */
     const val CREATED_AT: Long = 1_767_225_600L
 
-    private const val BIP340_VECTORS: String = "src/commonTest/resources/vectors/bip340-vectors.csv"
+    private const val BIP340_VECTORS: String = "nenya-core/src/commonTest/resources/vectors/bip340-vectors.csv"
 
     /** The BIP-340 reference vector file has nineteen data rows. */
     private const val BIP340_ROWS: Int = 19
@@ -58,7 +62,7 @@ internal object TagFixtures {
         }
         add("é")
         add("中")
-        add(String(Character.toChars(0x1F600)))
+        add(TestText.codePoint(0x1F600))
         add("ordinary")
         add("wss://relay.example.invalid")
     }
@@ -69,14 +73,8 @@ internal object TagFixtures {
      * §4.3's accept-and-normalise control in one value.
      */
     val uppercasePubkeys: List<String> by lazy {
-        val file = File(BIP340_VECTORS)
-        if (!file.isFile) {
-            fail(
-                "the vendored BIP-340 vectors were expected at ${file.absolutePath} but are not " +
-                    "there. The tests run with the module directory as the working directory; " +
-                    "this one is ${File(".").absoluteFile.normalize()}.",
-            )
-        }
+        // A missing path fails inside VendoredFile, naming every file that was generated.
+        val file = VendoredFile(BIP340_VECTORS)
         val lines = file.readLines().filter { it.isNotBlank() }
         val headers = lines.first().split(",").map { it.trim() }
         val column = headers.indexOf("public key")
@@ -96,7 +94,7 @@ internal object TagFixtures {
 
     /** A generated 64-character lowercase-hex pubkey, unique per [index] and never typed. */
     fun pubkeyFor(index: Int): String =
-        lowerHex(MessageDigest.getInstance("SHA-256").digest("nenya-tag-fixture-$index".toByteArray()))
+        lowerHex(oracleSha256("nenya-tag-fixture-$index".utf8Bytes()))
 
     /** §4.3's canonical form: lowercase, unpadded. Written here so no test transcribes hex. */
     fun lowerHex(bytes: ByteArray): String {
@@ -195,7 +193,7 @@ internal object TagFixtures {
      * `TagPropertyTest` asserts the whole corpus reads before it asserts anything about ids.
      */
     fun fixtures(count: Int): List<Fixture> {
-        val random = Random(SEED)
+        val random = JdkRandom(SEED)
         return List(count) { index ->
             when (index % 3) {
                 0 -> listingFixture(random, index, NenyaKind.REQUEST)
@@ -205,7 +203,7 @@ internal object TagFixtures {
         }
     }
 
-    private fun listingFixture(random: Random, index: Int, kind: Int): Fixture {
+    private fun listingFixture(random: JdkRandom, index: Int, kind: Int): Fixture {
         val tags = mutableListOf<List<String>>()
         tags += listOf("d", "listing-$index-${hostile(random, 1)}")
         tags += listOf("title", hostile(random, 2))
@@ -221,7 +219,7 @@ internal object TagFixtures {
         return Fixture(TagContext.listing(kind), tags.toList(), hostile(random, 4), index)
     }
 
-    private fun bidFixture(random: Random, index: Int): Fixture {
+    private fun bidFixture(random: JdkRandom, index: Int): Fixture {
         val tags = mutableListOf<List<String>>()
         tags += priceTag(random)
         tags += listOf("t", "nenya")
@@ -234,7 +232,7 @@ internal object TagFixtures {
         return Fixture(TagContext.publicBid(), tags.toList(), hostile(random, 4), index)
     }
 
-    private fun addOptionalListingTags(random: Random, index: Int, tags: MutableList<List<String>>) {
+    private fun addOptionalListingTags(random: JdkRandom, index: Int, tags: MutableList<List<String>>) {
         if (random.nextBoolean()) tags += listOf("summary", hostile(random, 2))
         if (random.nextBoolean()) tags += listOf("published_at", (CREATED_AT - random.nextInt(99999)).toString())
         if (random.nextBoolean()) tags += listOf("status", if (random.nextBoolean()) "active" else "sold")
@@ -256,7 +254,7 @@ internal object TagFixtures {
     }
 
     /** §8.1's two arities, both generated, so neither is only ever exercised by a named control. */
-    private fun feeTag(random: Random, index: Int): List<String> {
+    private fun feeTag(random: JdkRandom, index: Int): List<String> {
         // Zero is drawn deliberately rather than left to a uniform 1-in-10001 chance. §8.1 says a
         // proposal SHOULD carry an explicit `["fee", "0"]` so that the absence of a fee is itself a
         // signed statement, which makes the two-element arity a common real case rather than an
@@ -266,7 +264,7 @@ internal object TagFixtures {
     }
 
     /** §4.4's eight permissive-read unit tokens, all of them, on satoshi-exact values. */
-    private fun priceTag(random: Random): List<String> {
+    private fun priceTag(random: JdkRandom): List<String> {
         val satoshis = random.nextInt(1_000_000).toLong()
         return when (random.nextInt(8)) {
             0 -> listOf("price", satoshis.toString(), "SAT")
@@ -287,7 +285,7 @@ internal object TagFixtures {
         return "$whole.${fraction.toString().padStart(8, '0')}"
     }
 
-    private fun addUnknownTags(random: Random, index: Int, tags: MutableList<List<String>>) {
+    private fun addUnknownTags(random: JdkRandom, index: Int, tags: MutableList<List<String>>) {
         repeat(1 + random.nextInt(3)) {
             val name = UNKNOWN_NAMES[random.nextInt(UNKNOWN_NAMES.size)]
             val elements = 1 + random.nextInt(3)
@@ -303,7 +301,7 @@ internal object TagFixtures {
      * thousand times. §4.1 forbids reordering tags on the way out, and the id property is what
      * would catch a codec that did.
      */
-    private fun MutableList<List<String>>.shuffleTail(random: Random) {
+    private fun MutableList<List<String>>.shuffleTail(random: JdkRandom) {
         for (position in size - 1 downTo 1) {
             val other = random.nextInt(position + 1)
             val swap = this[position]
@@ -312,7 +310,7 @@ internal object TagFixtures {
         }
     }
 
-    private fun hostile(random: Random, maxPieces: Int): String {
+    private fun hostile(random: JdkRandom, maxPieces: Int): String {
         val out = StringBuilder()
         repeat(random.nextInt(maxPieces + 1)) {
             out.append(HOSTILE_PIECES[random.nextInt(HOSTILE_PIECES.size)])

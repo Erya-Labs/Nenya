@@ -8,6 +8,7 @@ import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.tag.TagLimits
 import dev.eryalabs.nenya.tag.TagRejection
 import dev.eryalabs.nenya.wire.EventId
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -32,6 +33,7 @@ class BidCodecTest {
         val LISTING_KINDS: List<Int> = BidFixtures.LISTING_KINDS
     }
 
+    @JsName("the_required_set_is_s6_s_own_and_is_not_s5_3_s_listing_set")
     @Test
     fun `the required set is §6's own and is not §5_3's listing set`() {
         val required = Bid.requiredTags()
@@ -53,6 +55,7 @@ class BidCodecTest {
         }
     }
 
+    @JsName("removing_each_required_tag_in_turn_is_refused_naming_that_tag")
     @Test
     fun `removing each REQUIRED tag in turn is refused naming that tag`() {
         for (kind in LISTING_KINDS) {
@@ -83,6 +86,7 @@ class BidCodecTest {
      * everywhere would reject: "Applying the listing rules everywhere rejects this document's own
      * bid example, which legitimately carries a single `["t", "nenya"]` and no `wtb`/`wts`."
      */
+    @JsName("a_single_t_nenya_with_no_wtb_or_wts_parses_because_s5_3_s_cardinality_is_a_listing_rule")
     @Test
     fun `a single t nenya with no wtb or wts parses, because §5_3's cardinality is a listing rule`() {
         val tags = BidFixtures.minimalBid()
@@ -103,6 +107,7 @@ class BidCodecTest {
      * actually contains. An implementation that made it REQUIRED would refuse every open-ended bid
      * on the board.
      */
+    @JsName("a_bid_with_no_expiration_parses_and_is_flagged_open_ended_rather_than_refused")
     @Test
     fun `a bid with no expiration parses and is flagged open-ended rather than refused`() {
         val open = BidFixtures.decode(BidFixtures.minimalBid())
@@ -121,6 +126,7 @@ class BidCodecTest {
      * term from the tags — so a bid whose prose and tags disagree is a display defect, never a terms
      * dispute."
      */
+    @JsName("a_bid_whose_content_contradicts_its_tags_parses_with_every_term_taken_from_the_tags")
     @Test
     fun `a bid whose content contradicts its tags parses, with every term taken from the tags`() {
         val tags = BidFixtures.with(
@@ -142,6 +148,7 @@ class BidCodecTest {
      * separate, named local-policy refusal. T9 enforces it at the tag layer; this is the rule
      * reached through a second caller, which is where a policy check tends to be quietly added.
      */
+    @JsName("a_fee_of_9000_bps_parses_on_a_bid_and_10001_does_not")
     @Test
     fun `a fee of 9000 bps parses on a bid and 10001 does not`() {
         val recipient = TagFixtures.pubkeyFor(9)
@@ -167,6 +174,7 @@ class BidCodecTest {
      * Refused as *scoped by event id* and **not** as a missing `a` tag — the conflation an
      * implementer makes, and the one that loses §6's stated reason on the way to the user.
      */
+    @JsName("a_bid_scoped_by_event_id_is_refused_as_scoped_by_event_id_and_not_as_a_missing_a_tag")
     @Test
     fun `a bid scoped by event id is refused as scoped by event id and not as a missing a tag`() {
         val eventId = EventId.of(BidFixtures.checked(BidFixtures.minimalBid()).event).toHex()
@@ -196,6 +204,7 @@ class BidCodecTest {
      * rule — with §6's reason rather than as a shrug about a tag nobody recognised. It is a
      * legitimate NIP-22 event and simply not a Nenya bid; see [Bid]'s scope statement.
      */
+    @JsName("a_reply_whose_parent_is_an_event_id_is_refused_with_s6_s_reason_even_though_a_and_a_are_present")
     @Test
     fun `a reply whose parent is an event id is refused with §6's reason even though A and a are present`() {
         val parent = EventId.of(BidFixtures.checked(BidFixtures.minimalBid()).event).toHex()
@@ -208,6 +217,7 @@ class BidCodecTest {
     }
 
     /** §6: "`K` and `k` MUST both be present and MUST both equal the listing's kind as a decimal string." */
+    @JsName("k_or_k_disagreeing_with_the_coordinate_s_kind_is_refused")
     @Test
     fun `K or k disagreeing with the coordinate's kind is refused`() {
         for (name in listOf("K", "k")) {
@@ -235,6 +245,7 @@ class BidCodecTest {
     }
 
     /** §6: "`P` and `p` MUST both be present and MUST both equal the listing author's pubkey." */
+    @JsName("p_or_p_disagreeing_with_the_coordinate_s_pubkey_is_refused")
     @Test
     fun `P or p disagreeing with the coordinate's pubkey is refused`() {
         val somebodyElse = TagFixtures.pubkeyFor(42)
@@ -252,6 +263,7 @@ class BidCodecTest {
     }
 
     /** §6: both the uppercase and the lowercase scope tag "MUST be present". */
+    @JsName("a_present_with_a_absent_is_refused_naming_the_absent_one")
     @Test
     fun `A present with a absent is refused naming the absent one`() {
         val refused = assertFailsWith<BidException> {
@@ -272,6 +284,7 @@ class BidCodecTest {
      * tags carry the same values." Two different coordinates is a NIP-22 reply shape, which this
      * codec states it does not read rather than guessing which half the bidder meant.
      */
+    @JsName("a_and_a_naming_different_coordinates_on_a_top_level_bid_is_refused")
     @Test
     fun `A and a naming different coordinates on a top-level bid is refused`() {
         val elsewhere = "${NenyaKind.REQUEST}:${TagFixtures.pubkeyFor(43)}:some-other-listing"
@@ -288,6 +301,7 @@ class BidCodecTest {
      * and a second binding that could disagree with the first is precisely what §4.2 exists to
      * prevent". Refused for that reason and not as a tag nobody recognised.
      */
+    @JsName("an_item_tag_on_a_bid_is_refused_as_a_double_binding")
     @Test
     fun `an item tag on a bid is refused as a double binding`() {
         val tags = BidFixtures.with(
@@ -306,6 +320,7 @@ class BidCodecTest {
      * §6: "Bids are made **against requests** in the normal flow, and MAY also be made against
      * offers as a counter-offer... An implementation MUST support parsing both."
      */
+    @JsName("a_bid_parses_against_a_request_and_against_an_offer_alike")
     @Test
     fun `a bid parses against a request and against an offer alike`() {
         for (kind in LISTING_KINDS) {
@@ -317,6 +332,7 @@ class BidCodecTest {
     }
 
     /** §6 scopes a bid to a listing; a coordinate naming any other kind is not a shape §6 defines. */
+    @JsName("a_coordinate_naming_a_non_listing_kind_is_refused")
     @Test
     fun `a coordinate naming a non-listing kind is refused`() {
         val notAListing = "${NenyaKind.PUBLIC_BID}:${BidFixtures.listingAuthor()}:whatever"
@@ -333,6 +349,7 @@ class BidCodecTest {
      * §4.3's rationale, reaching NIP-22's rows: "First wins" and "last wins" are both defensible,
      * which is exactly the problem. Asserted for **both** orderings, so neither resolution passes.
      */
+    @JsName("a_duplicated_scope_tag_is_refused_for_both_orderings")
     @Test
     fun `a duplicated scope tag is refused for both orderings`() {
         val elsewhere = "${NenyaKind.REQUEST}:${TagFixtures.pubkeyFor(44)}:another-listing"
@@ -348,6 +365,7 @@ class BidCodecTest {
     }
 
     /** §4.3's duplicate rule as §5.3 states it, reaching a bid through the tag layer. */
+    @JsName("a_duplicated_price_is_refused_for_both_orderings_and_never_resolved")
     @Test
     fun `a duplicated price is refused for both orderings and never resolved`() {
         for (pair in listOf(listOf("90000", "5"), listOf("5", "90000"))) {
@@ -364,6 +382,7 @@ class BidCodecTest {
      * listing rule that MUST NOT be applied here. A `t` tag carrying something else is therefore a
      * *missing topic* and not a missing tag.
      */
+    @JsName("a_t_tag_that_is_not_nenya_is_refused_as_a_missing_topic")
     @Test
     fun `a t tag that is not nenya is refused as a missing topic`() {
         val tags = BidFixtures.replacing(BidFixtures.minimalBid(), "t", listOf("t", "ai-video"))
@@ -375,6 +394,7 @@ class BidCodecTest {
     }
 
     /** §5.3: `t` tokens SHOULD be matched case-insensitively on read, because tag indexes are byte-exact. */
+    @JsName("an_uppercase_t_token_is_still_the_nenya_discovery_token_on_read")
     @Test
     fun `an uppercase t token is still the nenya discovery token on read`() {
         val tags = BidFixtures.replacing(BidFixtures.minimalBid(), "t", listOf("t", "NENYA"))
@@ -390,6 +410,7 @@ class BidCodecTest {
      * authored BIP-340 vector file — which is uppercase in the file, so the fixture and the control
      * are the same value and nobody typed it.
      */
+    @JsName("an_uppercase_pubkey_in_the_coordinate_and_in_p_and_p_is_accepted_and_normalised")
     @Test
     fun `an uppercase pubkey in the coordinate and in P and p is accepted and normalised`() {
         val uppercase = TagFixtures.uppercasePubkeys.first()
@@ -415,6 +436,7 @@ class BidCodecTest {
     }
 
     /** §4.3: a value of the wrong length is rejected rather than padded or truncated. */
+    @JsName("a_p_tag_of_63_hex_characters_is_refused_as_the_wrong_length")
     @Test
     fun `a P tag of 63 hex characters is refused as the wrong length`() {
         val short = BidFixtures.listingAuthor().dropLast(1)
@@ -427,6 +449,7 @@ class BidCodecTest {
     }
 
     /** §5.3 makes `d` opaque, so a colon inside one is legal — and §4.2's split has a limit for it. */
+    @JsName("a_coordinate_whose_d_value_contains_a_colon_round_trips_intact")
     @Test
     fun `a coordinate whose d value contains a colon round-trips intact`() {
         val dValue = "series:2026:09:lighthouse"
@@ -439,6 +462,7 @@ class BidCodecTest {
     }
 
     /** §6's `fee` is optional, and §8.1's `Absent` is not the same value as a stated zero. */
+    @JsName("an_absent_fee_is_absent_and_a_stated_zero_is_a_stated_zero")
     @Test
     fun `an absent fee is Absent and a stated zero is a stated zero`() {
         assertEquals(FeeTerm.Absent, BidFixtures.decode(BidFixtures.minimalBid()).fee)
@@ -449,6 +473,7 @@ class BidCodecTest {
     }
 
     /** §4.3's fifth resource bound, injected because §4.3 says the bounds SHOULD be configurable. */
+    @JsName("more_image_tags_than_the_injected_bound_is_refused_as_limit_exceeded_never_truncated")
     @Test
     fun `more image tags than the injected bound is refused as limit exceeded, never truncated`() {
         val images = List(3) { listOf("image", "https://example.invalid/$it.png") }
@@ -464,6 +489,7 @@ class BidCodecTest {
     }
 
     /** §4.4's recurring NIP-99 form: **unsupported** on read, which is not the same as malformed. */
+    @JsName("a_recurring_nip_99_price_is_refused_as_unsupported_and_not_as_malformed")
     @Test
     fun `a recurring NIP-99 price is refused as unsupported and not as malformed`() {
         val tags = BidFixtures.replacing(
@@ -479,6 +505,7 @@ class BidCodecTest {
     }
 
     /** §6's required set MUST NOT be applied to a listing or to an order rumor, so the kind is checked. */
+    @JsName("an_event_that_is_not_a_kind_1111_is_refused_as_not_a_bid_kind")
     @Test
     fun `an event that is not a kind 1111 is refused as not a bid kind`() {
         val refused = assertFailsWith<BidException> {
@@ -490,6 +517,7 @@ class BidCodecTest {
     }
 
     /** §4.3's round-trip guarantee on the one fixture §6 prints, before the corpus proves it at scale. */
+    @JsName("decode_then_encode_reproduces_the_identical_event_id")
     @Test
     fun `decode then encode reproduces the identical event id`() {
         val tags = BidFixtures.with(BidFixtures.minimalBid(), listOf("x-unknown", "kept", "verbatim"))

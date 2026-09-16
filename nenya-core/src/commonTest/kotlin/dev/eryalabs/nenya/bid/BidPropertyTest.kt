@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.bid
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.tag.NenyaTags
 import dev.eryalabs.nenya.wire.EventId
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -32,6 +33,7 @@ class BidPropertyTest {
 
     private val corpus = BidFixtures.bids(SAMPLES)
 
+    @JsName("every_generated_bid_decodes_and_re_encodes_to_the_identical_event_id")
     @Test
     fun `every generated bid decodes and re-encodes to the identical event id`() {
         assertEquals(SAMPLES, corpus.size)
@@ -75,6 +77,7 @@ class BidPropertyTest {
      * change the id. Without this, "the id was unchanged" would be a fact about a codec that had
      * nothing to drop.
      */
+    @JsName("dropping_an_unknown_tag_changes_the_event_id")
     @Test
     fun `dropping an unknown tag changes the event id`() {
         val fixture = corpus.first { it.tags.any { tag -> NenyaTags.byName(tag[0]) == null } }
@@ -95,6 +98,7 @@ class BidPropertyTest {
      * A codec that compared coordinate **strings** rather than parsed coordinates fails on the
      * re-cased half; one that split the coordinate without a limit of three fails on the colons.
      */
+    @JsName("every_bid_in_the_corpus_resolves_to_the_listing_its_scope_tags_name")
     @Test
     fun `every bid in the corpus resolves to the listing its scope tags name`() {
         for (fixture in corpus) {
@@ -123,6 +127,7 @@ class BidPropertyTest {
      * stopped producing open-ended bids, or colons in `d`, or re-cased pubkeys, would leave every
      * property above green over a corpus that exercised one branch ten thousand times.
      */
+    @JsName("the_corpus_covers_all_three_listing_kinds_both_fee_arities_and_s6_s_open_ended_bid")
     @Test
     fun `the corpus covers all three listing kinds, both fee arities and §6's open-ended bid`() {
         val decoded = corpus.map { BidFixtures.decode(it) }

@@ -1,10 +1,11 @@
 package dev.eryalabs.nenya.bid
 
+import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.TestText
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.wire.CheckedEvent
-import java.util.Random
 
 /**
  * The generator behind every bid fixture in this package.
@@ -13,7 +14,8 @@ import java.util.Random
  * a test as something somebody typed out, so nothing here is: the pubkeys are SHA-256 digests of a
  * per-index label (`TagFixtures.pubkeyFor`), the uppercase ones come from the vendored,
  * externally-authored BIP-340 vector file, and every event id under test is computed by
- * `MessageDigest` inside T8. A reviewer can change [SEED], re-run the suite, and every property
+ * the platform's own SHA-256 inside T8. A reviewer can change [SEED], re-run the suite, and every
+ * property
  * must still hold.
  *
  * ### Why it is a third generator rather than T9's or T10's
@@ -39,7 +41,8 @@ import java.util.Random
 internal object BidFixtures {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random`, for the
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm ([JdkRandom], identical on
+     * the JVM and JavaScript) rather than `kotlin.random`, for the
      * reason `WireFixtures` gives: its algorithm is specified by the JDK, so this file produces the
      * same runs on any JVM a reviewer re-runs it on.
      */
@@ -71,7 +74,7 @@ internal object BidFixtures {
         }
         add("é")
         add("中")
-        add(String(Character.toChars(0x1F600)))
+        add(TestText.codePoint(0x1F600))
         add("ordinary")
         add("wss://relay.example.invalid")
     }
@@ -154,11 +157,11 @@ internal object BidFixtures {
      * `BidPropertyTest` asserts the whole corpus decodes before it asserts anything about ids.
      */
     fun bids(count: Int): List<Fixture> {
-        val random = Random(SEED)
+        val random = JdkRandom(SEED)
         return List(count) { index -> bid(random, index, LISTING_KINDS[index % LISTING_KINDS.size]) }
     }
 
-    private fun bid(random: Random, index: Int, listingKind: Int): Fixture {
+    private fun bid(random: JdkRandom, index: Int, listingKind: Int): Fixture {
         val author = TagFixtures.pubkeyFor(index + AUTHOR_OFFSET)
         // §5.3 makes `d` opaque and only requires it be non-empty, so a colon inside one is legal —
         // and is the case §4.2's three-field split with a limit exists for. Drawn deliberately
@@ -191,10 +194,10 @@ internal object BidFixtures {
     }
 
     /** A scope tag with NIP-22's optional relay hint present or absent — both arities are legal. */
-    private fun scopeTag(random: Random, name: String, value: String): List<String> =
+    private fun scopeTag(random: JdkRandom, name: String, value: String): List<String> =
         if (random.nextBoolean()) listOf(name, value, RELAY_HINT) else listOf(name, value)
 
-    private fun addOptionalTags(random: Random, index: Int, tags: MutableList<List<String>>) {
+    private fun addOptionalTags(random: JdkRandom, index: Int, tags: MutableList<List<String>>) {
         // §6 makes `expiration` a SHOULD, so roughly a third of the corpus carries none: the
         // open-ended bid is a conformant shape and has to be in the corpus, or the property below
         // proves nothing about the one control an over-strict codec fails.
@@ -215,14 +218,14 @@ internal object BidFixtures {
     }
 
     /** §8.1's two arities, both generated, with zero drawn deliberately rather than by chance. */
-    private fun feeTag(random: Random, index: Int): List<String> {
+    private fun feeTag(random: JdkRandom, index: Int): List<String> {
         val bps = if (random.nextInt(4) == 0) 0 else 1 + random.nextInt(FeeTerm.MAX_BASIS_POINTS)
         return if (bps == 0) listOf("fee", "0")
         else listOf("fee", bps.toString(), TagFixtures.pubkeyFor(index + FEE_RECIPIENT_OFFSET))
     }
 
     /** §4.4's eight permissive-on-read unit tokens, all of them, on satoshi-exact values. */
-    private fun priceTag(random: Random): List<String> {
+    private fun priceTag(random: JdkRandom): List<String> {
         val satoshis = random.nextInt(1_000_000).toLong()
         return when (random.nextInt(8)) {
             0 -> listOf("price", satoshis.toString(), "SAT")
@@ -243,7 +246,7 @@ internal object BidFixtures {
         return "$whole.${fraction.toString().padStart(8, '0')}"
     }
 
-    private fun addUnknownTags(random: Random, index: Int, tags: MutableList<List<String>>) {
+    private fun addUnknownTags(random: JdkRandom, index: Int, tags: MutableList<List<String>>) {
         repeat(1 + random.nextInt(3)) {
             val name = UNKNOWN_NAMES[random.nextInt(UNKNOWN_NAMES.size)]
             val elements = 1 + random.nextInt(3)
@@ -260,7 +263,7 @@ internal object BidFixtures {
      * Every tag here may sit anywhere — §6 fixes no order and §4.1 forbids *changing* one — and the
      * id property is what would catch a codec that sorted or normalised on the way out.
      */
-    private fun MutableList<List<String>>.shuffleAll(random: Random) {
+    private fun MutableList<List<String>>.shuffleAll(random: JdkRandom) {
         for (position in size - 1 downTo 1) {
             val other = random.nextInt(position + 1)
             val swap = this[position]
@@ -269,7 +272,7 @@ internal object BidFixtures {
         }
     }
 
-    private fun hostile(random: Random, maxPieces: Int): String {
+    private fun hostile(random: JdkRandom, maxPieces: Int): String {
         val out = StringBuilder()
         repeat(random.nextInt(maxPieces + 1)) {
             out.append(HOSTILE_PIECES[random.nextInt(HOSTILE_PIECES.size)])

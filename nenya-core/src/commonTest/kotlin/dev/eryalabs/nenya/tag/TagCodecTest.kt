@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.MoneyException
 import dev.eryalabs.nenya.money.MoneyRejection
 import dev.eryalabs.nenya.money.Msat
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,6 +34,7 @@ class TagCodecTest {
 
     // ---------------------------------------------------------------- the two worked examples
 
+    @JsName("the_specification_s_own_worked_request_and_offer_read")
     @Test
     fun `the specification's own worked request and offer read`() {
         val read = TagFixtures.read(TagFixtures.minimalRequest(), request)
@@ -59,6 +61,7 @@ class TagCodecTest {
      * and no `wtb`/`wts`. §6 repeats it: "a single `["t", "nenya"]`, with no `wtb`/`wts`, is
      * correct on a bid, as the example above shows."
      */
+    @JsName("a_single_t_nenya_is_correct_on_a_bid_and_refused_on_a_listing")
     @Test
     fun `a single t nenya is correct on a bid and refused on a listing`() {
         val bidTags = TagFixtures.minimalBid()
@@ -80,6 +83,7 @@ class TagCodecTest {
     }
 
     /** The cardinality gate again, one rule further in: two `t` tags, neither naming a side. */
+    @JsName("a_listing_with_two_topics_and_no_side_token_is_refused")
     @Test
     fun `a listing with two topics and no side token is refused`() {
         val tags = TagFixtures.minimalRequest()
@@ -91,6 +95,7 @@ class TagCodecTest {
     }
 
     /** §5.3 matches `t` tokens case-insensitively on read, because relay tag indexes are byte-exact. */
+    @JsName("topic_matching_is_case_insensitive_on_read_and_the_verbatim_token_is_kept")
     @Test
     fun `topic matching is case-insensitive on read and the verbatim token is kept`() {
         val tags = TagFixtures.minimalRequest()
@@ -103,6 +108,7 @@ class TagCodecTest {
         assertEquals(listOf("nenya", "wtb"), read.normalisedTopics)
     }
 
+    @JsName("a_listing_carrying_both_side_tokens_is_refused")
     @Test
     fun `a listing carrying both side tokens is refused`() {
         val tags = TagFixtures.minimalRequest()
@@ -118,6 +124,7 @@ class TagCodecTest {
      * the first, the last or the smallest. Both orderings of two different values are asserted, so
      * neither a first-wins nor a last-wins implementation can pass.
      */
+    @JsName("a_duplicate_price_is_refused_in_both_orderings")
     @Test
     fun `a duplicate price is refused in both orderings`() {
         for (pair in listOf(
@@ -143,6 +150,7 @@ class TagCodecTest {
      * §4.3's duplicate rule is about signed events rather than about listings, so it is enforced
      * outside a listing too — where §5.3's *presence* rules deliberately are not.
      */
+    @JsName("a_duplicate_price_is_refused_on_a_bid_as_well_as_on_a_listing")
     @Test
     fun `a duplicate price is refused on a bid as well as on a listing`() {
         val tags = TagFixtures.minimalBid()
@@ -151,6 +159,7 @@ class TagCodecTest {
         assertEquals(TagRejection.DUPLICATE_TAG, refusal { TagFixtures.read(tags, bid) }.reason)
     }
 
+    @JsName("a_tag_marked_zero_or_n_may_repeat")
     @Test
     fun `a tag marked zero-or-n may repeat`() {
         val tags = TagFixtures.minimalRequest()
@@ -169,6 +178,7 @@ class TagCodecTest {
      * §8.1 and T2's log are both explicit: `Absent` is a case and not a zero. A codec that
      * collapsed them destroys "the absence of a fee is itself a signed statement".
      */
+    @JsName("a_stated_zero_fee_and_a_missing_fee_tag_are_different_values")
     @Test
     fun `a stated zero fee and a missing fee tag are different values`() {
         val stated = TagFixtures.read(TagFixtures.minimalRequest().also { it += listOf("fee", "0") }, request)
@@ -183,6 +193,7 @@ class TagCodecTest {
     }
 
     /** §8.1: a three-element zero-bps fee and a two-element non-zero fee "are both malformed". */
+    @JsName("both_wrong_fee_arities_are_refused_as_arity")
     @Test
     fun `both wrong fee arities are refused as arity`() {
         val withRecipientAtZero = TagFixtures.minimalRequest()
@@ -207,6 +218,7 @@ class TagCodecTest {
      * a local policy limit "MUST NOT be applied on read", and reporting one as a malformed fee tag
      * would make a legal peer look broken.
      */
+    @JsName("ten_thousand_and_one_bps_is_refused_and_nine_thousand_is_accepted")
     @Test
     fun `ten thousand and one bps is refused and nine thousand is accepted`() {
         val above = TagFixtures.minimalRequest()
@@ -222,6 +234,7 @@ class TagCodecTest {
         assertEquals(TagFixtures.pubkeyFor(4), TagFixtures.read(legal, request).feeRecipient)
     }
 
+    @JsName("a_fee_recipient_is_read_in_either_case_and_normalised")
     @Test
     fun `a fee recipient is read in either case and normalised`() {
         val uppercase = TagFixtures.uppercasePubkeys.first()
@@ -236,6 +249,7 @@ class TagCodecTest {
      * caller its peer is broken when the peer in fact asked for more than 100%, which is the
      * confusion §8.1's "never make a legal peer look broken" clause is about, in reverse.
      */
+    @JsName("a_fee_value_too_long_to_parse_is_refused_as_above_the_maximum")
     @Test
     fun `a fee value too long to parse is refused as above the maximum`() {
         val tags = TagFixtures.minimalRequest()
@@ -244,6 +258,7 @@ class TagCodecTest {
         assertEquals(TagRejection.BPS_ABOVE_MAXIMUM, refusal { TagFixtures.read(tags, request) }.reason)
     }
 
+    @JsName("a_fee_in_a_non_canonical_decimal_form_is_refused")
     @Test
     fun `a fee in a non-canonical decimal form is refused`() {
         val tags = TagFixtures.minimalRequest().also { it += listOf("fee", "0250", TagFixtures.pubkeyFor(4)) }
@@ -262,6 +277,7 @@ class TagCodecTest {
      * "MUST be treated as **unsupported** on read" — which is a different answer from malformed,
      * because a recurring-price NIP-99 listing is well formed and simply not implemented here.
      */
+    @JsName("the_nip_99_recurring_price_form_is_unsupported_and_not_malformed")
     @Test
     fun `the NIP-99 recurring price form is unsupported and not malformed`() {
         val tags = TagFixtures.minimalRequest()
@@ -271,6 +287,7 @@ class TagCodecTest {
         assertEquals(TagRejection.UNSUPPORTED, refusal { TagFixtures.read(tags, request) }.reason)
     }
 
+    @JsName("a_two_element_price_is_refused_as_arity")
     @Test
     fun `a two-element price is refused as arity`() {
         val tags = TagFixtures.minimalRequest()
@@ -281,6 +298,7 @@ class TagCodecTest {
     }
 
     /** §4.4's permissive-on-read list, all eight tokens, each normalised to millisatoshis. */
+    @JsName("all_eight_permissive_unit_tokens_are_accepted_and_normalised")
     @Test
     fun `all eight permissive unit tokens are accepted and normalised`() {
         val expected = Msat.ofSat(50_000)
@@ -304,6 +322,7 @@ class TagCodecTest {
         }
     }
 
+    @JsName("a_unit_token_outside_the_eight_is_refused_as_an_unknown_unit")
     @Test
     fun `a unit token outside the eight is refused as an unknown unit`() {
         for (unit in listOf("Sat", "mSat", "msats", "USD", "")) {
@@ -326,6 +345,7 @@ class TagCodecTest {
      * The paired positive control is the multiple of 1000 immediately below it, so the rejection
      * is about the precision and not about the unit.
      */
+    @JsName("an_msat_price_that_is_not_a_whole_satoshi_is_refused_as_lossy")
     @Test
     fun `an msat price that is not a whole satoshi is refused as lossy`() {
         val lossy = TagFixtures.minimalRequest()
@@ -347,6 +367,7 @@ class TagCodecTest {
     }
 
     /** The same rule from the `BTC` side: finer than a millisatoshi, and finer than a satoshi. */
+    @JsName("a_btc_price_finer_than_a_satoshi_is_refused_as_lossy")
     @Test
     fun `a BTC price finer than a satoshi is refused as lossy`() {
         for (value in listOf("0.000000000001", "0.000000005")) {
@@ -358,6 +379,7 @@ class TagCodecTest {
         }
     }
 
+    @JsName("a_price_above_the_bitcoin_supply_is_refused_as_above_supply")
     @Test
     fun `a price above the bitcoin supply is refused as above supply`() {
         val tags = TagFixtures.minimalRequest()
@@ -369,6 +391,7 @@ class TagCodecTest {
         assertEquals(MoneyRejection.ABOVE_SUPPLY, (refused.cause as MoneyException).reason)
     }
 
+    @JsName("a_price_that_is_not_a_decimal_at_all_is_refused_as_a_malformed_amount")
     @Test
     fun `a price that is not a decimal at all is refused as a malformed amount`() {
         for (value in listOf("-1", "1e6", "+1", "50 000", "٥٠", "")) {
@@ -391,6 +414,7 @@ class TagCodecTest {
      * three survives one. An unbounded split truncates the address to its first segment, and every
      * reference to that listing then addresses a different event.
      */
+    @JsName("a_coordinate_whose_d_value_contains_colons_round_trips_intact")
     @Test
     fun `a coordinate whose d value contains colons round-trips intact`() {
         val dValue = "season:2:episode:7"
@@ -402,6 +426,7 @@ class TagCodecTest {
         assertEquals(value, coordinate.toTagValue())
     }
 
+    @JsName("an_empty_d_value_is_refused_in_a_coordinate_and_in_a_d_tag")
     @Test
     fun `an empty d value is refused, in a coordinate and in a d tag`() {
         assertEquals(
@@ -424,6 +449,7 @@ class TagCodecTest {
      * Both fixtures are the same externally-authored value: the BIP-340 vectors are uppercase in
      * the file, so the normalisation control and the fixture cannot drift apart.
      */
+    @JsName("a_coordinate_pubkey_of_63_characters_is_refused_as_the_wrong_length")
     @Test
     fun `a coordinate pubkey of 63 characters is refused as the wrong length`() {
         val uppercase = TagFixtures.uppercasePubkeys[1]
@@ -437,6 +463,7 @@ class TagCodecTest {
         assertEquals("${NenyaKind.REQUEST}:${uppercase.lowercase()}:d", accepted.toTagValue())
     }
 
+    @JsName("a_coordinate_pubkey_that_is_not_hex_is_refused_as_not_hex")
     @Test
     fun `a coordinate pubkey that is not hex is refused as not hex`() {
         val notHex = "g".repeat(64)
@@ -446,6 +473,7 @@ class TagCodecTest {
         )
     }
 
+    @JsName("a_coordinate_with_fewer_than_three_fields_is_refused_as_arity")
     @Test
     fun `a coordinate with fewer than three fields is refused as arity`() {
         assertEquals(
@@ -454,6 +482,7 @@ class TagCodecTest {
         )
     }
 
+    @JsName("a_coordinate_kind_in_a_non_canonical_form_is_refused")
     @Test
     fun `a coordinate kind in a non-canonical form is refused`() {
         assertEquals(
@@ -466,6 +495,7 @@ class TagCodecTest {
 
     // ------------------------------------------------------------------------- §5.3's item tag
 
+    @JsName("an_item_tag_is_required_on_a_proposal_and_on_a_private_bid_and_forbidden_elsewhere")
     @Test
     fun `an item tag is required on a proposal and on a private bid, and forbidden elsewhere`() {
         val read = TagFixtures.read(TagFixtures.minimalProposal(), proposal)
@@ -490,6 +520,7 @@ class TagCodecTest {
         assertEquals(TagRejection.FORBIDDEN_TAG, refusal { TagFixtures.read(onListing, request) }.reason)
     }
 
+    @JsName("two_item_tags_are_a_rejection_everywhere")
     @Test
     fun `two item tags are a rejection everywhere`() {
         val tags = TagFixtures.minimalProposal().also { it += listOf("item", TagFixtures.coordinate(index = 5), "1") }
@@ -497,6 +528,7 @@ class TagCodecTest {
         assertEquals(TagRejection.DUPLICATE_TAG, refusal { TagFixtures.read(tags, proposal) }.reason)
     }
 
+    @JsName("an_item_quantity_other_than_the_string_one_is_refused")
     @Test
     fun `an item quantity other than the string one is refused`() {
         for (quantity in listOf("2", "01", "1.0", "")) {
@@ -515,6 +547,7 @@ class TagCodecTest {
 
     // ------------------------------------------------------------------------ §5.3's image tag
 
+    @JsName("an_image_that_is_not_an_https_url_is_refused")
     @Test
     fun `an image that is not an https URL is refused`() {
         for (url in listOf(
@@ -543,6 +576,7 @@ class TagCodecTest {
      *
      * A *present* third element is still held to the `<width>x<height>` form the column fixes.
      */
+    @JsName("an_image_tag_is_read_in_both_arities_and_a_malformed_dimension_is_refused")
     @Test
     fun `an image tag is read in both arities and a malformed dimension is refused`() {
         val twoElement = TagFixtures.minimalRequest()
@@ -573,6 +607,7 @@ class TagCodecTest {
     }
 
     /** §4.3's fifth bound, the one T8 left to this package: reject, never truncate. */
+    @JsName("the_sixty_fifth_image_tag_is_refused_as_limit_exceeded_and_sixty_four_are_accepted")
     @Test
     fun `the sixty-fifth image tag is refused as limit exceeded, and sixty-four are accepted`() {
         fun listingWith(images: Int) = TagFixtures.minimalRequest().also { tags ->
@@ -587,6 +622,7 @@ class TagCodecTest {
     }
 
     /** §4.3 says the bounds SHOULD be configurable, so the bound is injected and a test can pin it. */
+    @JsName("the_image_bound_is_injected")
     @Test
     fun `the image bound is injected`() {
         val tags = TagFixtures.minimalRequest().also { list ->
@@ -611,6 +647,7 @@ class TagCodecTest {
      * offer — so the *same* tag set is a rejection under one listing kind and legal under another,
      * which is the whole content of the conditional row.
      */
+    @JsName("alt_is_required_on_a_request_and_optional_on_an_offer")
     @Test
     fun `alt is required on a request and optional on an offer`() {
         val withoutAlt = TagFixtures.minimalRequest().also { tags -> tags.removeAll { it[0] == "alt" } }
@@ -622,6 +659,7 @@ class TagCodecTest {
         assertNull(TagFixtures.read(TagFixtures.minimalOffer(), offer).alt)
     }
 
+    @JsName("every_must_row_is_enforced_on_a_listing_and_none_of_them_on_a_bid")
     @Test
     fun `every MUST row is enforced on a listing and none of them on a bid`() {
         for (name in listOf("d", "title", "price", "nenya")) {
@@ -639,6 +677,7 @@ class TagCodecTest {
         assertNull(TagFixtures.read(TagFixtures.minimalBid(), bid).title)
     }
 
+    @JsName("g_and_location_are_refused_on_a_listing")
     @Test
     fun `g and location are refused on a listing`() {
         for (name in listOf("g", "location")) {
@@ -659,6 +698,7 @@ class TagCodecTest {
      * value is carried through untouched rather than parsed into a location this library would
      * then be holding, and §4.3's round-trip rule keeps it byte-identical.
      */
+    @JsName("g_and_location_outside_a_listing_are_carried_through_rather_than_refused")
     @Test
     fun `g and location outside a listing are carried through rather than refused`() {
         val tags = TagFixtures.minimalBid()
@@ -677,6 +717,7 @@ class TagCodecTest {
 
     // ---------------------------------------------------------------------- §4.3's timestamps
 
+    @JsName("a_timestamp_that_is_not_a_non_negative_decimal_integer_is_refused")
     @Test
     fun `a timestamp that is not a non-negative decimal integer is refused`() {
         for (value in listOf("-1", "1.5", "1e9", "+1757000000", "now", "")) {
@@ -695,6 +736,7 @@ class TagCodecTest {
 
     // ------------------------------------------------------------------------ §4.3's unknown tags
 
+    @JsName("unknown_tags_are_ignored_on_read_and_kept_verbatim")
     @Test
     fun `unknown tags are ignored on read and kept verbatim`() {
         val unknown = listOf("client", "some-client", "0.1")
@@ -707,6 +749,7 @@ class TagCodecTest {
 
     // ------------------------------------------------------------------------- the context itself
 
+    @JsName("reading_an_event_under_the_wrong_kind_is_refused")
     @Test
     fun `reading an event under the wrong kind is refused`() {
         val checked = TagFixtures.checked(TagFixtures.minimalRequest(), NenyaKind.REQUEST)
@@ -718,6 +761,7 @@ class TagCodecTest {
         )
     }
 
+    @JsName("a_context_must_name_a_type_for_a_kind_sixteen_and_must_not_elsewhere")
     @Test
     fun `a context must name a type for a kind sixteen and must not elsewhere`() {
         assertEquals(
@@ -739,6 +783,7 @@ class TagCodecTest {
      * MUST NOT map an unknown `type` onto the nearest known one — so a context has to be able to
      * name a type this library does not model in order to ignore it correctly.
      */
+    @JsName("a_context_may_name_an_order_message_type_this_library_does_not_implement")
     @Test
     fun `a context may name an order message type this library does not implement`() {
         val context = TagContext.orderMessage(99)
@@ -758,6 +803,7 @@ class TagCodecTest {
      * debugging `toString` somebody adds later is what this control is for — the same one T5
      * carries for the order id and T3 for the preimage.
      */
+    @JsName("no_tag_value_leaks_through_a_string_representation")
     @Test
     fun `no tag value leaks through a string representation`() {
         val counterparty = TagFixtures.pubkeyFor(1)
