@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.order
 
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -36,6 +37,7 @@ class TransitionTableTest {
      * before any equality is claimed of them. A restructured §11.2, a moved heading or a
      * missing data file would otherwise satisfy every assertion below.
      */
+    @JsName("the_specification_parse_yields_a_non_zero_number_of_transitions")
     @Test
     fun `the specification parse yields a non-zero number of transitions`() {
         assertTrue(
@@ -44,6 +46,7 @@ class TransitionTableTest {
         )
     }
 
+    @JsName("the_transcribed_file_yields_a_non_zero_number_of_transitions")
     @Test
     fun `the transcribed file yields a non-zero number of transitions`() {
         assertTrue(file.isNotEmpty(), "the transcribed §11.2 table carries no data lines")
@@ -53,6 +56,7 @@ class TransitionTableTest {
      * Set equality alone would let a duplicated line hide: two copies of one transition and
      * a missing one are indistinguishable once both are collapsed into a set.
      */
+    @JsName("no_transition_is_transcribed_twice")
     @Test
     fun `no transition is transcribed twice`() {
         val duplicates = file.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
@@ -65,6 +69,7 @@ class TransitionTableTest {
      * The headline. Both directions, over `(spec line, from, to)` triples, so the line
      * numbers a reviewer diffs by eye are inside the proof rather than beside it.
      */
+    @JsName("the_transcription_equals_section_11_2_triple_for_triple")
     @Test
     fun `the transcription equals section 11 2 triple for triple`() {
         val transcribed = file.toSet()
@@ -87,6 +92,7 @@ class TransitionTableTest {
      * today and asserted separately because the two could drift apart if the file ever
      * carried a transition the specification states on more than one line.
      */
+    @JsName("the_transcription_equals_section_11_2_pair_for_pair")
     @Test
     fun `the transcription equals section 11 2 pair for pair`() {
         assertEquals(
@@ -100,6 +106,7 @@ class TransitionTableTest {
      * without running anything, so they are checked literally as well as structurally: the
      * named line really does carry both tokens.
      */
+    @JsName("each_transcribed_line_number_carries_its_own_two_tokens_in_the_specification")
     @Test
     fun `each transcribed line number carries its own two tokens in the specification`() {
         for (transition in file) {
@@ -124,6 +131,7 @@ class TransitionTableTest {
      * so a typo cannot enter the table unnoticed — it would otherwise sit there as a legal
      * transition to a state that does not exist.
      */
+    @JsName("every_transcribed_token_is_a_section_11_1_state_genesis_excepted")
     @Test
     fun `every transcribed token is a section 11 1 state, genesis excepted`() {
         val known = Section11.states.keys
@@ -143,6 +151,7 @@ class TransitionTableTest {
     }
 
     /** A destination is always a state. The genesis marker belongs in the from-column only. */
+    @JsName("the_genesis_marker_never_appears_as_a_destination")
     @Test
     fun `the genesis marker never appears as a destination`() {
         assertTrue(file.none { it.to == Section11.GENESIS }, "§11.2 transitions *into* states")
@@ -154,6 +163,7 @@ class TransitionTableTest {
      * `(state × event)` cross-product cannot cover — it has no from-state to enumerate — and
      * a second one appearing silently would leave an edge outside both proofs.
      */
+    @JsName("the_genesis_row_is_the_only_one_without_a_from_state")
     @Test
     fun `the genesis row is the only one without a from-state`() {
         val genesis = file.filter { it.from == Section11.GENESIS }
@@ -167,6 +177,7 @@ class TransitionTableTest {
      * the transcribed table at all. T7 proves the transition function honours that; this
      * proves the table T7 is measured against does not contradict it in the first place.
      */
+    @JsName("no_terminal_state_originates_a_transition")
     @Test
     fun `no terminal state originates a transition`() {
         val terminal = Section11.states.filterValues { it }.keys
@@ -180,6 +191,7 @@ class TransitionTableTest {
      * checkable: it carries no token, so it appears in neither column of a table whose every
      * token is a §11.1 state. Nothing may transition into it and nothing may leave it.
      */
+    @JsName("the_unknown_sink_appears_in_neither_column")
     @Test
     fun `the unknown sink appears in neither column`() {
         val tokens = file.flatMap { listOf(it.from, it.to) }.toSet()

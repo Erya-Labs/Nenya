@@ -19,7 +19,8 @@ import kotlin.test.fail
  * The fixtures behind every transition test, and the generator behind every value they carry.
  *
  * Not a scratch file. Nothing here is typed: preimages come from the payment package's pinned
- * `java.util.Random` and their payment hashes from `MessageDigest`; blobs and their `x` / `ox`
+ * `java.util.Random` algorithm ([dev.eryalabs.nenya.JdkRandom]) and their payment hashes from the
+ * platform SHA-256 (`MessageDigest` on the JVM); blobs and their `x` / `ox`
  * come from the delivery package's generator. Both are reused rather than re-implemented, so a
  * reviewer changing either seed re-runs this file too.
  *
@@ -91,7 +92,8 @@ internal object OrderFixtures {
 
     /**
      * A `VerifiedPayment` for [payee], built the only way one can be: a generated preimage, its
-     * `SHA-256` computed by `MessageDigest`, and `VerifiedPayment.verify` comparing the two.
+     * `SHA-256` computed by the platform oracle (`MessageDigest` on the JVM), and
+     * `VerifiedPayment.verify` comparing the two.
      *
      * @param stream picks a distinct preimage per payee, so no two receipts in one order share
      *   evidence.
@@ -104,7 +106,7 @@ internal object OrderFixtures {
     /** One generated preimage from the payment package's pinned run. Never typed. */
     fun preimage(stream: Int = 0): Preimage = PaymentFixtures.preimages(stream + 1)[stream]
 
-    /** `SHA-256(preimage)`, computed by `MessageDigest` in the payment package's own fixture. */
+    /** `SHA-256(preimage)`, computed by the platform oracle in the payment package's own fixture. */
     fun paymentHashOf(preimage: Preimage): PaymentHash = PaymentFixtures.paymentHashOf(preimage)
 
     /** One verified receipt per payee in [payees], each with its own preimage. */

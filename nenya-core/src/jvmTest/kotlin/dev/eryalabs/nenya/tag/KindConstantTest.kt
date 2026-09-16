@@ -24,8 +24,14 @@ import kotlin.test.assertTrue
  * twice — for a line that closes a block comment, and for a block comment that opens and closes on
  * one line, both of which it used to discard whole — and a second copy would start out with both
  * defects.
+ *
+ * ### Where these tests run
+ *
+ * The two source sweeps read the main source roots from disk through `java.io.File`, so they run
+ * on the JVM only. The spec anchor (the value itself) is in [PortableKindConstantTest] in `src/commonTest`,
+ * which this class extends, so it keeps its `KindConstantTest` name and runs on JavaScript as well.
  */
-class KindConstantTest {
+class KindConstantTest : PortableKindConstantTest() {
 
     private companion object {
 
@@ -42,16 +48,6 @@ class KindConstantTest {
                     .filter { (_, line) -> REQUEST_KIND_LITERAL.containsMatchIn(line) }
                     .map { (number, line) -> "${file.path}:$number — $line" }
             }
-    }
-
-    @Test
-    fun `the request kind is the one the specification decided`() {
-        assertEquals(
-            Section53.requestKind(),
-            NenyaKind.REQUEST,
-            "§5.2 closed `OPEN-1` on this value and Appendix B forbids it changing after the " +
-                "first public release; read from ${Section53.specPath()}",
-        )
     }
 
     @Test

@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.order
 
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -32,6 +33,7 @@ class OrderStateTest {
      * The enum is exhaustive over §11.1's table: no state missing, none invented. Set
      * equality in both directions, against a parse rather than against a list written here.
      */
+    @JsName("the_enum_is_exhaustive_over_section_11_1_s_ten_states")
     @Test
     fun `the enum is exhaustive over section 11 1's ten states`() {
         val fromSpec = Section11.states.keys
@@ -40,6 +42,7 @@ class OrderStateTest {
     }
 
     /** Each canonical token reads to a state and writes back to the identical token. */
+    @JsName("every_section_11_1_token_round_trips_through_the_codec")
     @Test
     fun `every section 11 1 token round-trips through the codec`() {
         for (token in Section11.states.keys) {
@@ -54,6 +57,7 @@ class OrderStateTest {
     }
 
     /** Which states are terminal is §11.1's decision, read from §11.1's own meaning cells. */
+    @JsName("terminal_states_are_exactly_the_ones_section_11_1_marks_terminal")
     @Test
     fun `terminal states are exactly the ones section 11 1 marks terminal`() {
         val terminalInSpec = Section11.states.filterValues { it }.keys
@@ -64,6 +68,7 @@ class OrderStateTest {
         )
     }
 
+    @JsName("isrecognised_agrees_with_carrying_a_token")
     @Test
     fun `isRecognised agrees with carrying a token`() {
         for (state in OrderState.entries) {
@@ -79,6 +84,7 @@ class OrderStateTest {
      * matter — an unknown token read as `paid` or `settled` is an order reporting money it
      * never verified.
      */
+    @JsName("an_unrecognised_token_reads_as_the_sink_and_never_as_the_nearest_known_state")
     @Test
     fun `an unrecognised token reads as the sink and never as the nearest known state`() {
         val strangers = listOf(
@@ -98,6 +104,7 @@ class OrderStateTest {
      * nothing to emit for it, and a sentinel string here would put an eleventh token within
      * reach of anything writing a `status` tag.
      */
+    @JsName("the_sink_carries_no_token_and_cannot_be_emitted")
     @Test
     fun `the sink carries no token and cannot be emitted`() {
         assertNull(OrderState.UNKNOWN.token)
@@ -107,6 +114,7 @@ class OrderStateTest {
     }
 
     /** The sink is not a terminal outcome. §11.1 marks four states terminal and this is not one. */
+    @JsName("the_sink_is_not_marked_terminal")
     @Test
     fun `the sink is not marked terminal`() {
         assertFalse(OrderState.UNKNOWN.isTerminal)
@@ -122,6 +130,7 @@ class OrderStateTest {
      * The list is parsed out of §11.1 rather than written here, so a revision reserving a
      * fifth token extends this control automatically.
      */
+    @JsName("every_reserved_token_reads_as_the_sink_and_is_emittable_by_nothing_here")
     @Test
     fun `every reserved token reads as the sink and is emittable by nothing here`() {
         val reserved = Section11.reservedTokens
@@ -144,6 +153,7 @@ class OrderStateTest {
      * checked beside it: a codec that accepted the whole GammaMarkets vocabulary would pass
      * a test that only looked at `cancelled`.
      */
+    @JsName("the_four_disjoint_gammamarkets_tokens_read_as_the_sink_and_cancelled_reads_as_the_order_state")
     @Test
     fun `the four disjoint GammaMarkets tokens read as the sink and cancelled reads as the order state`() {
         for (token in listOf("pending", "confirmed", "processing", "completed")) {
@@ -163,6 +173,7 @@ class OrderStateTest {
      * order ended before `paid` — so reading it here yields the *order* state, and it is the
      * caller's business never to hand this codec a listing status in the first place.
      */
+    @JsName("the_listing_vocabulary_does_not_decode_with_the_order_state_codec")
     @Test
     fun `the listing vocabulary does not decode with the order-state codec`() {
         for (token in listOf("active", "awarded", "fulfilled", "sold")) {
@@ -181,6 +192,7 @@ class OrderStateTest {
      * mixed-case token is not silently normalised into a state: folding it would be the
      * nearest-known-state mapping §11.1 forbids, arriving through the side door.
      */
+    @JsName("a_token_of_the_wrong_case_is_not_normalised_into_a_state")
     @Test
     fun `a token of the wrong case is not normalised into a state`() {
         val variants = Section11.states.keys.flatMap { token ->
@@ -197,6 +209,7 @@ class OrderStateTest {
     }
 
     /** Surrounding whitespace is not trimmed away into a match, for the same reason. */
+    @JsName("a_padded_token_is_not_trimmed_into_a_state")
     @Test
     fun `a padded token is not trimmed into a state`() {
         for (token in Section11.states.keys) {
@@ -214,6 +227,7 @@ class OrderStateTest {
      * some state for everything fails every control above. This pins both ends in one place
      * so neither degenerate reader can pass by coincidence.
      */
+    @JsName("the_reader_is_neither_always_unknown_nor_never_unknown")
     @Test
     fun `the reader is neither always-unknown nor never-unknown`() {
         val recognised = Section11.states.keys.map { OrderStatusCodec.read(it) }

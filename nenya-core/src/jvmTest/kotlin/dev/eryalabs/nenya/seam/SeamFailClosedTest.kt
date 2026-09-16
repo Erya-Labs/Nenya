@@ -37,8 +37,15 @@ import kotlin.test.fail
  * and invalid". The mutation that proves it: make a default return a [SeamAnswer.Provided]
  * carrying a negative verdict and these tests turn red, which is them testing this task's own
  * rule rather than a VISION rule.
+ *
+ * ### Where these tests run
+ *
+ * The sweep is `java.lang.reflect` over the compiled seam package, so it runs on the JVM only. The
+ * one test here that needs no reflection (the fakes answer) is in [PortableSeamFailClosedTest] in
+ * `src/commonTest`, which this class extends, so it keeps its `SeamFailClosedTest` name and runs on
+ * JavaScript as well.
  */
-class SeamFailClosedTest {
+class SeamFailClosedTest : PortableSeamFailClosedTest() {
 
     private companion object {
 
@@ -383,29 +390,5 @@ class SeamFailClosedTest {
                     "later task can prove anything about without a device, a network or a keystore.",
             )
         }
-    }
-
-    /**
-     * And the fakes are not fail-closed themselves — they answer. A test tree full of fakes that
-     * all said `Unavailable` would make every assertion above true of a type that cannot say
-     * anything else.
-     */
-    @Test
-    fun `the fakes answer, so unavailable is a choice the defaults make rather than the only option`() {
-        assertEquals("", FakeSigner().nip44Encrypt("", "").provided())
-        assertEquals(
-            RelayAcknowledgement.CLAIMS_ACCEPTED,
-            FakeRelayTransport().publish("{}").provided(),
-        )
-        assertEquals(
-            WalletPaymentState.CLAIMS_SETTLED,
-            LyingWallet("00").payInvoice(SeamFixtures.NOT_AN_INVOICE).provided().state,
-        )
-        assertEquals(0L, FakeClock(0L).now().provided())
-        assertEquals(4, RecordingRandomness().randomBytes(4).provided().size)
-        assertEquals(
-            SignatureVerdict.VALID,
-            OptimisticSecp256k1Ops().verifySchnorr(ByteArray(32), ByteArray(32), ByteArray(64)).provided(),
-        )
     }
 }

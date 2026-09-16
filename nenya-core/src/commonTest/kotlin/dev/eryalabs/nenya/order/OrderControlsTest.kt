@@ -15,6 +15,7 @@ import dev.eryalabs.nenya.seam.LyingWallet
 import dev.eryalabs.nenya.seam.SeamFixtures
 import dev.eryalabs.nenya.seam.WalletPaymentState
 import dev.eryalabs.nenya.seam.provided
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -45,6 +46,7 @@ class OrderControlsTest {
      * specification's own worked order (Appendix A, step 6) illegal. Revision `1.1` was worded
      * that way; this is the test that says `1.2` is not.
      */
+    @JsName("a_fee_bearing_order_reaches_awaiting_payment_and_then_paid")
     @Test
     fun `a fee-bearing order reaches awaiting_payment and then paid`() {
         val terms = OrderFixtures.TERMS
@@ -76,6 +78,7 @@ class OrderControlsTest {
      * invoice per **named** payee passes a naive cross-product test — every event it knows about
      * still works — and deadlocks every such order into `expired`.
      */
+    @JsName("a_zero_fee_order_reaches_paid_with_no_fee_invoice_and_no_fee_receipt")
     @Test
     fun `a zero-fee order reaches paid with no fee invoice and no fee receipt`() {
         val terms = OrderFixtures.zeroFeeTerms
@@ -100,6 +103,7 @@ class OrderControlsTest {
     }
 
     /** §8.6 and §8.3: a fee request for an expected amount of `0` MUST be rejected, not ignored. */
+    @JsName("a_zero_fee_order_refuses_a_fee_payment_request_and_a_fee_receipt")
     @Test
     fun `a zero-fee order refuses a fee payment request and a fee receipt`() {
         val orders = OrderFixtures.orders(OrderFixtures.zeroFeeTerms)
@@ -125,6 +129,7 @@ class OrderControlsTest {
      * §8.1 — a `type=1` with **no** `fee` tag opens an order at zero fee and MUST NOT be refused
      * as incomplete terms. Every fee invoice for it MUST subsequently be refused.
      */
+    @JsName("a_proposal_with_no_fee_tag_opens_at_zero_fee_and_is_not_refused_as_incomplete")
     @Test
     fun `a proposal with no fee tag opens at zero fee and is not refused as incomplete`() {
         val terms = OrderFixtures.absentFeeTerms
@@ -145,6 +150,7 @@ class OrderControlsTest {
     }
 
     /** A required receipt still outstanding leaves the order where it was, with a named reason. */
+    @JsName("an_incomplete_receipt_set_leaves_the_order_awaiting_payment")
     @Test
     fun `an incomplete receipt set leaves the order awaiting_payment`() {
         val orders = OrderFixtures.orders()
@@ -167,6 +173,7 @@ class OrderControlsTest {
      * version of. §9.2 check 1 would also catch it and needs a persisted `type=2` store this
      * library does not have; this check needs only the arithmetic already done here.
      */
+    @JsName("one_payment_offered_as_evidence_for_both_payees_is_refused")
     @Test
     fun `one payment offered as evidence for both payees is refused`() {
         val preimage = OrderFixtures.preimage()
@@ -195,6 +202,7 @@ class OrderControlsTest {
      * whichever happens to be written first: "one payment claimed twice" is the more serious
      * fact and the one a user needs told.
      */
+    @JsName("a_shared_payment_is_named_as_such_even_when_the_payee_is_also_unrequired")
     @Test
     fun `a shared payment is named as such even when the payee is also unrequired`() {
         val preimage = OrderFixtures.preimage()
@@ -213,6 +221,7 @@ class OrderControlsTest {
     }
 
     /** §8.6 is one invoice per payee, so two receipts for one role are not a duplicate. */
+    @JsName("two_receipts_for_the_same_payee_are_refused")
     @Test
     fun `two receipts for the same payee are refused`() {
         val orders = OrderFixtures.orders()
@@ -238,6 +247,7 @@ class OrderControlsTest {
      * Enumerated over all eleven states and all three keys rather than spot-checked, because that
      * is what the sentence says. §7.4's reserved `type=4` rides along: v1 MUST ignore it on read.
      */
+    @JsName("a_private_bid_a_chat_message_and_a_type_4_advance_nothing_from_every_state")
     @Test
     fun `a private bid, a chat message and a type=4 advance nothing from every state`() {
         val orders = OrderFixtures.orders()
@@ -275,6 +285,7 @@ class OrderControlsTest {
      * time well past `deliver_by` and the injected clock says otherwise; the order does not move
      * until the clock does.
      */
+    @JsName("the_release_deadline_fires_on_the_injected_clock_and_never_on_a_counterparty_s_created_at")
     @Test
     fun `the release deadline fires on the injected clock and never on a counterparty's created_at`() {
         val paid = OrderFixtures.orders().getValue(OrderState.PAID)
@@ -303,6 +314,7 @@ class OrderControlsTest {
     }
 
     /** §11.2's `→ expired` rows, on the same clock and with the same refusal before it passes. */
+    @JsName("the_acceptance_deadline_fires_only_once_the_injected_clock_passes_it")
     @Test
     fun `the acceptance deadline fires only once the injected clock passes it`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
@@ -327,6 +339,7 @@ class OrderControlsTest {
      * not expire against an ambient clock either, which is the failure this refusal exists to make
      * impossible.
      */
+    @JsName("a_fail_closed_clock_expires_nothing_and_says_so")
     @Test
     fun `a fail-closed clock expires nothing and says so`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
@@ -347,6 +360,7 @@ class OrderControlsTest {
      * came back `DEADLINE_NOT_PASSED` — the right state for the wrong reason, which is exactly what
      * asserting the reason rather than the state catches.
      */
+    @JsName("a_clock_reading_before_1970_advances_and_expires_nothing_and_says_why")
     @Test
     fun `a clock reading before 1970 advances and expires nothing and says why`() {
         for (reading in listOf(-1L, Long.MIN_VALUE)) {
@@ -386,6 +400,7 @@ class OrderControlsTest {
     }
 
     /** Terms carrying no `expiration` have no `→ expired` edge to fire, and the refusal says so. */
+    @JsName("terms_with_no_expiration_expire_on_nothing")
     @Test
     fun `terms with no expiration expire on nothing`() {
         val terms = OrderTerms.of(OrderFixtures.PRICE, FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS))
@@ -406,6 +421,7 @@ class OrderControlsTest {
      * Local policy, so it is injected: the timeout runs from the clock reading taken when the
      * order became `paid`, and both are pinned here.
      */
+    @JsName("an_order_with_no_deliver_by_disputes_on_this_implementation_s_own_release_timeout")
     @Test
     fun `an order with no deliver_by disputes on this implementation's own release timeout`() {
         val terms = OrderTerms.of(
@@ -434,6 +450,7 @@ class OrderControlsTest {
     }
 
     /** §7.5 — `expiration` MUST fall strictly before `deliver_by`, and a violation is rejected. */
+    @JsName("terms_whose_expiration_is_not_strictly_before_deliver_by_are_rejected")
     @Test
     fun `terms whose expiration is not strictly before deliver_by are rejected`() {
         for (deliverBy in listOf(OrderFixtures.EXPIRATION, OrderFixtures.EXPIRATION - 1L)) {
@@ -447,6 +464,7 @@ class OrderControlsTest {
     // ---------------------------------------------------------------- §7.6 and §10.3
 
     /** §7.6 — acceptance is a `type=3` from the **provider's** key, and from nobody else's. */
+    @JsName("an_acceptance_from_the_buyer_s_own_key_is_refused_as_the_wrong_sender")
     @Test
     fun `an acceptance from the buyer's own key is refused as the wrong sender`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
@@ -462,6 +480,7 @@ class OrderControlsTest {
      * §7.6 — an acceptance carrying different terms is a **counter-proposal**, and one carrying no
      * terms at all is not an acceptance either.
      */
+    @JsName("an_acceptance_with_altered_terms_or_none_is_refused_as_a_counter_proposal")
     @Test
     fun `an acceptance with altered terms, or none, is refused as a counter-proposal`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
@@ -487,6 +506,7 @@ class OrderControlsTest {
      * every conformant acceptance and deadlock the order at `proposed` until it expired. It fails
      * closed, which is exactly why it would ship.
      */
+    @JsName("an_acceptance_echoing_only_the_four_terms_section_7_6_names_is_accepted")
     @Test
     fun `an acceptance echoing only the four terms section 7 6 names is accepted`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
@@ -512,6 +532,7 @@ class OrderControlsTest {
     }
 
     /** A `deliver_by` that differs *is* on §7.6's list, so it is a counter-proposal. */
+    @JsName("an_acceptance_whose_deliver_by_differs_is_refused")
     @Test
     fun `an acceptance whose deliver_by differs is refused`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
@@ -530,6 +551,7 @@ class OrderControlsTest {
     }
 
     /** §7.4, §10.1 — the `type=5` commitment is the provider's. */
+    @JsName("a_commitment_from_the_buyer_s_key_is_refused_as_the_wrong_sender")
     @Test
     fun `a commitment from the buyer's key is refused as the wrong sender`() {
         val accepted = OrderFixtures.orders().getValue(OrderState.ACCEPTED)
@@ -547,6 +569,7 @@ class OrderControlsTest {
      * That is a legal §11.2 `paid → disputed` pair reached by a trigger §10.3 states rather than
      * §11.2's own row, and the ground says which of the two it was.
      */
+    @JsName("a_release_that_does_not_match_the_commitment_disputes_the_order")
     @Test
     fun `a release that does not match the commitment disputes the order`() {
         val paid = OrderFixtures.orders().getValue(OrderState.PAID)
@@ -561,6 +584,7 @@ class OrderControlsTest {
     }
 
     /** §7.4, §10.3 — the `kind:15` release is the provider's, whatever it carries. */
+    @JsName("a_release_from_the_buyer_s_key_is_refused_before_the_identity_check_runs")
     @Test
     fun `a release from the buyer's key is refused before the identity check runs`() {
         val paid = OrderFixtures.orders().getValue(OrderState.PAID)
@@ -574,6 +598,7 @@ class OrderControlsTest {
     }
 
     /** §10.4's three failure steps each dispute the order, and each says which step it was. */
+    @JsName("each_of_section_10_4_s_failures_disputes_the_order_and_names_its_step")
     @Test
     fun `each of section 10 4's failures disputes the order and names its step`() {
         val released = OrderFixtures.orders().getValue(OrderState.RELEASED)
@@ -601,6 +626,7 @@ class OrderControlsTest {
     }
 
     /** The two pre-`paid` `→ disputed` edges §11.2 states and gives no trigger for. */
+    @JsName("a_locally_raised_dispute_is_legal_exactly_where_section_11_2_gives_no_trigger")
     @Test
     fun `a locally raised dispute is legal exactly where section 11 2 gives no trigger`() {
         val orders = OrderFixtures.orders()
@@ -636,6 +662,7 @@ class OrderControlsTest {
      * be a real bug for anything that persists an order and reloads it. This is the control that
      * pins the value comparison, since every other fixture threads one instance through.
      */
+    @JsName("evidence_settles_against_a_commitment_rebuilt_from_the_same_four_values")
     @Test
     fun `evidence settles against a commitment rebuilt from the same four values`() {
         val original = OrderFixtures.blob.commitment
@@ -670,6 +697,7 @@ class OrderControlsTest {
      * totality rule exists to prevent. A deadline beyond every representable clock reading is one
      * no clock can pass, so the answer is a named refusal.
      */
+    @JsName("a_paidat_at_the_end_of_time_refuses_rather_than_throwing")
     @Test
     fun `a paidAt at the end of time refuses rather than throwing`() {
         val terms = OrderTerms.of(
@@ -697,6 +725,7 @@ class OrderControlsTest {
      * timeout of its own". A zero or negative one is not a timeout: it disputes an order the
      * moment it is paid, which is a refusal to deliver wearing a deadline's clothes.
      */
+    @JsName("a_machine_cannot_be_built_with_a_non_positive_release_timeout")
     @Test
     fun `a machine cannot be built with a non-positive release timeout`() {
         for (timeout in listOf(0L, -86_400L, Long.MIN_VALUE)) {
@@ -713,6 +742,7 @@ class OrderControlsTest {
      * one second later it is not representable, and the same reading is refused rather than
      * wrapping to a deadline in the distant past.
      */
+    @JsName("a_release_deadline_landing_exactly_on_long_max_value_fires_and_one_second_later_refuses")
     @Test
     fun `a release deadline landing exactly on Long MAX_VALUE fires and one second later refuses`() {
         val terms = OrderTerms.of(
@@ -746,6 +776,7 @@ class OrderControlsTest {
     }
 
     /** The checked addition itself, at both ends of `Long`: a sum that does not fit is `null`. */
+    @JsName("deadline_arithmetic_never_wraps_at_either_end_of_long")
     @Test
     fun `deadline arithmetic never wraps at either end of Long`() {
         assertEquals(Long.MAX_VALUE, checkedDeadline(Long.MAX_VALUE - 5L, 5L))
@@ -764,6 +795,7 @@ class OrderControlsTest {
      * `java.time.Instant` never prevented a pre-1970 deadline either, but a `Long` makes the
      * question explicit, so it is answered at construction.
      */
+    @JsName("terms_carrying_a_negative_expiration_or_deliver_by_are_rejected")
     @Test
     fun `terms carrying a negative expiration or deliver_by are rejected`() {
         val negatives = listOf(-1L to null, null to -1L, Long.MIN_VALUE to OrderFixtures.DELIVER_BY, -2L to -1L)
@@ -777,6 +809,7 @@ class OrderControlsTest {
     }
 
     /** A rumor's `created_at` is a §4.3 timestamp too: a negative one was never on the wire. */
+    @JsName("a_rumor_carrying_a_negative_created_at_is_rejected")
     @Test
     fun `a rumor carrying a negative created_at is rejected`() {
         val rumors = listOf<() -> OrderEvent.Rumor>(
@@ -803,6 +836,7 @@ class OrderControlsTest {
      * rather than left to be discovered — it is the boundary two implementations will disagree
      * on, and every other fixture sits an hour clear of it.
      */
+    @JsName("a_clock_reading_exactly_at_a_deadline_counts_as_having_passed_it")
     @Test
     fun `a clock reading exactly at a deadline counts as having passed it`() {
         val orders = OrderFixtures.orders()
@@ -849,6 +883,7 @@ class OrderControlsTest {
      * cross-product — the order does not move — but the *reason* is API a client branches on, and
      * an unasserted constant can be swapped for a neighbour and stay green.
      */
+    @JsName("an_incomplete_payment_request_set_and_a_second_proposal_are_refused_by_name")
     @Test
     fun `an incomplete payment-request set and a second proposal are refused by name`() {
         val orders = OrderFixtures.orders()
@@ -889,6 +924,7 @@ class OrderControlsTest {
      * not the payment hash, no `VerifiedPayment` exists, and there is therefore nothing to build a
      * `ReceiptsVerified` out of.
      */
+    @JsName("a_wallet_that_reports_every_payment_settled_moves_the_order_not_at_all")
     @Test
     fun `a wallet that reports every payment settled moves the order not at all`() {
         val truth = OrderFixtures.receipt(Payee.PROVIDER)
@@ -931,6 +967,7 @@ class OrderControlsTest {
      * A default Kotlin `toString` on `OrderTerms` would print the price straight out of `FeeSplit`;
      * this is the control that catches the debugging one somebody adds later.
      */
+    @JsName("neither_an_order_nor_its_terms_prints_an_amount_or_a_deadline")
     @Test
     fun `neither an order nor its terms prints an amount or a deadline`() {
         val orders = OrderFixtures.orders()
@@ -946,6 +983,7 @@ class OrderControlsTest {
     }
 
     /** A refusal's `detail` names a rule; it never names a byte, an amount or a deadline. */
+    @JsName("a_refusal_s_detail_carries_no_amount_and_no_deadline")
     @Test
     fun `a refusal's detail carries no amount and no deadline`() {
         val orders = OrderFixtures.orders()

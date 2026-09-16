@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.crypto
 
-import java.io.File
+import dev.eryalabs.nenya.TestText
+import dev.eryalabs.nenya.VendoredFile
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -10,13 +11,18 @@ import kotlin.test.fail
  * `src/commonTest/resources/vectors/nist-sha256/` (see `vectors/PROVENANCE.md`).
  *
  * Deliberately shares no code with the implementation: hex is decoded here by hand, and
- * nothing in this file hashes anything. Files are opened by path from the module directory,
- * as `SpecAnchor` does, and a missing file fails with the absolute path it looked at.
+ * nothing in this file hashes anything.
+ *
+ * A common test cannot open a file, so `SHA256ShortMsg.rsp` and `SHA256Monte.rsp` are read from
+ * their generated copies in `VendoredTestFiles` ([lines]), which `VendoredTestFilesTest` proves are
+ * the files on disk byte for byte. `SHA256LongMsg.rsp` (426 KB) is not generated: the JVM reads it
+ * from disk (`NistSha256Files`) and hands its lines to the same parser, so every file goes through
+ * one parser whichever way it was read.
  */
 internal object NistSha256Vectors {
 
-    const val DIRECTORY: String = "src/commonTest/resources/vectors/nist-sha256"
-    const val PROVENANCE: String = "src/commonTest/resources/vectors/PROVENANCE.md"
+    /** The vendored directory, as a path from the repository root (the `VendoredTestFiles` key). */
+    const val DIRECTORY: String = "nenya-core/src/commonTest/resources/vectors/nist-sha256"
 
     /** One `Len` / `Msg` / `MD` triple. [bits] is NIST's `Len`, always a whole number of bytes here. */
     class MessageVector(val bits: Int, val message: ByteArray, val digest: ByteArray)
@@ -24,20 +30,15 @@ internal object NistSha256Vectors {
     /** The Monte Carlo file: its seed and its checkpoints in `COUNT` order. */
     class MonteVectors(val seed: ByteArray, val checkpoints: List<ByteArray>)
 
-    fun file(name: String): File {
-        val file = File("$DIRECTORY/$name")
-        if (!file.isFile) {
-            fail(
-                "NIST vector file $name was expected at ${file.absolutePath} but is not there; the " +
-                    "working directory is ${File(".").absoluteFile.normalize()}",
-            )
-        }
-        return file
-    }
+    /**
+     * The lines of the generated copy of [name]. Fails loudly, naming the generated files, for a
+     * file that is not generated, `SHA256LongMsg.rsp` among them.
+     */
+    fun lines(name: String): List<String> = VendoredFile("$DIRECTORY/$name").readLines()
 
     /** `name = value` pairs in file order, comments, headers and blank lines dropped. */
-    private fun fields(name: String): List<Pair<String, String>> =
-        file(name).readLines()
+    private fun fields(name: String, lines: List<String>): List<Pair<String, String>> =
+        lines
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("[") }
             .map { line ->
@@ -46,9 +47,9 @@ internal object NistSha256Vectors {
                 line.substring(0, eq).trim() to line.substring(eq + 1).trim()
             }
 
-    fun messages(name: String): List<MessageVector> {
+    fun messages(name: String, lines: List<String> = lines(name)): List<MessageVector> {
         val out = ArrayList<MessageVector>()
-        val all = fields(name)
+        val all = fields(name, lines)
         var i = 0
         while (i < all.size) {
             val (lenKey, lenValue) = all[i]
@@ -66,8 +67,8 @@ internal object NistSha256Vectors {
         return out
     }
 
-    fun monte(name: String): MonteVectors {
-        val all = fields(name)
+    fun monte(name: String, lines: List<String> = lines(name)): MonteVectors {
+        val all = fields(name, lines)
         val (seedKey, seedValue) = all.first()
         assertEquals("Seed", seedKey, "$name: first field")
         val rest = all.drop(1)
@@ -80,23 +81,15 @@ internal object NistSha256Vectors {
         return MonteVectors(unhex(seedValue), checkpoints)
     }
 
-    /** The digest PROVENANCE.md records for `nist-sha256/<name>`, in lowercase hex. */
-    fun recordedChecksum(name: String): String {
-        val pattern = Regex("^([0-9a-f]{64})  nist-sha256/${Regex.escape(name)}$")
-        val found = File(PROVENANCE).readLines().mapNotNull { pattern.find(it.trim())?.groupValues?.get(1) }
-        assertEquals(1, found.size, "PROVENANCE.md must record exactly one checksum for nist-sha256/$name")
-        return found.single()
-    }
-
     fun unhex(hex: String): ByteArray {
         assertTrue(hex.length % 2 == 0, "odd-length hex")
         return ByteArray(hex.length / 2) { i ->
-            val hi = Character.digit(hex[2 * i], 16)
-            val lo = Character.digit(hex[2 * i + 1], 16)
+            val hi = hex[2 * i].digitToIntOrNull(16) ?: -1
+            val lo = hex[2 * i + 1].digitToIntOrNull(16) ?: -1
             assertTrue(hi >= 0 && lo >= 0, "not hex: $hex")
             ((hi shl 4) or lo).toByte()
         }
     }
 
-    fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    fun hex(bytes: ByteArray): String = TestText.lowerHex(bytes)
 }

@@ -187,10 +187,16 @@ where the secret lives.
 nenya-core/src/commonMain/kotlin/dev/eryalabs/nenya/ implementation shared by JVM and JS
 nenya-core/src/jvmMain/kotlin/dev/eryalabs/nenya/    implementation still JVM-bound
 nenya-core/src/commonTest/kotlin/dev/eryalabs/nenya/ tests run on every target
-nenya-core/src/jvmTest/kotlin/dev/eryalabs/nenya/    JVM-only tests
+nenya-core/src/jvmTest/kotlin/dev/eryalabs/nenya/    JVM-only tests (reflection, JDK oracles, files on disk)
+nenya-core/src/jsTest/kotlin/dev/eryalabs/nenya/     JS test oracles and the JS classes of split tests
 nenya-core/src/commonTest/resources/                 test vectors and fixtures (compiled into common tests as constants)
 spec/                                               the microstandard
 ```
+
+A test class with both portable and JVM-only tests is split rather than left on the JVM: an
+abstract `Portable<Name>` in `commonTest` holds the portable tests, and a `<Name>` subclass in
+`jvmTest` (adding the JVM-only ones) and in `jsTest` runs them, so every test keeps its
+`<Name>` class and name on both targets.
 
 Package root: `dev.eryalabs.nenya`. The published API runs with Kotlin's `explicitApi()` on,
 because for a library whose whole purpose is to be a contract, an accidentally public symbol

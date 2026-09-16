@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.VerifiedPayment
+import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -36,6 +37,7 @@ class OrderInvariantsTest {
      * `→ paid` edge at all: nothing offered to a `proposed` order reaches `paid`, **and** the one
      * event that does reach `paid` is refused there.
      */
+    @JsName("invariant_1_proposed_to_paid_is_unreachable")
     @Test
     fun `invariant 1 - proposed to paid is unreachable`() {
         val proposed = orders.getValue(OrderState.PROPOSED)
@@ -64,6 +66,7 @@ class OrderInvariantsTest {
      * the request rather than the payment "makes every fee-bearing order unreachable and is
      * testing the wrong thing" (§8.5, §11.3).
      */
+    @JsName("invariant_2_no_fee_receipt_before_awaiting_payment_while_the_fee_request_is_accepted_there")
     @Test
     fun `invariant 2 - no fee receipt before awaiting_payment, while the fee request is accepted there`() {
         val feeReceipt = OrderEvent.ReceiptsVerified(setOf(OrderFixtures.receipt(Payee.FEE)))
@@ -105,6 +108,7 @@ class OrderInvariantsTest {
      * §11.1's own `isTerminal` mark rather than a list written here, so a revision that marked a
      * fifth state terminal would extend the test automatically.
      */
+    @JsName("invariant_3_no_terminal_state_leads_anywhere")
     @Test
     fun `invariant 3 - no terminal state leads anywhere`() {
         val terminal = OrderState.entries.filter { it.isTerminal }
@@ -130,6 +134,7 @@ class OrderInvariantsTest {
      * is a different fact from being an agreed terminal outcome, and reporting them the same way
      * would tell a user a garbled status update had settled or cancelled their order.
      */
+    @JsName("the_unknown_sink_is_refused_as_unknown_and_not_as_terminal")
     @Test
     fun `the unknown sink is refused as unknown and not as terminal`() {
         assertFalse(OrderState.UNKNOWN.isTerminal)
@@ -152,6 +157,7 @@ class OrderInvariantsTest {
      * the two things a type system cannot: that a provider's status update saying so does not
      * settle, and that evidence from another commitment does not settle this order.
      */
+    @JsName("invariant_4_settled_only_on_the_buyer_s_own_computation")
     @Test
     fun `invariant 4 - settled only on the buyer's own computation`() {
         val released = orders.getValue(OrderState.RELEASED)
@@ -190,6 +196,7 @@ class OrderInvariantsTest {
      * invariant says "arriving from any key", and a test exercising one state proves nothing about
      * the other ten.
      */
+    @JsName("invariant_5_a_status_update_announcing_paid_or_settled_changes_nothing_anywhere")
     @Test
     fun `invariant 5 - a status update announcing paid or settled changes nothing, anywhere`() {
         for (status in listOf(OrderState.PAID, OrderState.SETTLED)) {
@@ -221,6 +228,7 @@ class OrderInvariantsTest {
      * drive an order to a **terminal** state on its assertion alone — and it would pass an
      * invariant-5 test that exercised only `paid` and `settled`.
      */
+    @JsName("a_status_update_announcing_disputed_changes_nothing_anywhere")
     @Test
     fun `a status update announcing disputed changes nothing, anywhere`() {
         for (party in Party.entries) {
@@ -237,6 +245,7 @@ class OrderInvariantsTest {
     }
 
     /** The other half of invariant 5: `cancelled` *is* accepted from an assertion, before `paid`. */
+    @JsName("invariant_5_cancellation_is_accepted_from_either_party_and_only_before_paid")
     @Test
     fun `invariant 5 - cancellation is accepted from either party, and only before paid`() {
         val before = listOf(
@@ -267,6 +276,7 @@ class OrderInvariantsTest {
     }
 
     /** §11.2 says "either **party**", and §8.5 says the fee recipient is not one. */
+    @JsName("a_cancellation_from_the_fee_recipient_is_refused_as_the_wrong_sender")
     @Test
     fun `a cancellation from the fee recipient is refused as the wrong sender`() {
         val refusal = OrderFixtures.refusal(
@@ -290,6 +300,7 @@ class OrderInvariantsTest {
      * honouring that one layer down while dropping it one layer up is the same lie with an extra
      * step.
      */
+    @JsName("an_order_that_reached_paid_on_check_2_and_check_3_evidence_reports_itself_amount_unverified")
     @Test
     fun `an order that reached paid on check-2 and check-3 evidence reports itself amount-unverified`() {
         val paid = orders.getValue(OrderState.PAID)
@@ -321,6 +332,7 @@ class OrderInvariantsTest {
      * receipt at all — recording an inapplicable obligation as "not performed" is a different
      * false statement, not a safer one.
      */
+    @JsName("the_record_is_the_receipts_own_asserted_exactly_on_both_a_fee_bearing_and_a_provider_only_order")
     @Test
     fun `the record is the receipts' own, asserted exactly on both a fee-bearing and a provider-only order`() {
         assertEquals(
@@ -356,6 +368,7 @@ class OrderInvariantsTest {
      * `paid` on an empty receipt set. A client reading only `INVOICE_AMOUNT !in notPerformed`
      * would conclude the amount was checked; both sets are published so that it cannot.
      */
+    @JsName("an_order_that_required_no_receipt_carries_an_empty_record_in_both_directions")
     @Test
     fun `an order that required no receipt carries an empty record in both directions`() {
         val nothingOwed = OrderTerms.of(Msat.ZERO, FeeTerm.of(250))
@@ -392,6 +405,7 @@ class OrderInvariantsTest {
     }
 
     /** The record travels through `released` and into `settled`: §17 does not lapse on success. */
+    @JsName("the_payment_record_survives_into_settled_and_the_delivery_record_joins_it")
     @Test
     fun `the payment record survives into settled, and the delivery record joins it`() {
         val settled = orders.getValue(OrderState.SETTLED)
@@ -406,6 +420,7 @@ class OrderInvariantsTest {
     }
 
     /** An order before `paid` claims nothing at all, rather than claiming an empty success. */
+    @JsName("an_order_before_paid_carries_no_payment_record")
     @Test
     fun `an order before paid carries no payment record`() {
         for (state in listOf(OrderState.PROPOSED, OrderState.ACCEPTED, OrderState.COMMITTED)) {
@@ -417,6 +432,7 @@ class OrderInvariantsTest {
     }
 
     /** §14 item 3: `disputed` resolves nothing, so what it must do is say which thing happened. */
+    @JsName("disputeground_is_set_exactly_when_the_order_is_disputed")
     @Test
     fun `disputeGround is set exactly when the order is disputed`() {
         for ((state, order) in orders) {

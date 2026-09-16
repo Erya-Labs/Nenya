@@ -1,11 +1,11 @@
 package dev.eryalabs.nenya.conformance
 
+import dev.eryalabs.nenya.JdkRandom
 import dev.eryalabs.nenya.bid.BidFixtures
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.tag.TagLimits
 import dev.eryalabs.nenya.wire.WireLimits
-import java.util.Random
 
 /**
  * The generator behind the hostile-input sweep: well-formed fixtures, broken every way §4.3
@@ -14,8 +14,8 @@ import java.util.Random
  * This is not a scratch file. The queue's Definition of done forbids an encoded value appearing in
  * a test as something somebody typed out, so nothing here is: every pubkey is a SHA-256 digest of a
  * per-index label (`TagFixtures.pubkeyFor`), every base fixture is `TagFixtures`', and every string
- * is assembled by a `java.util.Random` pinned to [SEED]. A reviewer can change [SEED], re-run the
- * suite, and every property must still hold.
+ * is assembled by `java.util.Random`'s algorithm ([JdkRandom]) pinned to [SEED]. A reviewer can
+ * change [SEED], re-run the suite, and every property must still hold.
  *
  * ### Why the bases are well-formed and the mutations are one at a time
  *
@@ -37,9 +37,9 @@ import java.util.Random
 internal object HostileCorpus {
 
     /**
-     * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random` for the
-     * reason `WireFixtures` gives: its algorithm is specified by the JDK, so this file produces the
-     * same runs on any JVM a reviewer re-runs it on.
+     * Pinned so a failure is reproducible. `java.util.Random`'s algorithm rather than `kotlin.random`
+     * for the reason `WireFixtures` gives: it is specified by the JDK, so this file produces the
+     * same runs on any JVM a reviewer re-runs it on — and, as [JdkRandom], the same runs on JavaScript.
      */
     const val SEED: Long = 20260919L
 
@@ -147,12 +147,12 @@ internal object HostileCorpus {
      * pass.
      */
     fun corpus(count: Int): List<Input> {
-        val random = Random(SEED)
+        val random = JdkRandom(SEED)
         val mutations = Mutation.entries
         return List(count) { index -> input(random, index, mutations[index % mutations.size]) }
     }
 
-    private fun input(random: Random, index: Int, mutation: Mutation): Input {
+    private fun input(random: JdkRandom, index: Int, mutation: Mutation): Input {
         val kind = KINDS[index % KINDS.size]
         val base = base(kind, index)
         val pubkey = TagFixtures.pubkeyFor(index)
@@ -188,7 +188,7 @@ internal object HostileCorpus {
         else -> TagFixtures.minimalOffer()
     }.also { tags -> tags += listOf("x-nenya-unknown-$index", "preserved verbatim (§4.3)") }
 
-    private fun mutate(random: Random, draft: Input): Input = when (draft.mutation) {
+    private fun mutate(random: JdkRandom, draft: Input): Input = when (draft.mutation) {
         Mutation.WELL_FORMED -> draft
 
         Mutation.TRUNCATED -> draft.copy(
@@ -349,7 +349,7 @@ internal object HostileCorpus {
 
     /** [tags] with one randomly chosen tag rewritten by [edit]. */
     private fun mapOneTag(
-        random: Random,
+        random: JdkRandom,
         tags: List<List<String>>,
         edit: (List<String>) -> List<String>,
     ): List<List<String>> {
@@ -360,7 +360,7 @@ internal object HostileCorpus {
 
     /** [tags] with one randomly chosen tag **value** — never a tag name — rewritten by [edit]. */
     private fun mapOneValue(
-        random: Random,
+        random: JdkRandom,
         tags: List<List<String>>,
         edit: (String) -> String,
     ): List<List<String>> = mapOneTag(random, tags) { tag ->
