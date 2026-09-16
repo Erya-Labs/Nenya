@@ -275,10 +275,12 @@ public interface Wallet : Seam {
  * integer, so a clock answering before 1970 is not reporting an unusual time — it is broken, and
  * no deadline can honestly be evaluated against it. This library treats it exactly as it treats
  * every other injected part that answers something it cannot use (a randomness source returning
- * the wrong number of bytes, a wallet's claim, an unavailable seam): it **fails closed**. Nothing
- * advances or expires on such a reading, and the refusal names the reason —
- * `TransitionRejection.CLOCK_READING_BEFORE_EPOCH` from the order machine, and
- * `ListingActivity.CANNOT_SAY` from a listing, never `ACTIVE` and never `EXPIRED`.
+ * the wrong number of bytes, a wallet's claim, an unavailable seam): it **fails closed**. No
+ * deadline is evaluated against such a reading and no time is recorded from it, and the refusal
+ * names the reason — `TransitionRejection.CLOCK_READING_BEFORE_EPOCH` from the order machine, and
+ * `ListingActivity.CANNOT_SAY` from a listing, never `ACTIVE` and never `EXPIRED`. A transition
+ * that does not depend on the time still happens: an order whose receipts this library verified
+ * still becomes `paid`, it simply records no `paidAt`.
  *
  * ### Named `NenyaClock` rather than `Clock`
  *
@@ -296,8 +298,8 @@ public interface NenyaClock : Seam {
      * Any non-negative `Long` is used as given, up to and including [Long.MAX_VALUE]; the
      * deadline arithmetic that consumes it is overflow-checked rather than relying on the clock
      * to stay in a plausible range. A **negative** reading (before 1970) is refused where it is
-     * consumed: the clock is broken, and nothing advances, expires or is recorded on it — see
-     * this interface's note.
+     * consumed: the clock is broken, so no deadline is judged against it and no time is recorded
+     * from it — see this interface's note.
      */
     public fun now(): SeamAnswer<Long>
 

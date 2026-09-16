@@ -13,7 +13,7 @@ package dev.eryalabs.nenya
  * vol. 2, §3.2.1), with `nextInt`, `nextInt(bound)`, `nextLong`, `nextBoolean` and `nextBytes`
  * exactly as the JDK documents them. Nothing else is implemented because nothing else is used.
  *
- * It is a test fixture, never a source of anything secret. `JdkRandomOracleTest` (jvmTest)
+ * It is a test fixture, never a source of anything secret. `CommonTestOraclesTest` (jvmTest)
  * asserts it agrees with `java.util.Random` call for call across many seeds and every method,
  * so a slip here fails loudly rather than quietly changing a corpus.
  */

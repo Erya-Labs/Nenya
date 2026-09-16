@@ -21,7 +21,7 @@ internal fun String.latin1Bytes(): ByteArray = TestText.latin1(this)
 /**
  * Text helpers for common tests that the JDK used to provide, each written independently of the
  * library's own `dev.eryalabs.nenya.text` code so a fixture's bytes are not the code under test's
- * bytes. `TestTextOracleTest` (jvmTest) checks every one against the JDK call it replaces.
+ * bytes. `CommonTestOraclesTest` (jvmTest) checks every one against the JDK call it replaces.
  */
 internal object TestText {
 
