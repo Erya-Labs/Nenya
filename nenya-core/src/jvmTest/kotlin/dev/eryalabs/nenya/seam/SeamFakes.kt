@@ -26,7 +26,7 @@ internal object SeamFixtures {
      * Pinned so a failure is reproducible. `java.util.Random` rather than `kotlin.random`
      * because its algorithm is specified by the JDK, so this file produces the same runs on any
      * JVM a reviewer re-runs it on. It lives in the **test** tree; the ambient-effects sweep
-     * forbids either of them under `src/commonMain/kotlin` and `src/jvmMain/kotlin`.
+     * forbids either of them under every production source root.
      */
     const val SEED: Long = 20260910L
 

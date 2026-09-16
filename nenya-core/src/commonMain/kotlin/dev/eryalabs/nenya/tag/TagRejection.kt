@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.tag
 
 import dev.eryalabs.nenya.money.MoneyException
 import dev.eryalabs.nenya.money.MoneyRejection
+import kotlin.jvm.JvmSynthetic
 
 /**
  * Why a tag, a tag value or a tag set was refused (§4.3, §4.4, §5.3, §8.1).

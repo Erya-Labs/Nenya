@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.seam
 
+import dev.eryalabs.nenya.platform.runtimeSimpleName
+
 /**
  * Which of §3's capabilities an answer is about, named so that "this library did not do that"
  * is machine-readable rather than a paragraph in a README.
@@ -116,7 +118,7 @@ public sealed interface SeamAnswer<out T> {
     ) : SeamAnswer<T> {
 
         override fun toString(): String =
-            "SeamAnswer.Provided(${value?.let { it::class.java.simpleName } ?: "null"}, redacted)"
+            "SeamAnswer.Provided(${value?.let { runtimeSimpleName(it) } ?: "null"}, redacted)"
     }
 
     /**

@@ -275,7 +275,7 @@ public interface Wallet : Seam {
  *
  * The JDK's `Clock` would be the obvious JVM type, and a default built from it — `Clock.systemUTC()`
  * — is a live ambient effect that every injected-fake test would step straight over. The suite
- * sweeps `src/jvmMain/kotlin` for exactly that token, among others, and a distinct name keeps the
+ * sweeps the main source roots for exactly that token, among others, and a distinct name keeps the
  * two from being confused at a call site.
  */
 public interface NenyaClock : Seam {
@@ -313,7 +313,7 @@ public interface NenyaClock : Seam {
  * that the right implementation wraps `java.security.SecureRandom` and the wrong one wraps
  * `java.util.Random`.
  *
- * The suite sweeps `src/jvmMain/kotlin` for ambient randomness, so no code in this library can
+ * The suite sweeps the main source roots for ambient randomness, so no code in this library can
  * quietly construct either.
  */
 public interface Randomness : Seam {

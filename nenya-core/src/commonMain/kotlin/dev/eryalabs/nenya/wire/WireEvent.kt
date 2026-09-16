@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.wire
 
 import dev.eryalabs.nenya.collections.readOnlyListOf
 import dev.eryalabs.nenya.text.strictUtf8OrNull
+import kotlin.jvm.JvmSynthetic
 
 /**
  * Why an event, a bound or an event-id check was refused (§4.1, §4.3).

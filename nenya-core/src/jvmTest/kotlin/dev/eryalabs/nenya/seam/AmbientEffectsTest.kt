@@ -8,9 +8,9 @@ import kotlin.test.fail
 
 /**
  * The sweep that makes injection real rather than stylistic: **no source line under
- * `src/commonMain/kotlin` or `src/jvmMain/kotlin` reads an ambient clock or an ambient random
- * source.** Both roots are swept together, so code moved to common cannot escape the rule by
- * moving.
+ * `src/commonMain/kotlin`, `src/jvmMain/kotlin` or `src/jsMain/kotlin` reads an ambient clock or
+ * an ambient random source.** Every production root is swept together, so code moved between
+ * them cannot escape the rule by moving.
  *
  * Every module in this library takes its clock and its randomness by injection, and the reason is
  * not style. §4.6 requires every deadline be evaluated against the implementation's own injected
@@ -54,18 +54,33 @@ class AmbientEffectsTest {
     internal companion object {
 
         /**
-         * Every production source root, relative to the module directory. `src/commonMain/kotlin`
-         * is here because code moved there compiles into the same library and must answer to the
-         * same sweeps; a sweep over `src/jvmMain/kotlin` alone would pass over it silently. A
-         * `src/jsMain/kotlin` root joins this list in the commit that creates it.
+         * Every production source root, relative to the module directory. Since the move to
+         * Kotlin Multiplatform nearly all production code is in `src/commonMain/kotlin`;
+         * `src/jvmMain/kotlin` and `src/jsMain/kotlin` hold only the platform `actual`s. All three
+         * compile into the same library and answer to the same sweeps. [mainSources] also fails
+         * when a `src/<name>Main/kotlin` directory exists that this list does not name, so a new
+         * target's root cannot be added without joining the sweep.
          */
-        val MAIN_ROOTS: List<String> = listOf("src/commonMain/kotlin", "src/jvmMain/kotlin")
+        val MAIN_ROOTS: List<String> = listOf("src/commonMain/kotlin", "src/jvmMain/kotlin", "src/jsMain/kotlin")
 
         /**
-         * The `.kt` files under all of [MAIN_ROOTS] together, pinned as a floor for [mainSources]:
-         * 27, the whole main tree at commit 6432814. Moving a file between roots keeps the total.
+         * The `.kt` files under all of [MAIN_ROOTS] together, pinned as a floor for [mainSources].
+         * 27 was the whole main tree at commit 6432814. Raised to 33 when production code moved to
+         * `src/commonMain/kotlin`: the 27, plus `collections/ReadOnly.kt`, `crypto/Sha256.kt`,
+         * `text/Utf8.kt`, and `platform/TypeNames.kt` with its JVM and JavaScript `actual` files.
          */
-        const val MIN_MAIN_SOURCES: Int = 27
+        const val MIN_MAIN_SOURCES: Int = 33
+
+        /**
+         * Per-root floors. A total over all roots cannot tell "the code is in common" from "the
+         * code is in a root nobody reads": after the move a sweep over an almost-empty
+         * `src/jvmMain/kotlin` must go red, not green. 31 is `src/commonMain/kotlin` after the move.
+         */
+        val MIN_SOURCES_PER_ROOT: Map<String, Int> = mapOf(
+            "src/commonMain/kotlin" to 31,
+            "src/jvmMain/kotlin" to 1,
+            "src/jsMain/kotlin" to 1,
+        )
 
         /**
          * Every way this library could learn the time or draw a random number without being
@@ -154,8 +169,27 @@ class AmbientEffectsTest {
                 }
                 root
             }
+            // A production root on disk that MAIN_ROOTS does not name is swept by nobody.
+            val onDisk = File("src").listFiles { f: File -> f.isDirectory && f.name.endsWith("Main") }
+                .orEmpty()
+                .map { "src/${it.name}/kotlin" }
+                .filter { File(it).isDirectory }
+            val unswept = onDisk.filter { it !in MAIN_ROOTS }
+            assertTrue(
+                unswept.isEmpty(),
+                "production source root(s) $unswept exist but are not in MAIN_ROOTS $MAIN_ROOTS; " +
+                    "everything in them would pass these sweeps unread.",
+            )
             val sources = roots.flatMap { root ->
                 root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            }
+            for ((path, floor) in MIN_SOURCES_PER_ROOT) {
+                val count = File(path).walkTopDown().count { it.isFile && it.extension == "kt" }
+                assertTrue(
+                    count >= floor,
+                    "$path holds $count .kt file(s); at least $floor were pinned. The production " +
+                        "code is not where these sweeps were told it is.",
+                )
             }
             // Roots that exist but hold fewer sources than the tree did are the quiet failure: after
             // code moves to a root this list does not name, both sweeps here and KindConstantTest's

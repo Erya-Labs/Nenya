@@ -133,7 +133,7 @@ class TransitionTotalityTest {
     /**
      * Every declared event class is actually exercised.
      *
-     * Enumerated by reflection over `src/jvmMain`'s own output rather than listed by hand, so an
+     * Enumerated by reflection over the main output tree (`build/classes/kotlin/jvm/main`) rather than listed by hand, so an
      * event added later without a sample turns this red instead of sitting outside every proof
      * in the file. `kotlin-reflect` is not on the classpath (STOP RULE 11), so this walks the
      * class files the way `OrderStructureTest` does.
@@ -144,7 +144,7 @@ class TransitionTotalityTest {
             .filter { OrderEvent::class.java.isAssignableFrom(it) && !it.isInterface }
             .map { it.name }
             .toSet()
-        assertTrue(declared.isNotEmpty(), "no OrderEvent implementations found in src/jvmMain")
+        assertTrue(declared.isNotEmpty(), "no OrderEvent implementations found in the main output tree")
 
         assertEquals(
             declared,

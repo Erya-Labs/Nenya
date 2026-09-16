@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.tag.TagContext
 import dev.eryalabs.nenya.tag.TagException
 import dev.eryalabs.nenya.tag.TagRejection
 import dev.eryalabs.nenya.tag.TagRequirement
+import kotlin.jvm.JvmSynthetic
 
 /**
  * Why a listing was refused (§5.1, §5.2, §5.3, §5.6).

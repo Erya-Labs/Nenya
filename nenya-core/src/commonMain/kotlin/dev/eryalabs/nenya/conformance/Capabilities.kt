@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.VerifiedPayment
+import dev.eryalabs.nenya.platform.declaringEnumSimpleName
 import dev.eryalabs.nenya.seam.SeamCapability
 
 /**
@@ -113,7 +114,7 @@ public class ConformanceItem internal constructor(
     public val specSections: Set<String> = unmodifiable(specSections)
 
     /**
-     * Fully-qualified names of classes in `src/jvmMain` that do this item's work, or empty when
+     * Fully-qualified names of classes in the main source tree that do this item's work, or empty when
      * [status] is [ConformanceStatus.NOT_PERFORMED_HERE].
      *
      * Not exhaustive, and not meant to be: one class that must exist is enough to make the
@@ -512,13 +513,11 @@ public object Capabilities {
      * The declaring class rather than `javaClass`: an enum constant with a body is an anonymous
      * subclass, and none of the three enums has one today. Reading the declaring class means
      * adding a body to one later does not silently change every qualified name this surface
-     * publishes.
+     * publishes. Common Kotlin cannot read a declaring class, so the lookup is a platform
+     * `expect` with a real `actual` on each target ([declaringEnumSimpleName]).
      */
-    public fun qualify(constant: Enum<*>): String {
-        val type = constant.javaClass
-        val declaring = if (type.isEnum) type else type.superclass
-        return "${declaring.simpleName}.${constant.name}"
-    }
+    public fun qualify(constant: Enum<*>): String =
+        "${declaringEnumSimpleName(constant)}.${constant.name}"
 
     private fun <T> unmodifiable(values: List<T>): Set<T> =
         readOnlySetOf(values)

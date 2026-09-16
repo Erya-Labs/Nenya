@@ -210,7 +210,7 @@ class CapabilitySurfaceTest {
         )
     }
 
-    /** A named class that does not exist in `src/jvmMain` fails, so the anchor is not a spelling. */
+    /** A named class that does not exist in the main source tree fails, so the anchor is not a spelling. */
     @Test
     fun `an item naming a class that is not in src slash main fails the evidence anchor`() {
         val real = Capabilities.item(3) ?: fail("§17 item 3 is not published")
@@ -512,7 +512,7 @@ class CapabilitySurfaceTest {
         val wantsConstants = item.status != ConformanceStatus.PERFORMED_HERE
 
         if (wantsClasses && item.evidenceClasses.isEmpty()) {
-            return "status ${item.status} requires at least one class in src/jvmMain and names none"
+            return "status ${item.status} requires at least one class in the main source tree and names none"
         }
         if (!wantsClasses && item.evidenceClasses.isNotEmpty()) {
             return "status ${item.status} must name no class, and names ${item.evidenceClasses}"

@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.money
 
+import kotlin.jvm.JvmInline
+
 /**
  * Why a money conversion or a money arithmetic step refused a value.
  *

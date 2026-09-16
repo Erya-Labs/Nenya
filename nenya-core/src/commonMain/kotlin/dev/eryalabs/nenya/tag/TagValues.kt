@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.tag
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.MoneyException
 import dev.eryalabs.nenya.money.Msat
+import kotlin.jvm.JvmSynthetic
 
 /**
  * §4.2's addressable coordinate: `<kind>:<pubkey-hex>:<d-value>`.

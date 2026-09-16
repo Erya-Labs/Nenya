@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.bid
 import dev.eryalabs.nenya.tag.NenyaTags
 import dev.eryalabs.nenya.tag.TagException
 import dev.eryalabs.nenya.tag.TagRejection
+import kotlin.jvm.JvmSynthetic
 
 /**
  * Why a public bid was refused (§6, and §4.2, §4.3 and §5.3 reached through it).

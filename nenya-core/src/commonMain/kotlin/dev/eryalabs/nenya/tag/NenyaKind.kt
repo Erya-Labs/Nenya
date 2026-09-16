@@ -7,7 +7,7 @@ package dev.eryalabs.nenya.tag
  * request kind as a single named constant and MUST NOT hardcode the literal in more than one
  * place — "not because the value may change (Appendix B forbids that), but because a wire
  * constant duplicated across a codebase is how two call sites end up disagreeing." `KindConstantTest`
- * enforces it by sweeping the non-comment lines of `src/jvmMain/kotlin`.
+ * enforces it by sweeping the non-comment lines of the main source roots.
  *
  * The kinds are here rather than in the wire package on purpose. §4.1 makes `kind` a bare JSON
  * number and the wire layer knows no kind vocabulary at all; which kinds Nenya defines is §5's
