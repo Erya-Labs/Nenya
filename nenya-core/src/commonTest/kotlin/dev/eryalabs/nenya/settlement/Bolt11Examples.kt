@@ -21,10 +21,12 @@ import kotlin.test.fail
  * for one example, or a half-present signature breakdown fails loudly naming the line, rather
  * than quietly yielding fewer examples.
  *
- * Three quirks of the upstream file are handled deliberately:
+ * Four quirks of the upstream file are handled deliberately:
  *  - the P2TR example's invoice is not on a `> ` line; it follows a bare `> ` line;
  *  - the first invalid example's heading is `> #`, not `> ###`;
- *  - several examples (the all-uppercase one, and invalid examples 2-10) have no breakdown.
+ *  - several examples (the all-uppercase one, and invalid examples 2-10) have no breakdown;
+ *  - one quoted description escapes its double quotes as `\"`, and is unescaped here — see
+ *    [unquote], which is the one place this reader undoes any of the document's own notation.
  *
  * Every pattern here is also valid JavaScript under the `u` flag, because this runs on Kotlin/JS.
  */
@@ -204,7 +206,9 @@ internal object Bolt11Examples {
             val sub = SUB_VALUE.find(line) ?: continue
             val value = sub.groupValues[2]
             when (field) {
-                "d" -> QUOTED_TEXT.find(value)?.let { description = once(description, it.groupValues[1], "description", j) }
+                "d" -> QUOTED_TEXT.find(value)?.let {
+                    description = once(description, unquote(it.groupValues[1], heading, j), "description", j)
+                }
                 "x" -> SECONDS.find(value)?.let { expiry = once(expiry, it.groupValues[1].toLong(), "expiry", j) }
                 "p" -> PAYMENT_HASH.find(value)?.let { paymentHash = once(paymentHash, it.groupValues[1], "payment hash", j) }
             }
@@ -227,6 +231,27 @@ internal object Bolt11Examples {
             signature = if (present == 4) SignatureBreakdown(sig[0]!!, sig[1]!!.toInt(), sig[2]!!, sig[3]!!) else null,
         )
     }
+
+    /**
+     * A quoted description with the document's own escaping undone.
+     *
+     * The prose writes a description between `'` and escapes a double quote inside it as `\"`,
+     * while the invoice's `d` field carries the unescaped character — so a reader that copied the
+     * prose verbatim would state a value four bytes longer than the invoice holds, for the one
+     * example that has them ("Blockstream Store…", the pico-BTC invoice, whose description carries
+     * two `\"` pairs). That is the *only* escape the pinned file uses: exactly one line in it
+     * carries a backslash at all, and that is the line. So anything else escaped is a file this
+     * reader has not seen, and it fails rather than guessing.
+     */
+    private fun unquote(text: String, heading: String, line: Int): String {
+        val unescaped = text.replace(ESCAPED_QUOTE, "\"")
+        if (BACKSLASH in unescaped) fail("$PATH:${line + 1}: '$heading' quotes an escape this reader does not know")
+        return unescaped
+    }
+
+    private const val ESCAPED_QUOTE: String = "\\\""
+
+    private const val BACKSLASH: Char = '\\'
 
     private const val SIGNATURE: String = "<signature breakdown>"
 }

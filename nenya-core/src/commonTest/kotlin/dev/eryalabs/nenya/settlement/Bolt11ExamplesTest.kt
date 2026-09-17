@@ -96,6 +96,23 @@ class Bolt11ExamplesTest {
         assertEquals(11 to 0, count(Group.VALID) { it.signature != null } to count(Group.INVALID) { it.signature != null }, "signature breakdowns")
     }
 
+    /**
+     * The one description the document escapes, and the guard that keeps the unescaping honest.
+     *
+     * Exactly one line of the pinned file carries a backslash at all: the two `\"` pairs inside the
+     * pico-BTC example's description. The invoice's `d` field holds the unescaped character, so the
+     * extractor undoes that quoting — and this pins both that it happened and that nothing else
+     * arrives still escaped, so a future file with a notation it does not know cannot pass quietly.
+     */
+    @JsName("exactly_one_stated_description_is_unescaped_and_none_arrives_still_escaped")
+    @Test
+    fun `exactly one stated description is unescaped and none arrives still escaped`() {
+        val descriptions = Bolt11Examples.extract().mapNotNull { it.description }
+        assertEquals(9, descriptions.size, "stated descriptions")
+        assertEquals(1, descriptions.count { '"' in it }, "descriptions carrying a double quote")
+        assertEquals(emptyList(), descriptions.filter { '\\' in it }, "descriptions still carrying a backslash")
+    }
+
     @JsName("every_stated_signing_digest_is_the_sha_256_of_the_stated_signing_data")
     @Test
     fun `every stated signing digest is the SHA-256 of the stated signing data`() {
