@@ -137,6 +137,13 @@ class SettlementStructureTest {
             "FeeTermPoint.valueOf",
             "FeeTermRequirement.valueOf",
             "FeeTermElement.valueOf",
+            // The same, for Appendix C's two vocabularies. `Bolt11Invoice` itself is absent from
+            // this list on purpose and that is the point worth reading: it is a sealed interface
+            // with a private implementation, so it has no constructor for the sweep to see and no
+            // published member takes a String. Its `parse` takes a `Bolt11Reference` — a value this
+            // library has already recognised — and never a string a counterparty chose.
+            "Bolt11Multiplier.valueOf",
+            "Bolt11Field.valueOf",
         )
 
         /** `Payee` as it appears inside a `typeName`, bare or parameterised. */

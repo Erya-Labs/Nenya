@@ -26,23 +26,28 @@
 # a header comment the same hand wrote proves only that the file agrees with itself.
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
+#
+# Regenerated for revision `1.4`, whose edits to §0, §4.3 and Appendix C inserted 37 lines
+# above §11.2's row block. Every line number below is therefore its revision `1.3` value plus
+# 37, and the (from, to) column pair is byte-identical to the one that stood before: revision
+# `1.4` changes no transition.
 
-1551 | — | proposed
-1552 | proposed | accepted
-1553 | proposed | cancelled
-1554 | proposed | expired
-1555 | accepted | committed
-1556 | accepted | cancelled
-1556 | accepted | expired
-1557 | committed | awaiting_payment
-1558 | committed | cancelled
-1558 | committed | expired
-1558 | committed | disputed
-1559 | awaiting_payment | paid
-1560 | awaiting_payment | cancelled
-1560 | awaiting_payment | expired
-1560 | awaiting_payment | disputed
-1561 | paid | released
-1562 | paid | disputed
-1563 | released | settled
-1564 | released | disputed
+1588 | — | proposed
+1589 | proposed | accepted
+1590 | proposed | cancelled
+1591 | proposed | expired
+1592 | accepted | committed
+1593 | accepted | cancelled
+1593 | accepted | expired
+1594 | committed | awaiting_payment
+1595 | committed | cancelled
+1595 | committed | expired
+1595 | committed | disputed
+1596 | awaiting_payment | paid
+1597 | awaiting_payment | cancelled
+1597 | awaiting_payment | expired
+1597 | awaiting_payment | disputed
+1598 | paid | released
+1599 | paid | disputed
+1600 | released | settled
+1601 | released | disputed

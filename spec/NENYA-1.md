@@ -21,7 +21,7 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.3`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.4`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
 **Revision history**
@@ -32,6 +32,7 @@ nothing in it is deployed, and the identifiers it reserves are not registered.
 | `1.1` | 2026-09-09 | `OPEN-1`, `OPEN-2` and `OPEN-3` **closed** by the maintainer. The request kind is fixed at `30404`; the fee basis-point rule is fixed at "legal 0–10000, mandatory disclosure, no protocol ceiling below 10000"; public bidding is the default. Five items remain open (`OPEN-4`–`OPEN-8`), keeping their original numbers. |
 | `1.2` | 2026-09-09 | Consistency repair, no new wire semantics. Canonical JSON escaping (§4.1) aligned with the deployed ecosystem — the seven shortcut escapes, every other character below `0x20` as `\u00XX` — recorded as a deliberate, reasoned deviation from NIP-01's literal wording. Twenty internal contradictions resolved, chiefly: the fee-invoice deadlock (§8.5 vs §11.2), the zero-`fee_msat` deadlock (§8.3 vs §11.1), the simultaneously mandatory and optional `fee` tag (§7.5 vs §8.1), the undefined "release deadline" (§11.2), the unbound `kind:15` release (§7.4, §10.3), and the `m`/`file-type` identity (§10.1 vs §10.3). `kind:16` `type=6` assigned to the private bid, closing the §6.1 interop hole; `item` given a normative row in §5.3. The confirmation floor above `500` bps (§8.1) is recorded as a **standing disclosure duty, promoted from interim as part of the `OPEN-2` closure**. `OPEN-8` broadened to cover `type=6`; new `OPEN-9` (registering `30404`) gives the previously unnumbered publication question a number. Two example timestamps corrected (§6, §7.5). |
 | `1.3` | 2026-09-16 | Text with no UTF-8 encoding (§4.1). A `content` or tag value containing an unpaired UTF-16 surrogate MUST now be **rejected**, never serialised with a substituted replacement character: platforms substitute differently (`?` on the JVM, U+FFFD in JavaScript), so substitution gave one event two ids. Stated in §4.1, cross-referenced from §4.3, and added to §18's event-id vectors. |
+| `1.4` | 2026-09-17 | Appendix C corrected against BOLT-11 itself, and completed as a reader specification. Three errors of fact repaired: BOLT-11 does **not** define invoices as all-lowercase (it prescribes uppercase for QR codes and its own example 13 is all uppercase), so refusing an uppercase invoice is stated as **Nenya's** rule and not as BOLT-11's (§4.3, Appendix C); a tagged field of the wrong length is **skipped** as unknown rather than rejecting the invoice, which is BOLT-11's own reader rule; and the payment secret (`s`) is now REQUIRED. Appendix C additionally states, rather than leaves to the reference implementation, the reader rules Nenya enforces, and states which BOLT-11 rules Nenya does **not** perform and MUST NOT report as performed. No tag meaning, fee arithmetic or state changes. |
 
 Revision `1.1` changes no tag meaning, no fee arithmetic, no evidence rule and no state, so
 the `["nenya", "1"]` version tag is unchanged and revision `1.0` and revision `1.1` are wire
@@ -59,6 +60,36 @@ have none — explicit. The `["nenya", "1"]` version tag is unchanged. It change
 an event it newly rejects is one whose id no two implementations could agree on, because its
 serialisation has no UTF-8 encoding and every substitute byte sequence was an implementation
 accident rather than NIP-01.
+
+Revision `1.4` changes no tag meaning, no fee arithmetic and no state, and the
+`["nenya", "1"]` version tag is unchanged. It does **not** claim to change no evidence rule:
+two of its edits change which invoices §9.2's checks can read, and both are named here rather
+than left to be discovered.
+
+- **A tagged field of the wrong length is skipped as unknown, not rejected.** Appendix C
+  previously said an implementation "MUST reject" an invoice whose `p` field has
+  `length != 52`. That is not BOLT-11's rule: BOLT-11 requires a reader to skip any field
+  whose length is not the one its type calls for, every deployed Lightning wallet does so, and
+  BOLT-11's own valid example 14 is an invoice carrying eight such fields *on purpose*. An
+  implementation following the old text refused an invoice real wallets pay. **Evidence is not
+  weakened by the correction.** §9.2 check 3 still reads exactly one 52-group `p`: an invoice
+  with no correct-length `p`, and an invoice with a second one, are both still rejected — so
+  the payment hash a receipt is checked against is still the single unambiguous one the paying
+  wallet used.
+- **The payment secret (`s`) is now REQUIRED**, which rejects an invoice the old text
+  accepted. BOLT-11 requires the field, every deployed wallet refuses an invoice without one,
+  and BOLT-11's own list of *invalid* examples contains one whose only defect is its absence.
+  An implementation that stored such an invoice would be holding a bill no wallet will pay.
+
+Both corrections follow the precedent §4.1 set for canonical JSON escaping: where the letter
+of a document and every working implementation disagree, interoperability wins, and the
+reasoning is written down once in the place it applies.
+
+Everything else Appendix C gains in this revision is a rule Nenya's implementation already
+had to apply in order to read an invoice at all — the bech32 checksum, the last-`1` split, the
+amount rules, the data-part floor — written down so another implementer need not re-derive it,
+plus an explicit statement of what Nenya does **not** check. Neither adds an obligation on a
+sender, so no conformant invoice becomes non-conformant because of them.
 
 Some decisions are still **not yet made**. They are marked `OPEN-n` inline and indexed in
 §16.2; the ones already closed are recorded with their rationale in §16.1. An OPEN item is a
@@ -311,8 +342,14 @@ Implementations MUST emit lowercase hex, and SHOULD accept uppercase hex on read
 normalise it — **except** for the two values named below, where no normalisation of any kind
 is permitted and an uppercase or mixed-case value MUST be **rejected**:
 
-- the BOLT-11 invoice string, which is compared byte-identically (§9.2 check 1) and which
-  BOLT-11 itself defines as all-lowercase (Appendix C);
+- the BOLT-11 invoice string, which is compared byte-identically (§9.2 check 1). **This is
+  Nenya's rule and not BOLT-11's**, and revision `1.4` corrected the claim that it was
+  BOLT-11's: BOLT-11 prescribes an all-uppercase form for QR codes and publishes an
+  all-uppercase invoice among its valid examples. Nenya refuses an uppercase or mixed-case
+  invoice anyway, because check 1 compares the string byte for byte against the one that
+  arrived in the `type=2` and a case fold is exactly the re-encoding that comparison forbids.
+  A sender that has an uppercase invoice lowercases it before putting it in a `payment` tag
+  (Appendix C);
 - the Lightning **preimage** in a `kind:17` receipt (§9.2 check 2), which travels in the same
   tag as that invoice, is verified in the same step, and for which §18 accordingly lists
   uppercase hex as a negative control.
@@ -2103,8 +2140,18 @@ which, so an implementation need not read the reference implementation to know w
 [BOLT-11][bolt11] is normative for everything here.
 
 An invoice is bech32 (with the 90-character limit lifted): a human-readable part, the
-separator `1`, a data part of 5-bit groups, and a 6-character checksum. All of it is
-lowercase; a mixed-case invoice is invalid.
+separator `1`, a data part of 5-bit groups, and a 6-character checksum. The separator is the
+**last** `1` in the string, never the first: the bech32 alphabet contains no `1`, while the
+human-readable part legitimately may — inside the optional amount, as in `lnbc1500n1…`.
+
+**Case is Nenya's rule, not BOLT-11's.** BOLT-11 prescribes an all-uppercase encoding for QR
+codes and publishes an all-uppercase invoice among its own valid examples, so an uppercase
+invoice is a valid BOLT-11 invoice. Nenya nevertheless **MUST reject** an invoice containing
+any uppercase character, and MUST NOT normalise one: §9.2 check 1 compares the string in a
+receipt byte for byte against the string in the stored `type=2`, and a case fold is precisely
+the re-encoding that comparison forbids. A sender holding an uppercase invoice lowercases it
+before putting it in a `payment` tag. Revision `1.3` and earlier attributed this rule to
+BOLT-11, which was an error of fact; the rule itself is unchanged.
 
 **1. Amount — from the human-readable part.** The HRP is `ln` + a network prefix (`bc`,
 `tb`, `bcrt`, …) + an OPTIONAL amount, which is a decimal integer followed by a multiplier:
@@ -2117,31 +2164,89 @@ lowercase; a mixed-case invoice is invalid.
 | `p` | pico (10⁻¹² BTC) | 0.1 |
 | *(none)* | whole BTC | 100 000 000 000 |
 
-A `p` amount MUST be a multiple of 10, because msat is the smallest representable unit; an
-invoice violating that is invalid. An invoice with **no** amount is a "any amount" invoice and
-MUST be rejected by Nenya (§9.2 step 4). The multiplication overflows a double for large
-amounts, so the same arbitrary-precision rule as §4.4 applies.
+If an amount is present it MUST be a positive decimal integer with no leading zeroes; an
+implementation MUST reject `lnbc0…` and `lnbc0500u…` alike. A `p` amount MUST be a multiple of
+10, because msat is the smallest representable unit; an invoice violating that is invalid. An
+invoice with **no** amount is an "any amount" invoice and MUST be rejected by Nenya (§9.2 step
+4). The multiplication overflows a double for large amounts, so the same arbitrary-precision
+rule as §4.4 applies — note that the largest legal `p` figure, the supply cap at
+21 000 000 000 000 000 000 pico-BTC, is itself above a signed 64-bit range, so a 64-bit
+implementation divides by 10 **before** it multiplies.
 
 **2. Timestamp.** The first 35 bits (7 bech32 characters) of the data part, big-endian, Unix
 seconds.
 
 **3. Tagged fields.** The rest of the data part, until the 104-character signature, is a
 sequence of `(type: 5 bits, length: 10 bits in two 5-bit groups, data: length × 5 bits)`.
-Nenya reads two of them:
+
+**A tagged field whose length is not the one its type calls for MUST be skipped as though its
+type were unknown, and MUST NOT reject the invoice.** This is BOLT-11's own reader rule; every
+deployed Lightning wallet implements it, and BOLT-11's valid example 14 is an invoice carrying
+eight such fields deliberately, so an implementation that rejected them would refuse invoices
+real wallets pay. Revision `1.3` and earlier said the opposite of this for `p`; see §0 for why
+the correction does not weaken §9.2's evidence rule.
+
+Nenya reads six fields and requires three of them:
 
 - `p` (type 1) — the **payment hash**, `length == 52`, 260 bits of which the first 256 are the
-  hash. An implementation MUST reject an invoice with no `p` field, with more than one, or
-  with `length != 52`.
-- `x` (type 6) — **expiry** in seconds, big-endian over its data groups. If absent, the
-  default is **3600**. The invoice is expired when `timestamp + expiry` is in the past
-  relative to the injected clock.
+  hash. REQUIRED. An implementation MUST reject an invoice with no correct-length `p` field,
+  and MUST reject one carrying a **second** correct-length `p` field: "first wins" and "last
+  wins" are both defensible, which is exactly why neither may be chosen silently (§4.3), and
+  §9.2 check 3 compares a preimage against *the* payment hash of the stored invoice. A `p`
+  field of any other length is skipped by the rule above and does not satisfy this one.
+- `s` (type 16) — the **payment secret**, `length == 52`. REQUIRED. Nenya reads no value out
+  of it and publishes none; what it requires is that the field be there, because BOLT-11
+  requires it and every deployed wallet refuses an invoice without one.
+- `d` (type 13, variable length) and `h` (type 23, `length == 52`) — the **description** and
+  the **description hash**. Exactly one of the two is REQUIRED. With both, the two say
+  different things about what is being paid for and no reader can tell which the issuer meant.
+- `x` (type 6) — **expiry** in seconds, big-endian over its data groups. OPTIONAL; if absent,
+  the default is **3600**. A second `x` MUST be rejected, for the reason a second `p` is. The
+  invoice is expired when `timestamp + expiry` is in the past relative to **the value the
+  injected clock held at the moment the invoice was accepted** — the value §9.2 check 1
+  requires be persisted alongside the invoice, and never the clock as it reads at
+  receipt-verification time. §9.2 check 5 is normative for this; an invoice that was live when
+  the buyer paid it does not become unpaid because it has since expired.
 
-Unknown tagged fields MUST be skipped by length, never guessed at.
+- `c` (type 24) — `min_final_cltv_expiry_delta`. OPTIONAL; if absent, the default is **18**.
+  Nenya routes no payment and acts on it nowhere; an embedding wallet does, so a reader MAY
+  publish it. A repeat takes BOLT-11's reader rule — the first wins.
+- `9` (type 5) — the **feature bits**, big-endian over the field, numbered from the least
+  significant bit of that field so a bit's position depends on the field's width. OPTIONAL;
+  absent means no bit is set. A reader MAY publish the set of bits so that an embedding wallet
+  can apply BOLT-11's own even/odd rule. See below: Nenya applies none of it. A repeat takes
+  BOLT-11's reader rule.
+
+An `x` value, and **every** `c` value including a repeated one, MUST be rejected when the
+value is 2^64 or more. The bound is on the **value** and never on the field's width: a
+13-group field holding 2^64 − 1 is legal, and a wide field of leading zeros holding a small
+number is that number. An implementation whose integers are signed 64-bit values MUST NOT let
+such a value read as negative — a negative expiry inverts §9.2 check 5's comparison and expires
+every such invoice instantly; saturating at the largest representable value is the fail-closed
+reading, because an expiry that large is one that never runs out.
+
+Every other tagged field MUST be skipped by its length, never guessed at.
 
 **4. Signature.** The final 104 characters (512-bit signature + 1 recovery byte) over the HRP
 and data part. Verifying it, and recovering the node key from it, requires secp256k1 and is
 OPTIONAL in v1 (§9.2). An implementation that skips it MUST still parse past it correctly and
 MUST verify the bech32 checksum.
+
+**What a reader MUST do, and what Nenya does not do.** An implementation reading an invoice
+for Nenya MUST: verify the bech32 checksum; split at the last `1`; apply the human-readable
+part and amount rules above; require `s`; require exactly one of `d` and `h`; require exactly
+one correct-length `p`; refuse an `x` or `c` value of 2^64 or more; and refuse a data part
+shorter than 117 characters, which is the 7-character timestamp, the 104-character signature
+and the 6-character checksum with no room left for anything else.
+
+It MUST NOT report as performed any of the following, none of which Nenya performs:
+**signature verification**, **node-key recovery**, the **low-S** rule, and any judgement of
+the **feature bits** an invoice sets. Those are the paying wallet's, and §9.2's evidence rule
+is the preimage rather than the invoice's signature (§17's last paragraph makes the duty to
+publish that distinction explicit). An implementation MAY publish the signature bytes, the
+recovery id, the SHA-256 of the signed data and the feature bits, so that an embedding
+application with a secp256k1 library and a routing stack can do those things itself;
+publishing a value is not judging it.
 
 Everything Nenya's evidence rule needs — the payment hash, the amount, the expiry — is
 therefore reachable with bech32 decoding, bit-slicing and SHA-256 alone.

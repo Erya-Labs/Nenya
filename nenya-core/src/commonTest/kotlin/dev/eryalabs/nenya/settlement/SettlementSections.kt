@@ -346,3 +346,97 @@ internal object Section94 {
 
     private const val PAYMENT_TAG_NAME: String = "payment"
 }
+
+/**
+ * Appendix C's amount-multiplier table, parsed out of `spec/NENYA-1.md` at test time.
+ *
+ * `Bolt11Multiplier` is held **equal** to what this object returns, so a revision that changed a
+ * factor, added a multiplier or dropped one turns the suite red rather than leaving the parser
+ * quietly agreeing with a table nobody re-read. The same anchor every other `Section*` object here
+ * puts under the section it is about.
+ *
+ * ### The `p` row is why this is a fraction and not a number
+ *
+ * Four of the five rows state an integer number of millisatoshis per unit; the `p` row states
+ * `0.1`. Reading the cell as a `Double` would put floating point into the one place §4.4 forbids it,
+ * so a decimal cell is read as an exact fraction — `0.1` becomes 1/10 — which is the shape
+ * `Bolt11Multiplier` carries and the shape its arithmetic uses.
+ */
+internal object AppendixC {
+
+    const val HEADING: String = "## Appendix C "
+
+    /** One row: the multiplier letter (`null` for the *(none)* row) and its exact msat-per-unit. */
+    class Multiplier(val letter: Char?, val numerator: Long, val denominator: Long) {
+        override fun toString(): String = "${letter ?: "(none)"} = $numerator/$denominator msat per unit"
+    }
+
+    /** The table's first header cell, which is what identifies it among the section's tables. */
+    private const val HEADER_CELL: String = "Multiplier"
+
+    /** How Appendix C prints the row for an amount with no multiplier letter at all. */
+    private const val NO_MULTIPLIER_CELL: String = "*(none)*"
+
+    /** The cells are `| letter | meaning | msat per unit |`. */
+    private const val COLUMNS: Int = 3
+
+    /** Every row, in the order Appendix C prints them. */
+    val multipliers: List<Multiplier> by lazy {
+        val lines = SpecTagShapes.sectionLines(HEADING)
+        val start = lines.indexOfFirst { it.trimStart().startsWith("|") && cells(it).firstOrNull() == HEADER_CELL }
+        if (start < 0) {
+            fail("no `|`-delimited table with a `$HEADER_CELL` first column in Appendix C of ${SpecTagShapes.specPath()}")
+        }
+        val block = lines.drop(start).takeWhile { it.trimStart().startsWith("|") }
+        if (block.size < 3) {
+            fail("Appendix C's `$HEADER_CELL` table in ${SpecTagShapes.specPath()} has ${block.size} line(s)")
+        }
+        val separator = cells(block[1])
+        if (separator.any { cell -> cell.isEmpty() || cell.any { it != '-' && it != ':' } }) {
+            fail("the second line of Appendix C's `$HEADER_CELL` table is not a `|---|` separator: ${block[1]}")
+        }
+        block.drop(2).map { row ->
+            val cells = cells(row)
+            if (cells.size != COLUMNS) {
+                fail("a row of Appendix C's `$HEADER_CELL` table has ${cells.size} cells, not $COLUMNS: $row")
+            }
+            val fraction = fractionOf(cells[2], row)
+            Multiplier(letterOf(cells[0], row), fraction.first, fraction.second)
+        }
+    }
+
+    private fun letterOf(cell: String, row: String): Char? {
+        if (cell == NO_MULTIPLIER_CELL) return null
+        val token = cell.removeSurrounding("`")
+        if (token.length != 1) fail("Appendix C's multiplier cell is one backticked letter or $NO_MULTIPLIER_CELL: $row")
+        return token[0]
+    }
+
+    /**
+     * The msat-per-unit cell as a fraction, numerator first.
+     *
+     * The cell is written with ASCII spaces as digit grouping (`100 000 000`) and, for the `p` row,
+     * as a decimal (`0.1`). Both are read exactly: the spaces come out, and a decimal becomes the
+     * digit string over the corresponding power of ten.
+     */
+    private fun fractionOf(cell: String, row: String): Pair<Long, Long> {
+        val text = cell.replace(" ", "")
+        val dot = text.indexOf('.')
+        val whole = if (dot < 0) text else text.substring(0, dot)
+        val fractional = if (dot < 0) "" else text.substring(dot + 1)
+        if (whole.isEmpty() || whole.any { it !in '0'..'9' } || fractional.any { it !in '0'..'9' }) {
+            fail("Appendix C's msat-per-unit cell is a decimal figure: $row")
+        }
+        if (dot >= 0 && (fractional.isEmpty() || text.indexOf('.', dot + 1) >= 0)) {
+            fail("Appendix C's msat-per-unit cell carries a malformed decimal: $row")
+        }
+        val numerator = (whole + fractional).toLongOrNull()
+            ?: fail("Appendix C's msat-per-unit cell does not read as a number: $row")
+        var denominator = 1L
+        repeat(fractional.length) { denominator *= 10L }
+        return numerator to denominator
+    }
+
+    private fun cells(row: String): List<String> =
+        row.trim().removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
+}

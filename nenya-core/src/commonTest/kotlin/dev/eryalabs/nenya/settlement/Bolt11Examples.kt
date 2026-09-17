@@ -75,6 +75,17 @@ internal object Bolt11Examples {
         val expirySeconds: Long?,
         val description: String?,
         val paymentHashHex: String?,
+        /** The `c` field's stated `min_final_cltv_expiry_delta`, where the breakdown states one. */
+        val minFinalCltvExpiry: Long?,
+        /**
+         * The feature bits the breakdown states as a **sum**, where it states one.
+         *
+         * Only one example's breakdown spells the bits out this way (`… = 8 + 14 + 48`); the others
+         * print the bit string, and one of those elides its middle with `….`. So this is the one
+         * feature anchor the document states in numbers, and the test uses a second — an example
+         * whose *heading* names its features in prose — rather than transcribing any set.
+         */
+        val statedFeatureBits: Set<Int>?,
         val signature: SignatureBreakdown?,
     ) {
         override fun toString(): String = "$group example '$heading' (line $headingLine)"
@@ -94,6 +105,8 @@ internal object Bolt11Examples {
     private val QUOTED_TEXT = Regex("^'(.*)'\$")
     private val SECONDS = Regex("^([0-9]+) seconds( |\$)")
     private val PAYMENT_HASH = Regex("^payment hash ([0-9a-f]{64})\$")
+    private val MIN_FINAL_CLTV = Regex("^min_final_cltv_expiry_delta = ([0-9]+)\$")
+    private val FEATURE_SUM = Regex("= ([0-9]+(?: \\+ [0-9]+)+)\$")
     private val SIGNATURE_BREAKDOWN = Regex("^\\* Signature breakdown:\$")
     private val SIG_DATA = Regex("^  \\* `([0-9a-f]{128})` hex of signature data \\(32-byte r, 32-byte s\\)\$")
     private val RECOVERY_FLAG = Regex("^  \\* `([0-9])` \\(int\\) recovery flag contained in `signature`\$")
@@ -165,6 +178,8 @@ internal object Bolt11Examples {
         var expiry: Long? = null
         var description: String? = null
         var paymentHash: String? = null
+        var minFinalCltv: Long? = null
+        var featureBits: Set<Int>? = null
         val sig = arrayOfNulls<String>(4)
 
         fun <T> once(current: T?, value: T, what: String, line: Int): T {
@@ -211,6 +226,13 @@ internal object Bolt11Examples {
                 }
                 "x" -> SECONDS.find(value)?.let { expiry = once(expiry, it.groupValues[1].toLong(), "expiry", j) }
                 "p" -> PAYMENT_HASH.find(value)?.let { paymentHash = once(paymentHash, it.groupValues[1], "payment hash", j) }
+                "c" -> MIN_FINAL_CLTV.find(value)?.let {
+                    minFinalCltv = once(minFinalCltv, it.groupValues[1].toLong(), "min_final_cltv_expiry_delta", j)
+                }
+                "9" -> FEATURE_SUM.find(value)?.let {
+                    val bits = it.groupValues[1].split("+").map { part -> part.trim().toInt() }.toSet()
+                    featureBits = once(featureBits, bits, "feature bits", j)
+                }
             }
         }
 
@@ -228,6 +250,8 @@ internal object Bolt11Examples {
             expirySeconds = expiry,
             description = description,
             paymentHashHex = paymentHash,
+            minFinalCltvExpiry = minFinalCltv,
+            statedFeatureBits = featureBits,
             signature = if (present == 4) SignatureBreakdown(sig[0]!!, sig[1]!!.toInt(), sig[2]!!, sig[3]!!) else null,
         )
     }

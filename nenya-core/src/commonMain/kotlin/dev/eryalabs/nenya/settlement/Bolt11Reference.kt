@@ -73,7 +73,7 @@ public enum class PaymentMedium(
  *   [SettlementRejection.INVOICE_STATIC_ADDRESS] by §9.3;
  * - **shape** — an `ln` + network-prefix human-readable part with Appendix C's OPTIONAL amount, the
  *   `1` separator, and a data part drawn from the bech32 character set and long enough to hold
- *   Appendix C's 7-character timestamp and 104-character signature.
+ *   Appendix C's 7-character timestamp, 104-character signature and 6-character checksum.
  *
  * It does **not** verify the bech32 checksum. It slices no tagged field, and reads no amount, no
  * timestamp, no expiry and **no payment hash** — which is why `PaymentCheck.INVOICE_AMOUNT` and
@@ -85,9 +85,14 @@ public enum class PaymentMedium(
  * the signature "MUST still parse past it correctly and MUST verify the bech32 checksum". This
  * recogniser verifies no checksum, so it accepts strings a full parser would reject. A caller may
  * conclude from a value of this type only that the reference **is not an address, is not an LNURL
- * and is not obviously something else** — never that it is a valid invoice. Closing that gap needs
- * a BOLT-11 parser with its own externally-authored vectors, which is a human decision rather than
- * a queued task; `loop/queue.md`'s "Blocked on human" section carries the drafted proposal.
+ * and is not obviously something else** — never that it is a valid invoice.
+ *
+ * [Bolt11Invoice.parse] is what closes that gap, and it takes a value of this type: the two are a
+ * pair rather than alternatives, and the division between them is deliberate. This type is the door
+ * §9.2 check 1's byte comparison needs — an opaque string, held verbatim, compared and never read —
+ * and the parser is the door checks 3, 4 and 5 need. A caller that has only recognised a reference
+ * has performed none of the latter three, and no `PaymentCheck` constant moves because this type
+ * exists.
  *
  * ### Verbatim, and that is the whole point
  *
@@ -151,21 +156,47 @@ public class Bolt11Reference private constructor(
          */
         public const val BECH32_ALPHABET: String = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 
-        /** Appendix C: the first 35 bits of the data part, which is seven bech32 characters. */
-        private const val TIMESTAMP_CHARACTERS: Int = 7
+        /**
+         * Appendix C: the first 35 bits of the data part, which is seven bech32 characters.
+         *
+         * `internal` rather than private because [Bolt11Invoice] slices the same data part with the
+         * same three widths, and two copies of a width is how two readers come to disagree about
+         * where a field starts.
+         */
+        internal const val TIMESTAMP_CHARACTERS: Int = 7
 
         /** Appendix C: "the final 104 characters (512-bit signature + 1 recovery byte)". */
-        private const val SIGNATURE_CHARACTERS: Int = 104
+        internal const val SIGNATURE_CHARACTERS: Int = 104
+
+        /** BIP-173's checksum is the last six characters of the data part. */
+        internal const val CHECKSUM_CHARACTERS: Int = 6
 
         /**
-         * 111 — Appendix C's 7-character timestamp plus its 104-character signature.
+         * 117 — Appendix C's 7-character timestamp, its 104-character signature, and the
+         * 6-character bech32 checksum that every data part ends with.
          *
          * A floor on the data part and not a length: a real invoice carries tagged fields between
-         * the two, so this is the shortest data part that could hold the two values Appendix C
-         * says are always present. Below it there is nothing to parse past, whatever a checksum
-         * might say.
+         * the timestamp and the signature, so this is the shortest data part that could hold the
+         * three values Appendix C says are always there. Below it there is nothing to parse past,
+         * whatever a checksum might say.
+         *
+         * **The checksum term is counted, and was not before revision `1.4`'s parser.** The value
+         * this compares against is `reference.substring(separator + 1)`, which still *carries* the
+         * six checksum characters, so a floor of 111 admitted a data part with as few as 105
+         * characters of timestamp-and-signature — six short of the two values it was supposed to
+         * guarantee. No vendored vector lands in the six-character gap (the document's "String is
+         * too short" example has a 109-character data part and was refused either way), so the
+         * correction is proved by a control derived from a vendored invoice rather than by a vector:
+         * `Bolt11ComposerTest` builds data parts of exactly 117 down to 111 by stripping every
+         * tagged field and then truncating the signature, and `Bolt11InvoiceTest` requires the 117
+         * to be recognised and each of 116..111 to be refused.
+         *
+         * [Bolt11Invoice.parse] relies on this floor as an invariant and publishes no rejection of
+         * its own for it: a data part at 117 leaves exactly zero groups of tagged fields, which is
+         * in range for every slice the parser takes.
          */
-        public const val MIN_DATA_CHARACTERS: Int = TIMESTAMP_CHARACTERS + SIGNATURE_CHARACTERS
+        public const val MIN_DATA_CHARACTERS: Int =
+            TIMESTAMP_CHARACTERS + SIGNATURE_CHARACTERS + CHECKSUM_CHARACTERS
 
         /**
          * A reference recognised as BOLT-11-shaped, held verbatim.
@@ -241,9 +272,11 @@ public class Bolt11Reference private constructor(
             val data = reference.substring(separator + 1)
             if (data.length < MIN_DATA_CHARACTERS) {
                 throw malformed(
-                    "Appendix C puts a 7-character timestamp and a 104-character signature in every " +
-                        "invoice's data part, so a data part shorter than $MIN_DATA_CHARACTERS " +
-                        "characters cannot be parsed past; this one is ${data.length}",
+                    "Appendix C puts a $TIMESTAMP_CHARACTERS-character timestamp, a " +
+                        "$SIGNATURE_CHARACTERS-character signature and a " +
+                        "$CHECKSUM_CHARACTERS-character checksum in every invoice's data part, so a " +
+                        "data part shorter than $MIN_DATA_CHARACTERS characters cannot be parsed " +
+                        "past; this one is ${data.length}",
                 )
             }
             for (character in data) {

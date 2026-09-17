@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.settlement
 
 import dev.eryalabs.nenya.channel.ChannelTags
 import dev.eryalabs.nenya.channel.ChannelVocabulary
+import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.payment.PaymentRejection
 import dev.eryalabs.nenya.tag.TagRejection
 
@@ -160,6 +161,127 @@ public enum class SettlementRejection {
      * is not checked, and in particular for the bech32 checksum that is not.
      */
     INVOICE_MALFORMED,
+
+    // ---------------------------------------------------------------------------------------
+    // Appendix C's parser — [Bolt11Invoice.parse]. Every constant below is one that parse can
+    // actually produce; a rejection the recogniser makes first has no duplicate here, which is
+    // why there is no NO_SEPARATOR and no DATA_TOO_SHORT.
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Appendix C: an implementation that skips the signature "MUST still parse past it correctly
+     * and MUST verify the bech32 checksum", and this reference's checksum does not check out.
+     *
+     * The rejection that makes every other one below meaningful, and it is checked **first**. Two of
+     * the vendored document's invalid examples fail more than one rule at once — its bad-checksum
+     * example also carries no payment secret — so a control asserting only "rejected" would pass
+     * with the checksum check deleted entirely. That is why the tests name the reason and not merely
+     * the refusal.
+     */
+    CHECKSUM_INVALID,
+
+    /**
+     * A human-readable part the recogniser's `ln[a-z]+([0-9]+[munp]?)?` pattern admits and BOLT-11
+     * forbids: an amount with a leading zero, or an amount of zero.
+     *
+     * BOLT-11 requires a present amount to be "a positive decimal integer with no leading zeroes".
+     * The recogniser's pattern cannot express that, so it is the parser's. Distinct from
+     * [INVOICE_MALFORMED], which is the recogniser's answer for a shape that is not Appendix C's at
+     * all — including an unknown multiplier letter, which therefore never reaches this constant.
+     */
+    HRP_INVALID,
+
+    /**
+     * A `p`-multiplier amount that is not a multiple of ten — a fraction of a millisatoshi.
+     *
+     * Appendix C: "A `p` amount MUST be a multiple of 10, because msat is the smallest representable
+     * unit; an invoice violating that is invalid." Its own constant rather than
+     * [AMOUNT_OUT_OF_RANGE] for the reason `MoneyRejection.SUB_MILLISATOSHI` has one: the figure
+     * parsed fine and is nowhere near a bound, it simply cannot be represented — and §4.4 requires
+     * that fail loudly rather than be rounded.
+     */
+    AMOUNT_SUB_MSAT,
+
+    /**
+     * An amount above §4.4's bitcoin supply cap, or one whose figure is too large to read at all.
+     *
+     * The two are one constant on purpose: a figure that overflows a 64-bit reader is, at every
+     * multiplier Appendix C defines, already above supply — so reporting "malformed" for it would
+     * name the wrong fix. The product is computed through `Msat`'s checked arithmetic and bounded
+     * before the multiply, never after, because after is too late (§8.3).
+     */
+    AMOUNT_OUT_OF_RANGE,
+
+    /**
+     * A tagged field whose declared `data_length` runs past the start of the signature.
+     *
+     * Skipping it is not available: Appendix C's "Unknown tagged fields MUST be skipped by length"
+     * is what makes the rest of the data part readable, and a length that runs off the end is the
+     * one case where following it would read the signature as field data. Kept apart from every
+     * *wrong-length* rule below, which is the opposite situation: a field whose length is
+     * well-formed but not the one its type calls for is skipped, not refused.
+     */
+    FIELD_TRUNCATED,
+
+    /**
+     * No `p` tagged field of the correct length — so §9.2 check 3 has no operand.
+     *
+     * Still a MUST after revision `1.4` relaxed Appendix C's wrong-length rule, and saying so is the
+     * point: what changed is that a wrong-length `p` is skipped rather than rejecting the invoice,
+     * and an invoice left with no correct-length `p` at all is refused exactly as before.
+     */
+    PAYMENT_HASH_MISSING,
+
+    /**
+     * A **second** `p` tagged field of the correct length.
+     *
+     * Also still a MUST, and the other half of the same rule. §4.3's reasoning applies unchanged:
+     * "first wins" and "last wins" are both defensible, which is exactly the problem — two readers
+     * would then disagree about which payment settles the order, and §9.2 check 3 compares against
+     * *the* payment hash of the stored invoice.
+     */
+    PAYMENT_HASH_DUPLICATED,
+
+    /**
+     * A second `x` (expiry) tagged field.
+     *
+     * §9.2 check 5 measures one deadline. Two candidates for it are refused rather than resolved,
+     * for the reason [PAYMENT_HASH_DUPLICATED] gives. Note the asymmetry with `c` and `9`, which are
+     * repeated by BOLT-11's own first-wins reader rule and which no Nenya check reads: nothing this
+     * library decides turns on either, so there is no disagreement for a duplicate to cause.
+     */
+    EXPIRY_DUPLICATED,
+
+    /**
+     * An `x` or `c` field whose **value** is 2^64 seconds or more.
+     *
+     * The bound is on the value and never on the field's width: a 13-group field holding 2^64 − 1
+     * parses (saturated at `Long.MAX_VALUE`, which for check 5 reads as an expiry that never runs
+     * out), and a wide field of leading zeros holding a small number parses as that number.
+     */
+    EXPIRY_OUT_OF_RANGE,
+
+    /**
+     * No `s` (payment secret) tagged field of the correct length.
+     *
+     * **This refuses an invoice Appendix C's older text accepted**, and it is named in revision
+     * `1.4`'s compatibility paragraph rather than left to be discovered. BOLT-11 requires the field
+     * and every deployed wallet refuses an invoice without one — the vendored document lists such an
+     * invoice among its *invalid* examples — so an implementation that accepted one would store an
+     * invoice no wallet would pay.
+     */
+    PAYMENT_SECRET_MISSING,
+
+    /**
+     * Not exactly one of `d` (a short description) and `h` (a description hash).
+     *
+     * BOLT-11 requires exactly one. With both, the two say different things about what is being paid
+     * for and no reader can tell which the issuer meant; with neither, the invoice says nothing at
+     * all about it. A wrong-length `h` is not one of them — it is skipped as unknown — so an invoice
+     * carrying a `d` and two malformed `h` fields, which the vendored valid example 14 is, satisfies
+     * this rule with exactly one.
+     */
+    DESCRIPTION_NOT_EXACTLY_ONE,
 
     /**
      * The `<proof>` element of a `lightning` receipt is not §9.2 check 2's lowercase 32-byte hex.
@@ -329,7 +451,41 @@ public enum class SettlementRejection {
      * The precise §5.3 reason is the [TagRejection] on the `cause`, which is the `TagException` the
      * tag codec threw.
      */
-    MALFORMED_TAG,
+    MALFORMED_TAG;
+
+    public companion object {
+
+        /**
+         * Every reason [Bolt11Invoice.parse] can produce, and no other.
+         *
+         * Published for two reasons. A caller that wants to tell "this invoice does not decode" from
+         * "this receipt does not match the store" branches on membership here rather than on eleven
+         * separate constants. And the tests enumerate **this set** rather than a list of their own,
+         * so a constant added to the parser without a control that produces it turns them red — a
+         * rejection nothing can reach, and a rejection nothing tests, are both defects the parser's
+         * own test file is required to catch.
+         *
+         * Exactly the constants above this line's own block, and deliberately **not**
+         * [INVOICE_MALFORMED], [INVOICE_UPPERCASE_NOT_PERMITTED] or [INVOICE_STATIC_ADDRESS]: those
+         * three are `Bolt11Reference.recognise`'s, reported before any [Bolt11Reference] — and
+         * therefore any parse — exists at all.
+         */
+        public val APPENDIX_C_PARSER: Set<SettlementRejection> = readOnlySetOf(
+            listOf(
+                CHECKSUM_INVALID,
+                HRP_INVALID,
+                AMOUNT_SUB_MSAT,
+                AMOUNT_OUT_OF_RANGE,
+                FIELD_TRUNCATED,
+                PAYMENT_HASH_MISSING,
+                PAYMENT_HASH_DUPLICATED,
+                EXPIRY_DUPLICATED,
+                EXPIRY_OUT_OF_RANGE,
+                PAYMENT_SECRET_MISSING,
+                DESCRIPTION_NOT_EXACTLY_ONE,
+            ),
+        )
+    }
 }
 
 /**

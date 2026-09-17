@@ -94,6 +94,11 @@ class Bolt11ExamplesTest {
         assertEquals(8 to 1, count(Group.VALID) { it.description != null } to count(Group.INVALID) { it.description != null }, "descriptions")
         assertEquals(4 to 0, count(Group.VALID) { it.paymentHashHex != null } to count(Group.INVALID) { it.paymentHashHex != null }, "payment hashes")
         assertEquals(11 to 0, count(Group.VALID) { it.signature != null } to count(Group.INVALID) { it.signature != null }, "signature breakdowns")
+        // The document states a `min_final_cltv_expiry_delta` for one example and spells its feature
+        // bits out as a sum for one, and those are the two anchors `Bolt11InvoiceTest` uses. A
+        // pattern that silently stopped matching would take an anchor with it.
+        assertEquals(1 to 0, count(Group.VALID) { it.minFinalCltvExpiry != null } to count(Group.INVALID) { it.minFinalCltvExpiry != null }, "stated `c` values")
+        assertEquals(1 to 0, count(Group.VALID) { it.statedFeatureBits != null } to count(Group.INVALID) { it.statedFeatureBits != null }, "feature bits stated as a sum")
     }
 
     /**
