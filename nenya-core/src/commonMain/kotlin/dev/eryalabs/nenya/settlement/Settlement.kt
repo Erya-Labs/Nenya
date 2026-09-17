@@ -410,11 +410,17 @@ public sealed interface Settlement {
          *   neither read makes it trustworthy: a store is the embedding client's own persistence
          *   and §13 says Nenya does not defend its user against the client embedding it.
          * @param order **this implementation's own** order, from `OrderMachine`, which is the only
-         *   thing that can produce one. Whether it is the order this receipt names is the caller's
-         *   binding and not a check made here: `Order` carries no id, for the reason `OrderTerms`
-         *   gives — an identifier held where nothing reads it is a correlation handle (§12). The
-         *   same obligation reaches [earlierPoints]: sightings taken from another order's messages
-         *   would agree with each other, and only the caller knows which order they came from.
+         *   thing that can produce one. Whether it is the order this receipt names is **not**
+         *   checked here, and the narrowing is worth stating precisely rather than waving at. What
+         *   `OrderMachine` now refuses is a `Settlement.Evidenced` whose `order` is not *the
+         *   machine's* order (`TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER`), so no receipt from
+         *   another thread can move an order. That is a different comparison from this one: a
+         *   caller that hands **this** function another order's [Order] and [earlierPoints] still
+         *   gets a result claiming `FEE_TERM_MATCH` and `FEE_STATE_PRECONDITION` for a receipt
+         *   judged against the wrong thread. It is the same obligation [earlierPoints] carries —
+         *   sightings taken from another order's messages agree with each other, and only the
+         *   caller knows which order they came from — and it sits where §13 puts it: Nenya does not
+         *   defend its user against the client embedding it.
          * @param earlierPoints every point at which a `fee` tag appears — or deliberately does not
          *   — for this order **before** this receipt, in the order they were observed. §8.4's
          *   proposal, acceptance and fee `type=2` are **required** to be among them and their

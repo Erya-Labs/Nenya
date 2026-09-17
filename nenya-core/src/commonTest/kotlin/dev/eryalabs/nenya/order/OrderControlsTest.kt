@@ -7,6 +7,7 @@ import dev.eryalabs.nenya.delivery.ServedBytesVerified
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.payment.Payee
+import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.PaymentException
 import dev.eryalabs.nenya.payment.Preimage
 import dev.eryalabs.nenya.payment.VerifiedPayment
@@ -136,7 +137,7 @@ class OrderControlsTest {
         assertEquals(FeeTerm.Absent, terms.split.term)
         assertEquals(Msat.ZERO, terms.split.fee)
 
-        val opened = machine.open(OrderEvent.Proposal(terms))
+        val opened = machine.open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, terms))
         assertEquals(OrderState.PROPOSED, opened.state)
         assertEquals(setOf(Payee.PROVIDER), Payee.requiredPayees(terms.split))
 
@@ -170,23 +171,43 @@ class OrderControlsTest {
      * Two distinct invoices cannot share a payment hash, so a receipt set in which the provider
      * and the fee recipient present the **same** hash and the **same** preimage is a single
      * payment being counted twice — the split-a-combined-invoice shape §8.6 says NENYA-1 has no
-     * version of. §9.2 check 1 would also catch it and needs a persisted `type=2` store this
-     * library does not have; this check needs only the arithmetic already done here.
+     * version of.
+     *
+     * §9.2 check 1 does not subsume it and is not a reason to drop it. Both receipts here pass
+     * check 1: each names its **own** stored `type=2`, and the two invoice strings genuinely
+     * differ — check 1 compares a receipt against its own stored invoice and asks nothing about
+     * the other receipt in the set. What would catch it is check 3's provenance, the payment hash
+     * parsed out of each invoice, which nothing in this library does yet. This check needs only
+     * the arithmetic already done here.
      */
     @JsName("one_payment_offered_as_evidence_for_both_payees_is_refused")
     @Test
     fun `one payment offered as evidence for both payees is refused`() {
-        val preimage = OrderFixtures.preimage()
-        val hash = OrderFixtures.paymentHashOf(preimage)
-        val onePayment = setOf(
-            VerifiedPayment.verify(Payee.PROVIDER, hash, preimage),
-            VerifiedPayment.verify(Payee.FEE, hash, preimage),
+        // The same preimage stream for both payees, so the two receipts prove one payment.
+        val provider = OrderFixtures.receipt(Payee.PROVIDER, stream = 0)
+        val fee = OrderFixtures.receipt(Payee.FEE, stream = 0)
+        assertEquals(
+            provider.payment.paymentHash,
+            fee.payment.paymentHash,
+            "the control is about one payment claimed twice; distinct hashes would test nothing",
+        )
+        assertTrue(
+            PaymentCheck.INVOICE_IDENTITY in provider.checksPerformed &&
+                PaymentCheck.INVOICE_IDENTITY in fee.checksPerformed,
+            "and both passed check 1 against their own stored `type=2`, which is what makes this " +
+                "check still load-bearing rather than subsumed",
+        )
+        assertNotEquals(
+            OrderFixtures.invoice(OrderFixtures.ORDER_INDEX, Payee.PROVIDER),
+            OrderFixtures.invoice(OrderFixtures.ORDER_INDEX, Payee.FEE),
+            "§8.6's two separate invoices: if these were one string, check 1 would have caught " +
+                "this set on its own and the refusal under test would prove nothing",
         )
 
         val refusal = OrderFixtures.refusal(
             machine,
             OrderFixtures.orders().getValue(OrderState.AWAITING_PAYMENT),
-            OrderEvent.ReceiptsVerified(onePayment),
+            OrderEvent.ReceiptsVerified(setOf(provider, fee)),
         )
         assertEquals(TransitionRejection.RECEIPT_PAYMENT_DUPLICATED, refusal.reason)
         assertEquals(OrderState.AWAITING_PAYMENT, refusal.order.state)
@@ -205,15 +226,13 @@ class OrderControlsTest {
     @JsName("a_shared_payment_is_named_as_such_even_when_the_payee_is_also_unrequired")
     @Test
     fun `a shared payment is named as such even when the payee is also unrequired`() {
-        val preimage = OrderFixtures.preimage()
-        val hash = OrderFixtures.paymentHashOf(preimage)
         val refusal = OrderFixtures.refusal(
             machine,
             OrderFixtures.orders(OrderFixtures.zeroFeeTerms).getValue(OrderState.AWAITING_PAYMENT),
             OrderEvent.ReceiptsVerified(
                 setOf(
-                    VerifiedPayment.verify(Payee.PROVIDER, hash, preimage),
-                    VerifiedPayment.verify(Payee.FEE, hash, preimage),
+                    OrderFixtures.receipt(Payee.PROVIDER, stream = 0),
+                    OrderFixtures.receipt(Payee.FEE, stream = 0),
                 ),
             ),
         )
@@ -404,7 +423,8 @@ class OrderControlsTest {
     @Test
     fun `terms with no expiration expire on nothing`() {
         val terms = OrderTerms.of(OrderFixtures.PRICE, FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS))
-        val proposed = OrderFixtures.machineAfterDeadlines().open(OrderEvent.Proposal(terms))
+        val proposed = OrderFixtures.machineAfterDeadlines()
+            .open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, terms))
         val refusal = OrderFixtures.refusal(
             OrderFixtures.machineAfterDeadlines(),
             proposed,
@@ -813,7 +833,7 @@ class OrderControlsTest {
     @Test
     fun `a rumor carrying a negative created_at is rejected`() {
         val rumors = listOf<() -> OrderEvent.Rumor>(
-            { OrderEvent.Proposal(OrderFixtures.TERMS, createdAt = -1L) },
+            { OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS, createdAt = -1L) },
             { OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, createdAt = -1L) },
             { OrderEvent.PrivateBid(Party.BUYER, createdAt = Long.MIN_VALUE) },
             { OrderEvent.ChatMessage(Party.BUYER, createdAt = -1L) },
@@ -904,7 +924,7 @@ class OrderControlsTest {
                 OrderFixtures.refusal(
                     machine,
                     orders.getValue(state),
-                    OrderEvent.Proposal(OrderFixtures.TERMS),
+                    OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS),
                 ).reason,
                 "§7.6: a counter-proposal is a new type=1 with a new order id; at $state",
             )
@@ -927,7 +947,7 @@ class OrderControlsTest {
     @JsName("a_wallet_that_reports_every_payment_settled_moves_the_order_not_at_all")
     @Test
     fun `a wallet that reports every payment settled moves the order not at all`() {
-        val truth = OrderFixtures.receipt(Payee.PROVIDER)
+        val truth = OrderFixtures.receipt(Payee.PROVIDER).payment
         val fabricated = SeamFixtures.lowerHex(SeamFixtures.bytes(Preimage.BYTE_LENGTH, stream = 99L))
         val wallet = LyingWallet(fabricated)
         val awaiting = OrderFixtures.orders().getValue(OrderState.AWAITING_PAYMENT)

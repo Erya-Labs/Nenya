@@ -387,10 +387,15 @@ public class OrderProposal internal constructor(
     /**
      * §11.2's genesis event, for `OrderMachine.open`.
      *
+     * The [order] id travels with the terms, so the order the machine opens is bound to the
+     * `["order", ...]` tag that was on the wire rather than to one a caller supplied beside the
+     * terms — which is what lets §11.2's `awaiting_payment → paid` refuse a receipt that settles
+     * somebody else's order.
+     *
      * The `created_at` rides along because `OrderEvent.Rumor` carries one so that §4.6 has a
      * subject; `OrderMachine` reads it nowhere, which is the point of the field.
      */
-    public fun asOrderEvent(): OrderEvent.Proposal = OrderEvent.Proposal(terms, createdAt)
+    public fun asOrderEvent(): OrderEvent.Proposal = OrderEvent.Proposal(order, terms, createdAt)
 
     /**
      * §7.6, whole: is [update] an acceptance of *these* terms, a counter-proposal, or neither?

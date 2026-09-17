@@ -4,7 +4,8 @@ import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliverableRelease
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
 import dev.eryalabs.nenya.payment.Payee
-import dev.eryalabs.nenya.payment.VerifiedPayment
+import dev.eryalabs.nenya.seam.OrderId
+import dev.eryalabs.nenya.settlement.Settlement
 
 /**
  * How §10.4's three steps failed, when they failed in the caller.
@@ -112,6 +113,19 @@ public sealed interface OrderEvent {
      * a sender field to discriminate.
      */
     public class Proposal(
+
+        /**
+         * §7.4's `order` id this proposal mints the order under — 32 bytes of randomness the buyer
+         * drew, and the handle every later message in the thread carries.
+         *
+         * Here because an order that does not know its own id cannot tell its own evidence from
+         * somebody else's: a receipt verified for *another* order at the same price is otherwise
+         * indistinguishable from this one's, and [ReceiptsVerified] would move the wrong order to
+         * `paid`. `OrderProposal.asOrderEvent` supplies it from the decoded `type=1`, so the value
+         * the machine records is the one that was on the wire rather than one a caller chose
+         * alongside the terms.
+         */
+        public val order: OrderId,
 
         /** The terms the proposal states. A `FeeTerm.Absent` term is §8.1's zero-fee proposal. */
         public val terms: OrderTerms,
@@ -331,29 +345,43 @@ public sealed interface OrderEvent {
      * The receipts (`kind:17`) this library has **verified for itself**, per §9.2.
      *
      * Local rather than a [Rumor] on purpose. A `kind:17` arrives over the wire, but what this
-     * event carries is not the rumor: it is the result of `VerifiedPayment.verify`, which cannot
-     * be constructed except from a preimage whose SHA-256 this library computed and compared to
-     * the payment hash (§9.1, §9.2 checks 2 and 3). A wallet's `CLAIMS_SETTLED`, a counterparty's
-     * `status=paid` and a relay's acceptance are none of them constructible into one, which is
-     * what makes `awaiting_payment → paid` unreachable from an assertion.
+     * event carries is not the rumor: it is a `Settlement.Evidenced`, which cannot be constructed
+     * except from a preimage whose SHA-256 this library computed and compared to the payment hash
+     * (§9.1, §9.2 checks 2 and 3) **and** a BOLT-11 string it compared byte-identically against
+     * the `type=2` it stored for the same order and payee (§9.2 check 1). A wallet's
+     * `CLAIMS_SETTLED`, a counterparty's `status=paid` and a relay's acceptance are none of them
+     * constructible into one, which is what makes `awaiting_payment → paid` unreachable from an
+     * assertion.
      *
-     * §17's honesty rule crosses this layer with the evidence: every `VerifiedPayment` says that
-     * the invoice's **amount** was never checked (§9.2 check 4), and [Order] carries that record
-     * forward, so an order that reached `paid` on check-2/3-only evidence reports itself
-     * amount-unverified. Honouring §17 one layer down and dropping it one layer up is the same
-     * lie with an extra step.
+     * ### Why the element type is `Settlement.Evidenced` and not `VerifiedPayment`
+     *
+     * A bare `VerifiedPayment` needs only a preimage and a hash the caller chose, so it says
+     * nothing about *which invoice* was paid or *whose* it was. Two shapes followed from that and
+     * both reached `paid`: a receipt for an invoice the buyer issued to itself, and a receipt
+     * whose payee label had been swapped by the caller on the way in. Neither is expressible here
+     * any more — the payee is the one the `kind:17`'s own `["payee", …]` tag carried, the invoice
+     * is the one the store held, and `Settlement.Unverified` (§9.4's rail with no verification
+     * rule) is structurally unable to appear in this set at all, which is §9.4 made structural
+     * rather than checked.
+     *
+     * §17's honesty rule crosses this layer with the evidence: every settlement result says which
+     * §9.2 checks produced it and which it did not perform — the invoice's **amount** (check 4)
+     * above all — and [Order] carries **that** record forward rather than the `VerifiedPayment`'s,
+     * so an order reports exactly the checks the evidence behind it actually passed. Honouring
+     * §17 one layer down and dropping it one layer up is the same lie with an extra step.
      */
     public class ReceiptsVerified(
 
         /**
-         * One verified receipt per required payee (§9.2, §11.2).
+         * One verified receipt per required payee (§9.2, §11.2), each naming **this** order.
          *
          * Must cover exactly the required set: a missing one leaves the order `awaiting_payment`
          * — more receipts may still arrive — and a surplus one is refused, since §8.6 says a fee
          * receipt whose expected amount is `0` MUST be rejected and §8.1 says the same of every
-         * fee receipt for an order proposed with no `fee` tag.
+         * fee receipt for an order proposed with no `fee` tag. A receipt naming another order is
+         * refused before any of that ([TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER]).
          */
-        public val receipts: Set<VerifiedPayment>,
+        public val receipts: Set<Settlement.Evidenced>,
     ) : Local
 
     /**

@@ -424,11 +424,17 @@ public object Capabilities {
                 "comparison about an invoice nobody issued. While the two obligations shared one " +
                 "constant the store path subtracted both, and the record said the provenance was " +
                 "closed on the strength of the byte comparison; splitting them is what lets a " +
-                "refusal read this record without inheriting that over-claim. Nor is the " +
-                "settlement result wired into OrderMachine, so an order can still reach `paid` on " +
-                "a bare VerifiedPayment that performed no check 1; this item is the one that " +
-                "governs reaching `paid`. A caller that wants the machine-readable record of what " +
-                "the store path did reads Settlement.checksPerformed, which composes check 1 with " +
+                "refusal read this record without inheriting that over-claim. The settlement " +
+                "result is now what OrderMachine consumes: `awaiting_payment → paid` takes a " +
+                "Settlement.Evidenced per required payee and a bare VerifiedPayment is not " +
+                "expressible there, so no order reaches `paid` on evidence that performed no " +
+                "check 1, and a receipt naming another order is refused before any other rule " +
+                "runs. The order's own record is the union of those results' checksPerformed and " +
+                "checksNotPerformedHere, so it reports check 1 — and, for a fee receipt through " +
+                "verifyFeeReceipt, check 6's three — as performed, because on that path they were. " +
+                "This item is the one that governs reaching `paid`, and it stays PARTIAL for what " +
+                "is below: a caller that wants the machine-readable record of what the store path " +
+                "did reads Settlement.checksPerformed, which composes check 1 with " +
                 "T3's two rather than redefining VerifiedPayment's global claim. Checks 4 and 5 " +
                 "remain absent for want of a BOLT-11 parser: a provider who sends a receipt for " +
                 "ten times `price_msat` is caught by check 4 and by nothing here, and the order " +

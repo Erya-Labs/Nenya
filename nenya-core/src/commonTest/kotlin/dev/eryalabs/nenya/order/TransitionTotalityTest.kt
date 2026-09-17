@@ -62,7 +62,7 @@ abstract class PortableTransitionTotalityTest {
      * the cross-product below from being a lookup of the file it is measured against.
      */
     protected val events: List<OrderEvent> = listOf(
-        OrderEvent.Proposal(OrderFixtures.TERMS),
+        OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS),
         OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, OrderFixtures.TERMS),
         OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.BUYER, OrderFixtures.TERMS),
         OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, OrderFixtures.zeroFeeTerms),
@@ -208,11 +208,17 @@ abstract class PortableTransitionTotalityTest {
     fun `the genesis row is what open produces, and open produces nothing else`() {
         val genesis = Section11.transcribed().single { it.from == Section11.GENESIS }
         val opened = OrderFixtures.machineBeforeDeadlines()
-            .open(OrderEvent.Proposal(OrderFixtures.TERMS))
+            .open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS))
 
         assertEquals(genesis.to, opened.state.token)
         assertEquals(OrderState.PROPOSED, opened.state)
         assertEquals(OrderFixtures.TERMS, opened.terms)
+        assertEquals(
+            OrderFixtures.ORDER_ID,
+            opened.id,
+            "§7.4's order id is the buyer's, drawn when proposing, and the genesis row is where " +
+                "it enters the order — not a value the machine mints or defaults",
+        )
     }
 
     /**

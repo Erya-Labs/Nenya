@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.seam.OrderId
 import java.io.File
 import java.lang.reflect.Executable
 import java.lang.reflect.Modifier
@@ -78,6 +79,12 @@ class OrderStructureTest {
     private companion object {
 
         val PACKAGE: String = OrderStructure.PACKAGE
+
+        /** The binary name `Type.getTypeName()` renders for §9.2's evidence, nested class and all. */
+        const val EVIDENCED: String = "dev.eryalabs.nenya.settlement.Settlement\$Evidenced"
+
+        /** The type that must appear nowhere in this package's generic signatures. */
+        const val VERIFIED_PAYMENT: String = "dev.eryalabs.nenya.payment.VerifiedPayment"
 
         /**
          * The classes this sweep is *about*. Asserted by name rather than by count: a count is
@@ -249,8 +256,8 @@ class OrderStructureTest {
 
     /**
      * §11.2's `awaiting_payment → paid` consumes verified evidence and nothing else, asserted on
-     * the parameter list rather than on the body: the event carries a `Set<VerifiedPayment>` and
-     * no second parameter a counterparty could fill in.
+     * the parameter list rather than on the body: the event carries a set of settlement results
+     * and no second parameter a counterparty could fill in.
      */
     @Test
     fun `the transition function takes an order and an event, and nothing that can assert`() {
@@ -276,6 +283,63 @@ class OrderStructureTest {
     }
 
     /**
+     * The element type of that set, read off the **generic** signature — which is where the two
+     * probes this task closes were expressible.
+     *
+     * `parameterTypes` erases `Set<VerifiedPayment>` and `Set<Settlement.Evidenced>` to the same
+     * `java.util.Set`, so the assertion above is true of both and says nothing about either. T13's
+     * rule is therefore applied here: walk `genericParameterTypes` and match on `typeName`.
+     *
+     * What the element type buys, stated as the two shapes it makes unrepresentable. A bare
+     * `VerifiedPayment` needs a preimage and a payment hash the caller chose and knows nothing of
+     * *which* invoice or *whose*; so a receipt for an invoice the buyer issued to itself reached
+     * `paid`, and so did one whose payee label the caller swapped on the way in. A
+     * `Settlement.Evidenced` carries the order the `kind:17` named, the payee its own
+     * `["payee", …]` tag carried and the invoice the store held. Neither probe can be written any
+     * more, which is why the second half of this test sweeps the **whole** package for
+     * `VerifiedPayment` in any generic position rather than only this one constructor: a second
+     * door taking one would restore both.
+     */
+    @Test
+    fun `the receipts event takes settlement evidence, and nothing here names a bare VerifiedPayment`() {
+        val receipts = OrderStructure.mainClasses()
+            .single { it.name == "$PACKAGE.OrderEvent\$ReceiptsVerified" }
+        val parameters = receipts.constructors.single().genericParameterTypes.map { it.typeName }
+
+        assertEquals(1, parameters.size, "one parameter: the receipts, and nothing beside them")
+        val element = parameters.single()
+        assertTrue(
+            element.startsWith("java.util.Set<"),
+            "the receipts must arrive as a Set — §8.6 is one invoice per payee: $element",
+        )
+        assertTrue(
+            EVIDENCED in element,
+            "the element type must be $EVIDENCED, which cannot exist without §9.2 check 1 having " +
+                "compared the receipt's BOLT-11 string against the stored `type=2` for the same " +
+                "order and payee. It was $element",
+        )
+
+        var swept = 0
+        for (type in publishedClasses()) {
+            for (executable in publishedExecutables(type)) {
+                swept++
+                val signature = executable.genericParameterTypes.map { it.typeName } +
+                    (executable as? java.lang.reflect.Method)?.genericReturnType?.typeName.orEmpty()
+                for (named in signature) {
+                    assertFalse(
+                        VERIFIED_PAYMENT in named,
+                        "${label(type, executable)} names $VERIFIED_PAYMENT in a generic " +
+                            "position ($named). A door into this package taking one re-opens both " +
+                            "probes: evidence with no invoice behind it, and a payee a caller " +
+                            "chose rather than the receipt's own tag",
+                    )
+                }
+            }
+        }
+        assertTrue(swept > 20, "the sweep inspected only $swept members, which is not the package")
+    }
+
+    /**
      * The one door that produces an order carries no state, no token and no flag — it produces
      * `proposed` and nothing else (§11.2's genesis row), and the sink door produces `unknown` and
      * nothing else (§11.1).
@@ -289,7 +353,11 @@ class OrderStructureTest {
             machine.methods.single { it.name == "open" }.parameterTypes.toList(),
         )
         assertEquals(
-            listOf(OrderTerms::class.java),
+            // The order id joins the sink door for the reason it joined the genesis one: an order
+            // that has forgotten which thread it belongs to cannot be told apart from another at
+            // the same price. It is an `OrderId` and never a `String`, so §4.3's length and hex
+            // rules were applied before it got here.
+            listOf(OrderId::class.java, OrderTerms::class.java),
             machine.methods.single { it.name == "unrecognised" }.parameterTypes.toList(),
         )
         for (method in machine.methods.filter { it.declaringClass == machine }) {

@@ -4,7 +4,7 @@ import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
-import dev.eryalabs.nenya.payment.VerifiedPayment
+import dev.eryalabs.nenya.settlement.Settlement
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -292,30 +292,52 @@ class OrderInvariantsTest {
     /**
      * §17's honesty rule survives the layer change, which is this task's finding that matters most.
      *
-     * Every `VerifiedPayment` says §9.2 check 4 — the invoice's **amount** — was not checked here,
+     * Every settlement result says §9.2 check 4 — the invoice's **amount** — was not checked here,
      * because that needs a BOLT-11 parser this library does not have. So an order that reached
-     * `paid` on check-2/3-only evidence is `paid` on partial evidence: a provider who sends a
+     * `paid` is `paid` on partial evidence however many checks it passed: a provider who sends a
      * `type=2` for ten times `price_msat` is caught by check 4 and by nothing this library yet
      * does. §17 says an implementation MUST NOT report unverified things as verified, and
      * honouring that one layer down while dropping it one layer up is the same lie with an extra
      * step.
+     *
+     * The three that remain are the three that need the parser — check 3's *provenance*, check 4's
+     * amount and check 5's expiry — and no more. `INVOICE_IDENTITY` moved to the other side of
+     * this record when the evidence became a settlement result rather than a bare payment: check 1
+     * is a byte comparison against the stored `type=2`, it is performed on every path into
+     * `ReceiptsVerified`, and reporting it unperformed would be a §17 error in the under-claiming
+     * direction rather than a safe silence.
      */
-    @JsName("an_order_that_reached_paid_on_check_2_and_check_3_evidence_reports_itself_amount_unverified")
+    @JsName("an_order_that_reached_paid_reports_exactly_the_three_checks_needing_the_bolt11_parser")
     @Test
-    fun `an order that reached paid on check-2 and check-3 evidence reports itself amount-unverified`() {
+    fun `an order that reached paid reports exactly the three checks needing the BOLT-11 parser`() {
         val paid = orders.getValue(OrderState.PAID)
 
-        assertTrue(
-            PaymentCheck.INVOICE_AMOUNT in paid.paymentChecksNotPerformedHere,
-            "a `paid` order must carry forward that §9.2 check 4 was never performed",
-        )
-        assertTrue(PaymentCheck.INVOICE_IDENTITY in paid.paymentChecksNotPerformedHere)
-        assertTrue(PaymentCheck.INVOICE_EXPIRY in paid.paymentChecksNotPerformedHere)
         assertEquals(
-            setOf(PaymentCheck.PREIMAGE_SHAPE, PaymentCheck.PREIMAGE_HASH_COMPARISON),
-            paid.paymentChecksPerformed,
-            "and it must say which two checks it *did* perform, so the record is actionable",
+            setOf(
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
+                PaymentCheck.INVOICE_AMOUNT,
+                PaymentCheck.INVOICE_EXPIRY,
+            ),
+            paid.paymentChecksNotPerformedHere,
+            "a `paid` order must carry forward that §9.2 check 4 was never performed, and those " +
+                "are the three that need the BOLT-11 parser this library does not have",
         )
+        assertTrue(
+            PaymentCheck.INVOICE_IDENTITY in paid.paymentChecksPerformed,
+            "check 1 was performed against the stored `type=2`, and the record says so rather " +
+                "than under-claiming it",
+        )
+        assertTrue(
+            setOf(PaymentCheck.PREIMAGE_SHAPE, PaymentCheck.PREIMAGE_HASH_COMPARISON)
+                .all { it in paid.paymentChecksPerformed },
+            "T3's two are still in there: ${paid.paymentChecksPerformed}",
+        )
+        for (check in paid.paymentChecksPerformed) {
+            assertFalse(
+                check in paid.paymentChecksNotPerformedHere,
+                "$check is on both sides of the same statement, which cannot both be true",
+            )
+        }
     }
 
     /**
@@ -326,36 +348,48 @@ class OrderInvariantsTest {
      * ### Both directions, as **exact** set equalities
      *
      * A membership assertion on a fee-bearing order alone cannot tell "carried forward from the
-     * receipts" from "hardcoded to the fee constant", because for that order the two coincide.
-     * The provider-only order below is what separates them: its record must be exactly the three
-     * invoice checks and **must not** name check 6's three, which do not apply to a provider
-     * receipt at all — recording an inapplicable obligation as "not performed" is a different
-     * false statement, not a safer one.
+     * receipts" from "hardcoded to a constant", because for that order the two coincide. The
+     * provider-only order below is what separates them: it carries no fee receipt, so check 6's
+     * three obligations must appear on **neither** side of its record. They were not performed and
+     * they were not skipped either — they do not apply to a provider receipt at all, and recording
+     * an inapplicable obligation as "not performed" is a different false statement, not a safer
+     * one.
      */
     @JsName("the_record_is_the_receipts_own_asserted_exactly_on_both_a_fee_bearing_and_a_provider_only_order")
     @Test
     fun `the record is the receipts' own, asserted exactly on both a fee-bearing and a provider-only order`() {
+        val feeBearing = orders.getValue(OrderState.PAID)
         assertEquals(
-            VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_FEE,
-            orders.getValue(OrderState.PAID).paymentChecksNotPerformedHere,
+            Settlement.CHECKS_PERFORMED_ON_THE_FEE_RECEIPT_PATH,
+            feeBearing.paymentChecksPerformed,
             "a fee-bearing order's record is the union of its two receipts', which for these two " +
-                "is the fee receipt's superset — including §9.2 check 6's three obligations",
+                "is the fee receipt's superset — check 1, T3's two, and §9.2 check 6's three",
         )
 
         val providerOnly = OrderFixtures.orders(OrderFixtures.zeroFeeTerms)
             .getValue(OrderState.PAID)
         assertEquals(
-            VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_PROVIDER,
+            Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH,
+            providerOnly.paymentChecksPerformed,
+            "a provider-only order's record must be exactly check 1 and T3's two: claiming check " +
+                "6 for an order with no fee receipt would be the over-claim §17 forbids",
+        )
+        assertEquals(
+            feeBearing.paymentChecksNotPerformedHere,
             providerOnly.paymentChecksNotPerformedHere,
-            "a provider-only order's record must be exactly the three invoice checks: naming " +
-                "check 6's obligations for an order with no fee receipt is a false statement too",
+            "and what neither performed is the same three, because the BOLT-11 parser is missing " +
+                "for both",
         )
         for (check in listOf(
             PaymentCheck.FEE_TERM_MATCH,
             PaymentCheck.FEE_SEALING_KEY,
             PaymentCheck.FEE_STATE_PRECONDITION,
         )) {
-            assertFalse(check in providerOnly.paymentChecksNotPerformedHere, "$check")
+            assertFalse(
+                check in providerOnly.paymentChecksNotPerformedHere,
+                "$check does not apply to a provider receipt, so it is not a skipped check either",
+            )
+            assertFalse(check in providerOnly.paymentChecksPerformed, "$check")
         }
     }
 
@@ -374,7 +408,7 @@ class OrderInvariantsTest {
         val nothingOwed = OrderTerms.of(Msat.ZERO, FeeTerm.of(250))
         assertEquals(emptySet(), Payee.requiredPayees(nothingOwed.split))
 
-        val opened = machine.open(OrderEvent.Proposal(nothingOwed))
+        val opened = machine.open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, nothingOwed))
         val committed = OrderFixtures.advanced(
             machine,
             OrderFixtures.advanced(

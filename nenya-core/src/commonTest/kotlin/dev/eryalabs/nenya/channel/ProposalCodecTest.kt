@@ -106,6 +106,12 @@ class ProposalCodecTest {
         // And it is the genesis event §11.2's first row has no from-state for.
         assertEquals(proposal.terms, proposal.asOrderEvent().terms)
         assertEquals(proposal.createdAt, proposal.asOrderEvent().createdAt)
+        assertEquals(
+            proposal.order,
+            proposal.asOrderEvent().order,
+            "the order the machine opens is bound to the `order` tag that was on the wire, not " +
+                "to an id a caller supplied beside the terms",
+        )
     }
 
     /** §4.3: decoding and re-encoding must reproduce the id T8 computed, byte for byte. */

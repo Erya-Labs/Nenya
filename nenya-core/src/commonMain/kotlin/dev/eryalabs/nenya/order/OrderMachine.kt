@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.delivery.DeliveryException
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.seam.NenyaClock
+import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.seam.SeamAnswer
 
 /**
@@ -97,6 +98,22 @@ public enum class TransitionRejection {
     RECEIPT_NOT_REQUIRED,
 
     /**
+     * A verified receipt whose `["order", ...]` tag names a **different** order from this one.
+     *
+     * §9.2 check 1 keys the stored payment request by `(order, payee)` and §7.4 makes the order id
+     * the handle every message in a thread carries, so a settlement result carries the id the
+     * `kind:17` named. Without this comparison a receipt verified for another order at the same
+     * price is indistinguishable from this one's — every other check here passes on it, because
+     * every other check is about the payee and the payment hash and neither is order-specific.
+     *
+     * Checked **first**, before the duplicate, surplus and completeness rules, for the reason §9.2
+     * gives check 1 first place: a caller whose evidence belongs to another thread is told that,
+     * rather than being told its receipt set is incomplete — which is true of the wrong order and
+     * useless for a misrouted one.
+     */
+    RECEIPT_FOR_ANOTHER_ORDER,
+
+    /**
      * Two receipts for the same payee. §8.6 is one invoice per payee, so a second receipt for a
      * role is not a duplicate to be collapsed: one of the two is for something else.
      */
@@ -110,9 +127,12 @@ public enum class TransitionRejection {
      *
      * Two distinct invoices cannot share a payment hash — a preimage is drawn per invoice — so a
      * receipt set in which two payees present the same hash is one payment claimed twice. §9.2
-     * check 1 would also catch it, and check 1 needs the persisted `type=2` store this library
-     * does not have; **this** check needs only arithmetic already done here, so the fact that the
-     * stronger check is unavailable is no reason to skip the weaker one.
+     * check 1 is performed one layer down now, against the stored `type=2` for each payee, and it
+     * does **not** subsume this: check 1 compares each receipt against its own stored invoice and
+     * asks nothing about the other receipt in the set, so two genuinely distinct invoices
+     * presented with one shared payment hash pass check 1 twice. Catching that needs check 3's
+     * provenance — the hash parsed out of each invoice — which nothing here does yet. This check
+     * needs only arithmetic already done here.
      */
     RECEIPT_PAYMENT_DUPLICATED,
 
@@ -274,14 +294,20 @@ public sealed interface OrderOutcome {
  *
  * ### It carries §17's capability record forward, and that is not decoration
  *
- * Every `VerifiedPayment` says that §9.2 check 4 — the invoice's **amount** — was not checked
- * here, because that needs a BOLT-11 parser this library does not have. So an order that reached
- * `paid` on check-2/3-only evidence is `paid` on partial evidence: a provider who sends a
- * `type=2` for ten times `price_msat` is caught by check 4 and by nothing this library yet does.
- * §17 says an implementation MUST NOT report unverified things as verified, and honouring that
- * one layer down while dropping it one layer up is the same lie with an extra step — so
- * [paymentChecksNotPerformedHere] carries it, and [deliveryChecksNotPerformedHere] does the same
- * for §10.
+ * Every settlement result says that §9.2 check 4 — the invoice's **amount** — was not checked
+ * here, because that needs a BOLT-11 parser this library does not have, and says the same of
+ * check 3's *provenance* and check 5's expiry. So an order is `paid` on partial evidence however
+ * many checks it passed: a provider who sends a `type=2` for ten times `price_msat` is caught by
+ * check 4 and by nothing this library yet does. §17 says an implementation MUST NOT report
+ * unverified things as verified, and honouring that one layer down while dropping it one layer up
+ * is the same lie with an extra step — so [paymentChecksNotPerformedHere] carries it, and
+ * [deliveryChecksNotPerformedHere] does the same for §10.
+ *
+ * The record is the **settlement results'** and not their `VerifiedPayment`s'. That distinction
+ * is the whole of the fix: check 1 and check 6 are performed on the settlement path, a
+ * `VerifiedPayment` knows of neither, and an order that read through to one would under-report
+ * every check the evidence behind it actually passed. Under-reporting is the safe direction of a
+ * §17 error and it is still a false statement about what this library did.
  *
  * ### Never branch on ordinal
  *
@@ -292,6 +318,22 @@ public sealed interface OrderOutcome {
  * named individually rather than taken as a suffix of the enum.
  */
 public sealed interface Order {
+
+    /**
+     * §7.4's 32-byte order id this order was opened under — the handle every `kind:15`, `kind:16`
+     * and `kind:17` in its thread carries.
+     *
+     * Recorded because the evidence that moves an order carries one too: a `Settlement.Evidenced`
+     * names the order its `kind:17` claimed to settle, and without an id here there is nothing to
+     * compare it against. A receipt verified for another order at the same price would otherwise
+     * satisfy every check `OrderMachine.receipts` makes.
+     *
+     * **It is never printed.** §12 item 11 names order ids in one sentence with key material and
+     * preimages as values that MUST NOT appear in a log, a crash report, or the string
+     * representation of anything this library exposes, and [OrderId.toString] redacts itself —
+     * but [toString] here names no id at all, and a test asserts the hex is absent.
+     */
+    public val id: OrderId
 
     /** Where the order is (§11.1). Never [OrderState.UNKNOWN] for an order this library opened. */
     public val state: OrderState
@@ -349,13 +391,18 @@ public sealed interface Order {
  *
  * ### What may move an order, and what may not
  *
- * `awaiting_payment → paid` consumes a `VerifiedPayment` for every payee `Payee.requiredPayees`
- * names, and **nothing else**; `released → settled` consumes a `DeliveryEvidence`, and nothing
- * else. Neither type can be constructed from a wallet's claim, a counterparty's status string or
- * a relay's acceptance, so §9.1 and STOP RULE 12 are enforced by the type system rather than by a
- * check somebody has to remember to write. The seam package's `LyingWallet` is the executable
- * form of that: it reports every payment settled and moves an order out of `awaiting_payment` not
- * at all.
+ * `awaiting_payment → paid` consumes a `Settlement.Evidenced` for every payee
+ * `Payee.requiredPayees` names, and **nothing else**; `released → settled` consumes a
+ * `DeliveryEvidence`, and nothing else. Neither type can be constructed from a wallet's claim, a
+ * counterparty's status string or a relay's acceptance, so §9.1 and STOP RULE 12 are enforced by
+ * the type system rather than by a check somebody has to remember to write. The seam package's
+ * `LyingWallet` is the executable form of that: it reports every payment settled and moves an
+ * order out of `awaiting_payment` not at all.
+ *
+ * The evidence is bound to *this* order as well as verified: a `Settlement.Evidenced` names the
+ * order its `kind:17` claimed to settle, and one naming another is refused
+ * ([TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER]) before any other rule runs. Verified evidence
+ * for somebody else's order is still evidence of something; it is not evidence of this.
  *
  * ### The seams are injected, both of them
  *
@@ -399,6 +446,7 @@ public class OrderMachine(
      * enforced when the terms were built, so nothing here can fail.
      */
     public fun open(proposal: OrderEvent.Proposal): Order = OpenOrder(
+        id = proposal.order,
         state = OrderState.PROPOSED,
         terms = proposal.terms,
         commitment = null,
@@ -425,8 +473,13 @@ public class OrderMachine(
      * cannot be used to assert an order into `paid`. [on] then refuses every event from it —
      * §11.1's sink appears in neither column of §11.2, so it originates no transition and
      * receives none.
+     *
+     * It takes the order id for the same reason [open] does: the caller reconstructing a thread
+     * read the `["order", ...]` tag off the messages it is putting here, and an order in the sink
+     * that had forgotten which thread it was is one a client cannot even list.
      */
-    public fun unrecognised(terms: OrderTerms): Order = OpenOrder(
+    public fun unrecognised(id: OrderId, terms: OrderTerms): Order = OpenOrder(
+        id = id,
         state = OrderState.UNKNOWN,
         terms = terms,
         commitment = null,
@@ -778,12 +831,29 @@ public class OrderMachine(
     /**
      * §11.2's `awaiting_payment → paid`: **all** required receipts verified per §9.2.
      *
-     * The only input is a set of `VerifiedPayment`, which exists only where this library hashed a
-     * preimage itself. §17's record travels with it: the union of what those receipts say was and
-     * was not checked becomes the order's own, so `paid` never over-claims what got it there.
+     * The only input is a set of `Settlement.Evidenced`, which exists only where this library
+     * hashed a preimage itself **and** matched the invoice against the `type=2` it stored for the
+     * same order and payee. Every operand below is read off that evidence and none off a caller's
+     * parameter: the order id, the payee and the payment hash are the ones the `kind:17` carried
+     * and the store confirmed.
+     *
+     * §17's record travels with it: the union of what those *settlement results* say was and was
+     * not checked becomes the order's own — not the union of their `VerifiedPayment`s', which
+     * would drop check 1 and check 6 on the floor and under-report an order that had passed both.
+     * So `paid` claims exactly the checks the evidence behind it performed, no more and no less.
      */
     private fun receipts(order: Order, event: OrderEvent.ReceiptsVerified): OrderOutcome {
         val required = Payee.requiredPayees(order.terms.split)
+        if (event.receipts.any { it.order != order.id }) {
+            return refuse(
+                order,
+                TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER,
+                "a receipt naming another order was offered as evidence for this one. §7.4 makes " +
+                    "the order id the handle every message in a thread carries and §9.2 check 1 " +
+                    "keys the stored payment request by (order, payee); the payment may well have " +
+                    "happened, and it is not this order's",
+            )
+        }
         val covered = event.receipts.mapTo(LinkedHashSet()) { it.payee }
         if (covered.size != event.receipts.size) {
             return refuse(
@@ -793,7 +863,7 @@ public class OrderMachine(
                     "to be collapsed: one of them is evidence of something else",
             )
         }
-        if (event.receipts.mapTo(HashSet()) { it.paymentHash }.size != event.receipts.size) {
+        if (event.receipts.mapTo(HashSet()) { it.payment.paymentHash }.size != event.receipts.size) {
             return refuse(
                 order,
                 TransitionRejection.RECEIPT_PAYMENT_DUPLICATED,
@@ -826,6 +896,9 @@ public class OrderMachine(
                 // A broken or silent clock records nothing here rather than a time: the refusal is
                 // raised when a deadline is next evaluated, which reads the clock afresh.
                 paidAt = (reading() as? ClockReading.At)?.unixSeconds,
+                // The settlement result's own sets, never its `payment`'s: check 1 and check 6 are
+                // performed on the settlement path and a `VerifiedPayment` knows nothing of
+                // either, so reading through to it would under-report an order that passed both.
                 paymentChecksPerformed = event.receipts.flatMapTo(LinkedHashSet()) { it.checksPerformed },
                 paymentChecksNotPerformedHere =
                     event.receipts.flatMapTo(LinkedHashSet()) { it.checksNotPerformedHere },
@@ -1010,6 +1083,10 @@ private fun Order.with(
     deliveryChecksPerformed: Set<DeliveryCheck> = this.deliveryChecksPerformed,
     deliveryChecksNotPerformedHere: Set<DeliveryCheck> = this.deliveryChecksNotPerformedHere,
 ): Order = OpenOrder(
+    // Not a parameter: §7.6 makes a counter-proposal a new `type=1` with a **new** order id, so
+    // there is no transition in §11.2 that moves an order to another id, and a door for one here
+    // is a door for a receipt to be re-pointed at the evidence it did not match.
+    id = id,
     state = state,
     terms = terms,
     commitment = commitment,
@@ -1023,6 +1100,7 @@ private fun Order.with(
 
 /** The single implementation of [Order]. Private, so the only doors in are on [OrderMachine]. */
 private class OpenOrder(
+    override val id: OrderId,
     override val state: OrderState,
     override val terms: OrderTerms,
     override val commitment: DeliverableCommitment?,
@@ -1035,8 +1113,14 @@ private class OpenOrder(
 ) : Order {
 
     /**
-     * Names the state, the dispute ground and the two capability records — and no amount, no
-     * deadline, no hash and no clock reading (§12 item 11, and see [OrderTerms.toString]).
+     * Names the state, the dispute ground and the two capability records — and no order id, no
+     * amount, no deadline, no hash and no clock reading (§12 item 11, and see
+     * [OrderTerms.toString]).
+     *
+     * The order id is the addition worth naming: §12 item 11 lists it beside key material and
+     * preimages, and it is a correlation handle for anyone who later learns it, so it is absent
+     * here rather than delegated to `OrderId.toString` — a redaction two levels deep is one a
+     * later `id.toHex()` in a debugging line undoes without anybody noticing.
      */
     override fun toString(): String =
         "Order(state=${state.token ?: "unknown"}, disputeGround=$disputeGround, " +
