@@ -119,6 +119,7 @@ val vendoredTestFilePaths: List<String> = listOf(
     "nenya-core/src/commonTest/resources/vectors/nip44.vectors.json",
     "nenya-core/src/commonTest/resources/vectors/nist-sha256/SHA256ShortMsg.rsp",
     "nenya-core/src/commonTest/resources/vectors/nist-sha256/SHA256Monte.rsp",
+    "nenya-core/src/commonTest/resources/vectors/bolt11/11-payment-encoding.md",
 )
 
 val generateVendoredTestFiles = tasks.register<GenerateVendoredTestFiles>("generateVendoredTestFiles") {
