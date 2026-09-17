@@ -754,6 +754,18 @@ public sealed interface Settlement {
          * obligations attach to a fee receipt and to nothing else — recording an inapplicable
          * obligation as "not performed" would be a different false statement, which is the reading
          * `VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_PROVIDER` already carries.
+         *
+         * `payment.applicableChecks` composes the same set from the same two constants, for the
+         * refusal `OrderMachine.receipts` takes (decision B). The two must stay in step, and what
+         * keeps them there is a test rather than a shared call — nothing outside this file can call
+         * a private helper, and publishing this one would widen a surface the package sweep pins.
+         * `SettlementPropertyTest` binds them in two steps, and neither closes the loop alone:
+         * "every settlement partitions its payee's applicable checks" asserts that every result
+         * this path produces divides **that file's own** independently composed `applicable(payee)`
+         * exactly between its performed and not-performed sets, and "the applicable check set is
+         * §9.2's own, for each payee" asserts that set equals `applicableChecks(payee)` and equals
+         * §9.2's checks written out one by one. Together they make a divergence a red test naming
+         * the check that moved.
          */
         private fun applicable(payee: Payee): Set<PaymentCheck> = readOnlySetOf(
             VerifiedPayment.CHECKS_PERFORMED_HERE + when (payee) {

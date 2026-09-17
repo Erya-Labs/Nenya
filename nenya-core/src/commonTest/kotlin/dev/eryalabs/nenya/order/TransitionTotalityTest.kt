@@ -98,10 +98,24 @@ abstract class PortableTransitionTotalityTest {
         OrderEvent.ShippingUpdate(Party.PROVIDER),
     )
 
+    /**
+     * Every §11.1 state at [OrderFixtures.TERMS], **and** every one at
+     * [OrderFixtures.freeTerms] — the union the `awaiting_payment → paid` row now needs.
+     *
+     * Decision B refuses `paid` while any applicable §9.2 check is unperformed, so the priced
+     * `awaiting_payment` order below produces that row for no event in the vocabulary: its receipts
+     * verify and the gate still holds it. A free order owes no receipt, `ReceiptsVerified(emptySet)`
+     * is legal from it, and the row is produced there. Both terms shapes are swept rather than the
+     * free one alone, because every other row is a priced order's and dropping it would shrink the
+     * cross-product to prove the equality — the inverse of what this test is for.
+     */
+    private fun crossProductOrders(): List<Order> =
+        orders.values + OrderFixtures.orders(OrderFixtures.freeTerms()).values
+
     /** Every `(from, to)` the function produced, over the whole cross-product. */
     private fun produced(): Set<Pair<String, String>> {
         val pairs = mutableSetOf<Pair<String, String>>()
-        for (order in orders.values) {
+        for (order in crossProductOrders()) {
             for (event in events) {
                 val outcome = machine.on(order, event)
                 if (outcome is OrderOutcome.Advanced) {

@@ -369,6 +369,18 @@ public sealed interface OrderEvent {
      * above all — and [Order] carries **that** record forward rather than the `VerifiedPayment`'s,
      * so an order reports exactly the checks the evidence behind it actually passed. Honouring
      * §17 one layer down and dropping it one layer up is the same lie with an extra step.
+     *
+     * ### Verified is not sufficient: the checks must have been performed (decision B)
+     *
+     * This event carrying one `Settlement.Evidenced` per required payee no longer means the order
+     * will advance. §9.2 requires **all** of its checks before a payment may be treated as made,
+     * and `OrderMachine.receipts` refuses with
+     * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED] when any check that applies to these
+     * receipts was performed by nobody — naming which, on
+     * [OrderOutcome.Refused.ChecksNotPerformed.missing]. Until a BOLT-11 parser closes checks 4 and
+     * 5 and check 3's provenance, the only order this event can move is one that owes no receipt at
+     * all: price `0`, no fee, an empty set. A caller holding a fully verified priced receipt and
+     * seeing that refusal is being told the truth about this library, not about its receipt.
      */
     public class ReceiptsVerified(
 

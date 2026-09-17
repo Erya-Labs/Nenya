@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.settlement
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.VerifiedPayment
+import dev.eryalabs.nenya.payment.applicableChecks
 import dev.eryalabs.nenya.seam.FakeClock
 import kotlin.js.JsName
 import kotlin.test.Test
@@ -332,6 +333,68 @@ class SettlementPropertyTest {
                 "check 6 is the only thing a fee receipt adds. Asserted here rather than left to " +
                 "fail inside the invariant, where a set difference would have to be deciphered",
         )
+    }
+
+    /**
+     * The library's own `applicableChecks` is the set this file composes independently, and is the
+     * set §9.2 names — asserted three ways, because it is what `OrderMachine.receipts` subtracts a
+     * receipt's performed set from to decide whether an order may become `paid` (decision B).
+     *
+     * `Settlement`'s private `applicable` composes the same thing a third time. The three cannot be
+     * collapsed into one call — `Settlement`'s is private, and publishing it would widen a surface
+     * its package sweep pins — so what holds them together is this test. It is the only place
+     * `applicableChecks` is observed at all.
+     *
+     * ### Why the written-out sets, and not only the composition
+     *
+     * The composition below and the library's are built from the same two published constants, so
+     * they agree by construction against anything that edits those constants — including an edit
+     * that is wrong. Worse, `CHECKS_PERFORMED_HERE` is invisible to every behavioural test of the
+     * gate: drop that half of the union and `missing` is unchanged, because every receipt these
+     * fixtures build performs all of it. The literal sets are what make that half falsifiable, and
+     * that half is exactly what fails closed if a settlement path ever stops performing check 2 or
+     * check 3's comparison. Enum constants are names rather than encoded values, so writing them
+     * out is not the typed-fixture the Definition of done forbids.
+     */
+    @JsName("the_applicable_check_set_is_s9_2s_own_for_each_payee")
+    @Test
+    fun `the applicable check set is §9_2's own, for each payee`() {
+        val provider = setOf(
+            PaymentCheck.PREIMAGE_SHAPE,
+            PaymentCheck.PREIMAGE_HASH_COMPARISON,
+            PaymentCheck.INVOICE_IDENTITY,
+            PaymentCheck.PAYMENT_HASH_PROVENANCE,
+            PaymentCheck.INVOICE_AMOUNT,
+            PaymentCheck.INVOICE_EXPIRY,
+        )
+
+        assertEquals(
+            provider,
+            applicableChecks(Payee.PROVIDER),
+            "§9.2 checks 1 to 5 — check 3 being two obligations — apply to a provider receipt, and " +
+                "check 6 does not. This is the set the `paid` gate measures a receipt against",
+        )
+        assertEquals(
+            provider + CHECK_SIX,
+            applicableChecks(Payee.FEE),
+            "and a fee receipt owes check 6's three besides (§9.2 states it for `payee=fee`)",
+        )
+
+        for (payee in Payee.entries) {
+            assertEquals(
+                applicable(payee),
+                applicableChecks(payee),
+                "the library's composition and this file's independent one must agree for $payee; " +
+                    "two compositions agreeing is evidence, one agreeing with itself is not",
+            )
+            assertTrue(
+                VerifiedPayment.CHECKS_PERFORMED_HERE.all { it in applicableChecks(payee) },
+                "the checks this library performs for itself apply to every receipt, and dropping " +
+                    "them from the union is invisible to every behavioural test of the gate: for " +
+                    "$payee it would still yield the same `missing` today, and would stop failing " +
+                    "closed the moment a path stopped performing one of them",
+            )
+        }
     }
 
     @JsName("every_settlement_partitions_its_payees_applicable_checks")

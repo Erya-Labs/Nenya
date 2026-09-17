@@ -11,6 +11,7 @@ import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentFixtures
+import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.PaymentHash
 import dev.eryalabs.nenya.payment.Preimage
 import dev.eryalabs.nenya.seam.FakeClock
@@ -23,6 +24,7 @@ import dev.eryalabs.nenya.settlement.PaymentRequestStore
 import dev.eryalabs.nenya.settlement.Settlement
 import dev.eryalabs.nenya.settlement.SettlementFixtures
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.fail
 
 /**
@@ -109,6 +111,71 @@ internal object OrderFixtures {
     /** §8.1's proposal with no `fee` tag at all: complete terms meaning zero fee. */
     val absentFeeTerms: OrderTerms
         get() = OrderTerms.of(PRICE, FeeTerm.Absent, EXPIRATION, DELIVER_BY)
+
+    /**
+     * [terms] with **both** expected amounts taken to zero, and the same two deadlines.
+     *
+     * The only order that can reach `paid` while decision B stands. §9.2 requires a receipt only
+     * from a payee owed a non-zero amount, so `Payee.requiredPayees` is empty here, `paid` is
+     * reached on an empty receipt set, and there is no check for the gate to find unperformed.
+     * Every other order in this repository's fixtures is refused
+     * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED] until a BOLT-11 parser closes §9.2 checks
+     * 4 and 5 and check 3's provenance.
+     *
+     * Zero price **and** [FeeTerm.Absent], not merely a zero fee: §8.3's `zeroFeeTerms` still owes
+     * the provider `price_msat`, which is a receipt, which is unperformed checks. The deadlines are
+     * kept so that every clock and deadline row of §11.2 behaves on the free chain exactly as it
+     * did on the priced one — the deadline tests rewritten onto it are testing the clock, and terms
+     * with no `expiration` would quietly make them test nothing.
+     */
+    fun freeTerms(terms: OrderTerms = TERMS): OrderTerms =
+        OrderTerms.of(Msat.ZERO, FeeTerm.Absent, terms.expiration, terms.deliverBy)
+
+    /**
+     * The three §9.2 checks **no** path in this library performs, for either payee.
+     *
+     * Checks 4 and 5 need a BOLT-11 parser that does not exist yet, and check 3's *provenance*
+     * needs the same parser to slice the `p` field the comparison's operand must come from. So
+     * this is exactly the `missing` set decision B's gate reports for every priced order, whichever
+     * payee and whichever settlement path — `Settlement.verify` closes check 1 and
+     * `verifyFeeReceipt` closes check 6's three besides, and neither touches these.
+     *
+     * Written out rather than derived from the library's own constants on purpose: a set computed
+     * the way the gate computes it would agree with a broken gate. Enum constants are names, not
+     * encoded values, so the Definition of done's rule against typed fixtures does not reach them.
+     */
+    val CHECKS_NO_PATH_PERFORMS: Set<PaymentCheck> = setOf(
+        PaymentCheck.PAYMENT_HASH_PROVENANCE,
+        PaymentCheck.INVOICE_AMOUNT,
+        PaymentCheck.INVOICE_EXPIRY,
+    )
+
+    /**
+     * The refusal [event] produced, asserted to be decision B's and to name exactly [missing].
+     *
+     * A helper because eleven tests now make the same two assertions, and because the type test is
+     * the load-bearing half: `assertEquals(PAYMENT_CHECKS_NOT_PERFORMED, reason)` alone would pass
+     * over a refusal carrying no check names at all.
+     */
+    fun refusedForChecks(
+        machine: OrderMachine,
+        order: Order,
+        event: OrderEvent,
+        missing: Set<PaymentCheck> = CHECKS_NO_PATH_PERFORMS,
+    ): OrderOutcome.Refused.ChecksNotPerformed {
+        val refused = refusal(machine, order, event)
+        assertEquals(
+            TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED,
+            refused.reason,
+            "§9.2 requires all of its checks before a payment is treated as made (decision B)",
+        )
+        assertIs<OrderOutcome.Refused.ChecksNotPerformed>(
+            refused,
+            "the refusal must carry the checks it found missing, not merely the constant",
+        )
+        assertEquals(missing, refused.missing, "the exact set of checks nobody performed")
+        return refused
+    }
 
     /** A machine whose clock is before both deadlines — the one the fixture chain is built with. */
     fun machineBeforeDeadlines(): OrderMachine = OrderMachine(FakeClock(BEFORE_DEADLINES))
@@ -208,6 +275,28 @@ internal object OrderFixtures {
      * The map is built with [machineBeforeDeadlines] so that no fixture order expires while it is
      * being built. Tests that need a deadline to fire re-run the events against
      * [machineAfterDeadlines].
+     *
+     * ### `paid`, `released` and `settled` carry **free** terms, and why
+     *
+     * The chain up to `awaiting_payment` is built on [terms] as it always was. Past that point it
+     * is not, and cannot be: the human's decision B refuses `paid` while any §9.2 check that
+     * applies is unperformed, and until a BOLT-11 parser exists checks 4 and 5 and check 3's
+     * provenance are unperformed for every receipt this library can produce. So a priced order
+     * cannot be `paid` at all, and the last three states are reached on [freeTerms] — price
+     * [Msat.ZERO], [FeeTerm.Absent], the same two deadlines, no payment requests and no receipts —
+     * which owes no receipt and therefore has no check to be missing.
+     *
+     * **A caller that reads `orders(TERMS)[OrderState.PAID]` gets an order whose terms are free,
+     * whatever it passed in.** That is deliberate and is the only honest fixture available: the
+     * alternative is a `paid` order the library cannot produce. Tests that need a *fee-bearing*
+     * order past `awaiting_payment` have nothing to assert over and must assert the refusal
+     * instead — see `FeeTermCheckTest`, which says so where it does it.
+     *
+     * The refusal is not assumed here, it is **asserted**: a priced [terms] has its real receipt
+     * set offered to the real machine and must come back
+     * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED]. Every suite in this package therefore
+     * re-proves decision B on every run, and a gate deleted or moved turns this fixture red before
+     * it turns any single test red — which is the opposite of a silent fallback to free terms.
      */
     fun orders(terms: OrderTerms = TERMS, index: Int = ORDER_INDEX): Map<OrderState, Order> {
         val machine = machineBeforeDeadlines()
@@ -226,14 +315,57 @@ internal object OrderFixtures {
         )
         val awaitingPayment =
             advanced(machine, committed, OrderEvent.PaymentRequestsReceived(required))
-        val paid =
-            advanced(machine, awaitingPayment, OrderEvent.ReceiptsVerified(receipts(required, index)))
+
+        // Decision B, re-proved here rather than taken on trust, because everything below depends
+        // on it: if this order *could* reach `paid`, the switch to free terms would be an
+        // unnecessary weakening of every fixture built on this map.
+        val freeChain = if (required.isEmpty()) {
+            // Already free. The chain continues on its own terms and nothing is substituted.
+            FreeChain(machine, awaitingPayment)
+        } else {
+            val refused = refusal(
+                machine,
+                awaitingPayment,
+                OrderEvent.ReceiptsVerified(receipts(required, index)),
+            )
+            assertEquals(
+                TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED,
+                refused.reason,
+                "a priced order whose every required receipt has verified must still be refused " +
+                    "`paid` while a §9.2 check that applies to it was performed by nobody " +
+                    "(decision B). This fixture reaches `paid` on free terms *because* of that " +
+                    "refusal, so a run where the refusal is gone must fail here rather than " +
+                    "quietly keep substituting",
+            )
+            freeChainTo(index, terms)
+        }
+
+        val paid = advanced(
+            freeChain.machine,
+            freeChain.awaitingPayment,
+            OrderEvent.ReceiptsVerified(emptySet()),
+        )
+        // Only the two amounts were zeroed. A free chain that also substituted the deadlines would
+        // hand a caller asking for `deliverBy = null` an order carrying one, and every test probing
+        // §11.2's own-release timeout would quietly exercise the `deliver_by` branch instead — and
+        // stay green with that timeout deleted. Asserted here so it is re-proved on every run.
+        assertEquals(
+            terms.deliverBy,
+            paid.terms.deliverBy,
+            "the free chain must keep the caller's `deliver_by`, including its absence",
+        )
+        assertEquals(
+            terms.expiration,
+            paid.terms.expiration,
+            "and the caller's `expiration`, for the same reason",
+        )
         val released = advanced(
-            machine,
+            freeChain.machine,
             paid,
             OrderEvent.DeliverableReleased(matchingRelease(), Party.PROVIDER),
         )
-        val settled = advanced(machine, released, OrderEvent.DeliveryVerified(evidence()))
+        val settled =
+            advanced(freeChain.machine, released, OrderEvent.DeliveryVerified(evidence()))
 
         val cancelled = advanced(
             machine,
@@ -255,6 +387,50 @@ internal object OrderFixtures {
                 "below is not over eleven states at all",
         )
         return byState
+    }
+
+    /**
+     * A free order sitting at `awaiting_payment`, and the machine that drove it there.
+     *
+     * The machine travels with the order because §11.2's clock-dependent rows are evaluated
+     * against the one injected into it: continuing a chain on a different machine would silently
+     * change which deadlines fire.
+     */
+    private class FreeChain(val machine: OrderMachine, val awaitingPayment: Order)
+
+    /**
+     * `proposed → accepted → committed → awaiting_payment` on `freeTerms(terms)`, at [index]'s
+     * order id.
+     *
+     * **[terms] is threaded through rather than defaulted, and that is load-bearing.** Only the two
+     * *amounts* may be zeroed; the deadlines must stay the caller's. A chain built on
+     * `freeTerms()`'s default would hand every caller an order carrying [DELIVER_BY] — so a test
+     * that asked for terms with `deliverBy = null`, in order to probe §11.2's own-release timeout,
+     * would get a `paid` order with a `deliver_by` after all and would silently exercise the
+     * *other* deadline branch. It would stay green with the release timeout deleted entirely.
+     *
+     * No payment requests, because [Payee.requiredPayees] is empty for free terms and §8.6 refuses
+     * a request from a payee owed nothing — `PaymentRequestsReceived(emptySet())` is the whole of
+     * §11.2's `committed → awaiting_payment` row here.
+     */
+    private fun freeChainTo(index: Int, terms: OrderTerms): FreeChain {
+        val machine = machineBeforeDeadlines()
+        val free = freeTerms(terms)
+        val proposed = machine.open(OrderEvent.Proposal(orderId(index), free))
+        val accepted = advanced(
+            machine,
+            proposed,
+            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, assertedTerms = free),
+        )
+        val committed = advanced(
+            machine,
+            accepted,
+            OrderEvent.DeliveryCommitted(blob.commitment, Party.PROVIDER),
+        )
+        return FreeChain(
+            machine,
+            advanced(machine, committed, OrderEvent.PaymentRequestsReceived(emptySet())),
+        )
     }
 
     /**

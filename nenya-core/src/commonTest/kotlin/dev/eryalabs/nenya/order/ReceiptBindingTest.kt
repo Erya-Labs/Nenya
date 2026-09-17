@@ -7,6 +7,7 @@ import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -61,18 +62,17 @@ class ReceiptBindingTest {
     // ---------------------------------------------------------------- what the order now claims
 
     /**
-     * The headline: a fee-bearing order fed the two receipts §9.2 requires reaches `paid` and
-     * reports **both** check 1 and check 6 as performed, because on the path those receipts took
-     * they were.
+     * The headline, read off decision B's refusal rather than off a `paid` order: a fee-bearing
+     * order fed the two receipts §9.2 requires is missing **neither** check 1 nor check 6, because
+     * on the path those receipts took both were performed.
      *
-     * Asserted as an exact equality on the not-performed side. A membership assertion would be
-     * satisfied by a record that also named a check it had in fact performed, which is the §17
-     * error in the under-claiming direction — safer than over-claiming and still a false
-     * statement about what this library did.
+     * Asserted as an exact equality. A membership assertion would be satisfied by a gate that also
+     * demanded a check that had in fact been performed — the mirror of §17's over-claim, and the
+     * shape that deadlocks an order for ever over work somebody already did.
      */
-    @JsName("a_fee_bearing_order_reaches_paid_claiming_check_1_and_check_6_and_nothing_more")
+    @JsName("a_fee_bearing_order_is_missing_neither_check_1_nor_check_6")
     @Test
-    fun `a fee-bearing order reaches paid claiming check 1 and check 6, and nothing more`() {
+    fun `a fee-bearing order is refused paid missing neither check 1 nor check 6`() {
         val awaiting = OrderFixtures.orders().getValue(OrderState.AWAITING_PAYMENT)
         assertEquals(
             setOf(Payee.PROVIDER, Payee.FEE),
@@ -80,64 +80,65 @@ class ReceiptBindingTest {
             "this order must owe a fee, or check 6 never applies and the test is about nothing",
         )
 
-        val paid = OrderFixtures.advanced(
+        val refused = OrderFixtures.refusedForChecks(
             machine,
             awaiting,
             OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         )
 
-        assertEquals(OrderState.PAID, paid.state)
-        assertTrue(
-            PaymentCheck.INVOICE_IDENTITY in paid.paymentChecksPerformed,
-            "§9.2 check 1 was performed against the stored `type=2` for both receipts",
+        assertFalse(
+            PaymentCheck.INVOICE_IDENTITY in refused.missing,
+            "§9.2 check 1 was performed against the stored `type=2` for both receipts, so the " +
+                "gate must not demand it: ${refused.missing}",
         )
         assertTrue(
-            CHECK_SIX.all { it in paid.paymentChecksPerformed },
-            "and check 6's three were performed for the fee receipt: ${paid.paymentChecksPerformed}",
+            CHECK_SIX.none { it in refused.missing },
+            "and check 6's three were performed for the fee receipt: ${refused.missing}",
         )
         assertEquals(
             NEEDS_THE_PARSER,
-            paid.paymentChecksNotPerformedHere,
-            "what is left is exactly the three that need the BOLT-11 parser — and a check may " +
-                "never be on both sides of the same statement",
+            refused.missing,
+            "what is left is exactly the three that need the BOLT-11 parser",
         )
     }
 
     /**
-     * The negative control that keeps the claim above honest: the **same** fee receipt, put
-     * through plain `Settlement.verify` instead, leaves check 6 unperformed — and the order says
-     * so rather than inheriting the claim from the payee role.
+     * The negative control that keeps the claim above honest, and the one the queue names: the
+     * **same** fee receipt put through plain `Settlement.verify` performed no part of check 6, and
+     * the gate **demands** it rather than merely recording it.
      *
-     * Without this, a machine that recorded check 6 for every `Payee.FEE` receipt would pass the
-     * test above exactly as one that read the evidence's own record does.
+     * Two failure modes die here and neither is hypothetical.
+     *
+     * - A machine that credited check 6 to every `Payee.FEE` receipt would pass the test above
+     *   exactly as one reading the evidence's own record does. Here it would let the order past.
+     * - A gate computing `missing` from the receipt's `checksNotPerformedHere` instead of from what
+     *   *applies* would agree with this assertion today — and would stop agreeing the moment a
+     *   settlement path subtracted a check it had not done. That is why the queue's mutation pairs
+     *   the two changes: only "applicable minus performed" survives both.
      */
-    @JsName("a_fee_receipt_through_plain_verify_leaves_check_6_unperformed_on_the_order")
+    @JsName("a_fee_receipt_through_plain_verify_leaves_check_6_demanded_by_the_gate")
     @Test
-    fun `a fee receipt through plain verify leaves check 6 unperformed on the order`() {
+    fun `a fee receipt through plain verify leaves check 6 demanded by the gate`() {
         val throughVerify = OrderFixtures.receiptThroughVerify(Payee.FEE, stream = 1)
         assertEquals(Payee.FEE, throughVerify.payee, "still a fee receipt; only the path differs")
 
-        val paid = OrderFixtures.advanced(
+        val refused = OrderFixtures.refusedForChecks(
             machine,
             OrderFixtures.orders().getValue(OrderState.AWAITING_PAYMENT),
             OrderEvent.ReceiptsVerified(
                 setOf(OrderFixtures.receipt(Payee.PROVIDER, stream = 0), throughVerify),
             ),
+            missing = NEEDS_THE_PARSER + CHECK_SIX,
         )
 
-        assertEquals(OrderState.PAID, paid.state)
         assertTrue(
-            CHECK_SIX.all { it in paid.paymentChecksNotPerformedHere },
-            "a caller that used the general entry point got no part of check 6, and the order's " +
-                "record must say so: ${paid.paymentChecksNotPerformedHere}",
+            CHECK_SIX.all { it in refused.missing },
+            "a caller that used the general entry point got no part of check 6, and the gate must " +
+                "refuse on it rather than record it: ${refused.missing}",
         )
-        assertTrue(
-            CHECK_SIX.none { it in paid.paymentChecksPerformed },
-            "and must not claim it: ${paid.paymentChecksPerformed}",
-        )
-        assertTrue(
-            PaymentCheck.INVOICE_IDENTITY in paid.paymentChecksPerformed,
-            "check 1 is on both paths, so it is still performed here",
+        assertFalse(
+            PaymentCheck.INVOICE_IDENTITY in refused.missing,
+            "check 1 is on both paths, so it is still performed here and still not demanded",
         )
     }
 
@@ -172,10 +173,20 @@ class ReceiptBindingTest {
             "a refusal leaves the order exactly where it was",
         )
 
-        // ...and the same evidence is not merely unusable: its own order takes it.
-        val paid =
-            OrderFixtures.advanced(machine, theirs, OrderEvent.ReceiptsVerified(theirReceipts))
-        assertEquals(OrderState.PAID, paid.state)
+        // ...and the same evidence is not merely unusable: its own order gets past this rule.
+        // Decision B then holds it for the checks nobody performed, which is a different refusal
+        // and the one that proves the id comparison was satisfied rather than merely reached.
+        val own = OrderFixtures.refusedForChecks(
+            machine,
+            theirs,
+            OrderEvent.ReceiptsVerified(theirReceipts),
+        )
+        assertNotEquals(
+            TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER,
+            own.reason,
+            "these receipts name *this* order. A transition that refused everything would " +
+                "satisfy the first half of this test, and this is what separates the two",
+        )
     }
 
     /**

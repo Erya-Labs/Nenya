@@ -40,16 +40,26 @@ class OrderControlsTest {
     // ---------------------------------------------------------------- the two deadlock probes
 
     /**
-     * §18's §8.5 probe — a **fee-bearing** order reaches `awaiting_payment` and then `paid`.
+     * §18's §8.5 probe — a **fee-bearing** order reaches `awaiting_payment`, and is then refused
+     * `paid` for the checks nobody performed and for no other reason.
      *
      * §8.5 is explicit that a rule rejecting the fee `type=2` while the order is still `committed`
      * would make `awaiting_payment` unreachable for every fee-bearing order, and would make the
      * specification's own worked order (Appendix A, step 6) illegal. Revision `1.1` was worded
      * that way; this is the test that says `1.2` is not.
+     *
+     * The probe survives decision B intact, and the assertion that carries it is the **negative**
+     * one. `awaiting_payment` is still reached with both payment requests, both receipts still
+     * verify, and the refusal that follows is `PAYMENT_CHECKS_NOT_PERFORMED` — emphatically not
+     * `RECEIPTS_INCOMPLETE`, which is what a fee payee deadlocked out of the required set would
+     * produce. So this still distinguishes "§9.2 is not yet fully implemented", which is true of
+     * every implementation until the parser lands, from "this order can never be paid", which is
+     * the bug §8.5 is about. The positive half moved to the only order that can reach `paid` at
+     * all: a free one.
      */
-    @JsName("a_fee_bearing_order_reaches_awaiting_payment_and_then_paid")
+    @JsName("a_fee_bearing_order_reaches_awaiting_payment_and_is_refused_paid_for_checks_alone")
     @Test
-    fun `a fee-bearing order reaches awaiting_payment and then paid`() {
+    fun `a fee-bearing order reaches awaiting_payment and is refused paid for checks alone`() {
         val terms = OrderFixtures.TERMS
         assertTrue(terms.split.feePayeeRequired, "this probe needs an order that owes a fee")
         assertEquals(setOf(Payee.PROVIDER, Payee.FEE), Payee.requiredPayees(terms.split))
@@ -62,26 +72,45 @@ class OrderControlsTest {
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
-        val paid = OrderFixtures.advanced(
+        val refused = OrderFixtures.refusedForChecks(
             machine,
             awaiting,
             OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         )
-        assertEquals(OrderState.PAID, paid.state)
+        assertNotEquals(
+            TransitionRejection.RECEIPTS_INCOMPLETE,
+            refused.reason,
+            "§8.5's probe: a fee-bearing order whose fee receipt has verified must never be told " +
+                "its receipt set is incomplete. That refusal is what an implementation which " +
+                "cannot admit the fee payee produces, and it is the deadlock this test exists for",
+        )
+
+        val free = OrderFixtures.orders(OrderFixtures.freeTerms())
+        assertEquals(
+            OrderState.PAID,
+            free.getValue(OrderState.PAID).state,
+            "the positive half: `awaiting_payment → paid` is reachable, on the one order that " +
+                "owes no receipt and therefore has no unperformed check",
+        )
     }
 
     /**
-     * §18's §8.3 probe — an order whose `fee_msat` computes to `0` reaches `paid` with **no** fee
-     * invoice and **no** fee receipt.
+     * §18's §8.3 probe — an order whose `fee_msat` computes to `0` needs **no** fee invoice and
+     * **no** fee receipt, and is held short of `paid` only by §9.2's unperformed checks.
      *
      * §8.3's own example: `bps = 1`, `price_msat = 3000`, `floor(3000 × 1 / 10000) = 0`. The terms
      * *name* a fee payee and no fee invoice may legally exist. An implementation requiring an
      * invoice per **named** payee passes a naive cross-product test — every event it knows about
      * still works — and deadlocks every such order into `expired`.
+     *
+     * Decision B moved where the probe lands and not what it proves: a provider-only receipt set is
+     * accepted as **complete** (no fee receipt is waited for, which is the whole point) and is then
+     * refused for the three checks no path performs. `RECEIPTS_INCOMPLETE` here would mean the fee
+     * payee had been required after all.
      */
-    @JsName("a_zero_fee_order_reaches_paid_with_no_fee_invoice_and_no_fee_receipt")
+    @JsName("a_zero_fee_order_needs_no_fee_receipt_and_is_refused_paid_for_checks_alone")
     @Test
-    fun `a zero-fee order reaches paid with no fee invoice and no fee receipt`() {
+    fun `a zero-fee order needs no fee receipt and is refused paid for checks alone`() {
         val terms = OrderFixtures.zeroFeeTerms
         assertTrue(terms.split.term.namesRecipient, "the terms must *name* a fee payee")
         assertEquals(Msat.ZERO, terms.split.fee, "and the computed fee must still be zero (§8.3)")
@@ -95,12 +124,24 @@ class OrderControlsTest {
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
-        val paid = OrderFixtures.advanced(
+        val refused = OrderFixtures.refusedForChecks(
             machine,
             awaiting,
             OrderEvent.ReceiptsVerified(setOf(OrderFixtures.receipt(Payee.PROVIDER))),
         )
-        assertEquals(OrderState.PAID, paid.state)
+        assertNotEquals(
+            TransitionRejection.RECEIPTS_INCOMPLETE,
+            refused.reason,
+            "§8.3's probe: a provider-only receipt set is COMPLETE for a zero-fee order. Being " +
+                "told otherwise is the implementation waiting for an invoice that may not exist",
+        )
+
+        val free = OrderFixtures.orders(OrderFixtures.freeTerms(terms))
+        assertEquals(
+            OrderState.PAID,
+            free.getValue(OrderState.PAID).state,
+            "the positive half, on the one order §9.2 leaves owing no receipt at all",
+        )
     }
 
     /** §8.6 and §8.3: a fee request for an expected amount of `0` MUST be rejected, not ignored. */
@@ -392,14 +433,17 @@ class OrderControlsTest {
                 assertEquals(state, refusal.order.state, "at $state, reading $reading")
             }
 
+            // Free terms, because decision B leaves no other order able to reach `paid` at all —
+            // and what is under test here is the clock, not the price. `deliver_by` is absent so
+            // the own-release timeout is the edge being probed, exactly as before.
             val noDeliverBy = OrderTerms.of(
-                OrderFixtures.PRICE,
-                FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+                Msat.ZERO,
+                FeeTerm.Absent,
                 expiration = OrderFixtures.EXPIRATION,
                 deliverBy = null,
             )
             val awaiting = OrderFixtures.orders(noDeliverBy).getValue(OrderState.AWAITING_PAYMENT)
-            val paid = OrderFixtures.advanced(broken, awaiting, OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()))
+            val paid = OrderFixtures.advanced(broken, awaiting, OrderEvent.ReceiptsVerified(emptySet()))
             assertEquals(OrderState.PAID, paid.state, "verified receipts still move the order; no deadline is involved")
             assertEquals(null, paid.paidAt, "a broken clock's reading must not be recorded as the time of payment")
             val refusal = OrderFixtures.refusal(broken, paid, OrderEvent.ClockChecked)
@@ -720,9 +764,11 @@ class OrderControlsTest {
     @JsName("a_paidat_at_the_end_of_time_refuses_rather_than_throwing")
     @Test
     fun `a paidAt at the end of time refuses rather than throwing`() {
+        // Free terms: decision B leaves no priced order able to reach `paid`, and the arithmetic
+        // under test is the clock's, which does not know what the order cost.
         val terms = OrderTerms.of(
-            OrderFixtures.PRICE,
-            FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+            Msat.ZERO,
+            FeeTerm.Absent,
             expiration = OrderFixtures.EXPIRATION,
             deliverBy = null,
         )
@@ -731,7 +777,7 @@ class OrderControlsTest {
         val paid = OrderFixtures.advanced(
             extreme,
             awaiting,
-            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+            OrderEvent.ReceiptsVerified(emptySet()),
         )
         assertEquals(Long.MAX_VALUE, paid.paidAt)
 
@@ -765,9 +811,10 @@ class OrderControlsTest {
     @JsName("a_release_deadline_landing_exactly_on_long_max_value_fires_and_one_second_later_refuses")
     @Test
     fun `a release deadline landing exactly on Long MAX_VALUE fires and one second later refuses`() {
+        // Free terms, for the reason the test above gives: the edge is in the deadline arithmetic.
         val terms = OrderTerms.of(
-            OrderFixtures.PRICE,
-            FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+            Msat.ZERO,
+            FeeTerm.Absent,
             expiration = OrderFixtures.EXPIRATION,
             deliverBy = null,
         )
@@ -778,7 +825,7 @@ class OrderControlsTest {
         val paidOnTheEdge = OrderFixtures.advanced(
             OrderMachine(FakeClock(Long.MAX_VALUE - timeout), timeout),
             awaiting,
-            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+            OrderEvent.ReceiptsVerified(emptySet()),
         )
         val disputed = OrderFixtures.advanced(atEndOfTime, paidOnTheEdge, OrderEvent.ClockChecked)
         assertEquals(OrderState.DISPUTED, disputed.state)
@@ -787,7 +834,7 @@ class OrderControlsTest {
         val paidPastTheEdge = OrderFixtures.advanced(
             OrderMachine(FakeClock(Long.MAX_VALUE - timeout + 1L), timeout),
             awaiting,
-            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+            OrderEvent.ReceiptsVerified(emptySet()),
         )
         assertEquals(
             TransitionRejection.DEADLINE_NOT_PASSED,

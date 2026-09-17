@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.crypto.constantTimeEquals
 import dev.eryalabs.nenya.crypto.sha256
 import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.money.Msat
+import kotlin.jvm.JvmSynthetic
 
 /**
  * The two payee roles §8.6 defines, in the tokens it writes them in.
@@ -352,3 +353,47 @@ public sealed interface VerifiedPayment {
         }
     }
 }
+
+/**
+ * Every §9.2 check that applies to a receipt for [payee] **at all**, performed or not.
+ *
+ * The union of what this library verifies for itself and what a receipt for that role still owes,
+ * which together are the whole of §9.2 as it bears on one payee: check 6's three obligations are
+ * in it for a [Payee.FEE] receipt and absent for a [Payee.PROVIDER] one, because §9.2 states check
+ * 6 "for a `payee=fee` receipt" and recording an inapplicable obligation would be a different
+ * false statement.
+ *
+ * ### Why it is here, and what keeps it in step with `Settlement`
+ *
+ * `OrderMachine.receipts` subtracts a receipt's performed set from this to decide whether an order
+ * may become `paid` at all (decision B). `Settlement`'s own private `applicable` composes the same
+ * set from the same two constants to build its §17 record. The two are the same rule read for
+ * opposite purposes — one says what was done, the other refuses what was not — and they must not
+ * drift apart: a refusal demanding a check the record says does not apply would deadlock every
+ * order, and one blind to a check the record does name would let an order past it.
+ *
+ * They are held together by tests rather than by a shared call, because a shared helper is not
+ * available: `Settlement`'s is private, nothing outside that file can call it, and publishing it
+ * would widen a surface its package sweep pins. `SettlementPropertyTest` does the binding, in two
+ * halves — "the applicable check set is §9.2's own, for each payee" pins this function against an
+ * independently composed set **and** against §9.2's checks written out one by one, and "every
+ * settlement partitions its payee's applicable checks" asserts that every result the settlement
+ * path produces divides that same set exactly between its performed and not-performed halves. A
+ * change to either composition turns one of them red naming the check that moved.
+ *
+ * It is deliberately **not** derived from any instance. A record that wrongly subtracted a check
+ * must still be refused, and only "what applies, minus what was done" fails closed. The result is
+ * fixed at call time and iterates in declaration order.
+ *
+ * `@JvmSynthetic` because `internal` alone is not enough — Kotlin compiles an internal top-level
+ * function to a **public** static method on this file's facade class, and this package's
+ * structural sweep reads the JVM surface rather than the Kotlin one (see `encodeLowerHex` in
+ * `wire` for the same note).
+ */
+@JvmSynthetic
+internal fun applicableChecks(payee: Payee): Set<PaymentCheck> = readOnlySetOf(
+    VerifiedPayment.CHECKS_PERFORMED_HERE + when (payee) {
+        Payee.PROVIDER -> VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_PROVIDER
+        Payee.FEE -> VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_FEE
+    },
+)

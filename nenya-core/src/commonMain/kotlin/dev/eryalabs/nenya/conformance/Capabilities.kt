@@ -436,9 +436,22 @@ public object Capabilities {
                 "is below: a caller that wants the machine-readable record of what the store path " +
                 "did reads Settlement.checksPerformed, which composes check 1 with " +
                 "T3's two rather than redefining VerifiedPayment's global claim. Checks 4 and 5 " +
-                "remain absent for want of a BOLT-11 parser: a provider who sends a receipt for " +
-                "ten times `price_msat` is caught by check 4 and by nothing here, and the order " +
-                "carries that fact forward to whatever reads it.",
+                "remain absent for want of a BOLT-11 parser, and so does check 3's provenance: a " +
+                "provider who sends a receipt for ten times `price_msat` is caught by check 4 and " +
+                "by nothing here. What the order does about that has changed. It used to carry the " +
+                "fact forward and advance anyway; §9.2 requires ALL of its checks before a payment " +
+                "may be treated as made, so `awaiting_payment → paid` now REFUSES — " +
+                "TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED, naming the missing checks — " +
+                "while any check that applies to the receipts offered was performed by nobody. The " +
+                "refusal is computed from what applies to each payee minus what that receipt " +
+                "recorded as performed, never from its checksNotPerformedHere, so a record that " +
+                "wrongly subtracted a check cannot hide its own omission from it. The consequence " +
+                "is deliberate and is the reason this item is not CONFORMING: until the parser " +
+                "exists, the only order that can reach `paid` at all is one owing no receipt — " +
+                "price 0 and no fee, the empty set §9.2's non-zero clause produces. Every order in " +
+                "`paid`, `released` or `settled` therefore carries an empty " +
+                "paymentChecksNotPerformedHere, and that emptiness is an invariant of the gate " +
+                "rather than a claim that six checks ran.",
         ),
         ConformanceItem(
             number = 7,

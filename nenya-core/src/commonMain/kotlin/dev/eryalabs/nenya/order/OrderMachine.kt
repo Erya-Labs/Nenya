@@ -1,10 +1,12 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.delivery.DeliveryException
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
+import dev.eryalabs.nenya.payment.applicableChecks
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.seam.SeamAnswer
@@ -135,6 +137,25 @@ public enum class TransitionRejection {
      * needs only arithmetic already done here.
      */
     RECEIPT_PAYMENT_DUPLICATED,
+
+    /**
+     * Every required receipt verified, and at least one §9.2 check that applies to one of them was
+     * never performed. The order stays `awaiting_payment`.
+     *
+     * §9.2 says an implementation "MUST perform **all**" of its checks before treating a payment as
+     * made; §11.1 and §11.2's row define `paid` as receipts "verified per §9.2"; §17 item 6 says
+     * the same. Partial evidence is therefore not weak evidence for `paid` — it is not the thing
+     * §11.2 names — and this library fails closed on it rather than advancing with a record of what
+     * it skipped. No honest priced trade can reach `paid` until the missing checks are implemented,
+     * which is the intended cost: an order wrongly marked `paid` releases a deliverable against a
+     * payment nobody checked the amount of.
+     *
+     * Raised **after** every other refusal in `awaiting_payment → paid`, so a caller whose receipt
+     * set is incomplete, misrouted or duplicated is still told that first. The refusal carries
+     * [OrderOutcome.Refused.ChecksNotPerformed.missing], which names the checks by rule rather than
+     * by identifier (§12 item 11).
+     */
+    PAYMENT_CHECKS_NOT_PERFORMED,
 
     /**
      * A release or a delivery-evidence event reached an order holding no commitment. Unreachable
@@ -277,6 +298,41 @@ public sealed interface OrderOutcome {
          * name a *rule* and a *role*; it may never name a byte, an amount or a deadline.
          */
         public val detail: String
+
+        /**
+         * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED], with the checks that were owed and
+         * not done (decision B).
+         *
+         * A sub-interface rather than a field on every refusal, because [missing] is meaningful
+         * for this one refusal and empty-and-misleading on the other nineteen. A caller branches
+         * on the type — `is OrderOutcome.Refused.ChecksNotPerformed` — and gets the set, or
+         * branches on [reason] and gets the constant; neither reading can be had by accident.
+         *
+         * What a client does with it is the point of publishing it: the set names which of §9.2's
+         * checks this library cannot yet perform, so a client can say "the invoice amount was
+         * never checked" rather than "the order did not move".
+         */
+        public sealed interface ChecksNotPerformed : Refused {
+
+            /**
+             * The §9.2 checks that apply to the receipts offered and were performed by nobody —
+             * the union, over every receipt in the set, of what applies to that payee minus what
+             * that receipt recorded as performed.
+             *
+             * Never empty: an empty [missing] is exactly the case that advances instead.
+             *
+             * **Computed from what *applies*, never from a receipt's own
+             * `checksNotPerformedHere`.** The two agree today and are different questions. A
+             * record that wrongly subtracted a check — a settlement path that came to claim
+             * §9.2 check 4 without a parser behind it — would make its own omission invisible to a
+             * refusal that trusted it, which is §9.1 one layer up: what a value *asserts* about
+             * itself is not evidence. Only "applicable minus performed" fails closed.
+             *
+             * The names are §9.2's rules and not identifiers, so §12 item 11 permits them here and
+             * in [detail].
+             */
+            public val missing: Set<PaymentCheck>
+        }
     }
 }
 
@@ -296,12 +352,21 @@ public sealed interface OrderOutcome {
  *
  * Every settlement result says that §9.2 check 4 — the invoice's **amount** — was not checked
  * here, because that needs a BOLT-11 parser this library does not have, and says the same of
- * check 3's *provenance* and check 5's expiry. So an order is `paid` on partial evidence however
- * many checks it passed: a provider who sends a `type=2` for ten times `price_msat` is caught by
- * check 4 and by nothing this library yet does. §17 says an implementation MUST NOT report
+ * check 3's *provenance* and check 5's expiry. §17 says an implementation MUST NOT report
  * unverified things as verified, and honouring that one layer down while dropping it one layer up
  * is the same lie with an extra step — so [paymentChecksNotPerformedHere] carries it, and
  * [deliveryChecksNotPerformedHere] does the same for §10.
+ *
+ * **No order reaches `paid` on partial payment evidence any more.** It used to: a provider who
+ * sent a `type=2` for ten times `price_msat` is caught by check 4 and by nothing this library yet
+ * does, and the order advanced anyway with the omission written into its record. The human's
+ * decision B closed that — `awaiting_payment → paid` now refuses
+ * ([TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED]) while any applicable §9.2 check is
+ * unperformed — so the record's job here is narrower than it was and its **emptiness** is now the
+ * invariant rather than its contents. See [paymentChecksNotPerformedHere].
+ *
+ * The delivery record is unchanged and is not subject to that rule: §10's obligations are not
+ * §9.2's, and decision B is about what counts as evidence of payment.
  *
  * The record is the **settlement results'** and not their `VerifiedPayment`s'. That distinction
  * is the whole of the fix: check 1 and check 6 are performed on the settlement path, a
@@ -365,16 +430,27 @@ public sealed interface Order {
     /**
      * The §9.2 checks behind `paid` that this library did **not** perform (§17).
      *
-     * Non-empty for any order that reached `paid` on a receipt — `INVOICE_AMOUNT` above all,
-     * which is the check a provider inflating their invoice is caught by.
+     * ### Invariant: empty on every order in `paid`, `released` or `settled`
      *
-     * **Empty is a third answer, and a caller MUST NOT read it as "everything was checked".** An
-     * order whose price and fee both compute to zero requires no receipt at all (§9.2's non-zero
-     * clause), reaches `paid` on an empty receipt set, and therefore carries an empty record in
-     * both directions. The question this set answers is "of the checks the receipts behind this
-     * order needed, which were skipped" — and where there were no receipts there were no checks.
-     * [paymentChecksPerformed] being empty is the flag that distinguishes the two, which is why
-     * both sets are published rather than only this one.
+     * Decision B made it so. `awaiting_payment → paid` refuses while any applicable §9.2 check is
+     * unperformed ([TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED]), and `paid` is the only
+     * gateway to `released` and `settled`, so an order past that gate carries nothing here by
+     * construction. It used to be non-empty for every order that reached `paid` on a receipt —
+     * `INVOICE_AMOUNT` above all, the check a provider inflating their invoice is caught by — and
+     * that is precisely the state of affairs the decision ended.
+     *
+     * The field is **kept**, and not because it is now always empty. It is the shape §17 item 6
+     * requires of an order's record, it is what the refusal above is computed against one layer
+     * out, and it goes back to carrying content the moment a §9.2 check is performed on some paths
+     * and not others. A caller that deleted its handling would have to write it again.
+     *
+     * **Empty was always a third answer, and still is: a caller MUST NOT read it as "everything
+     * was checked".** An order whose price and fee both compute to zero requires no receipt at all
+     * (§9.2's non-zero clause), reaches `paid` on an empty receipt set, and carries an empty record
+     * in both directions — today it is the only order that can. The question this set answers is
+     * "of the checks the receipts behind this order needed, which were skipped", and where there
+     * were no receipts there were no checks. [paymentChecksPerformed] being empty is the flag that
+     * distinguishes the two, which is why both sets are published rather than only this one.
      */
     public val paymentChecksNotPerformedHere: Set<PaymentCheck>
 
@@ -841,6 +917,28 @@ public class OrderMachine(
      * not checked becomes the order's own — not the union of their `VerifiedPayment`s', which
      * would drop check 1 and check 6 on the floor and under-report an order that had passed both.
      * So `paid` claims exactly the checks the evidence behind it performed, no more and no less.
+     *
+     * ### The last question asked is whether §9.2 was actually performed (decision B)
+     *
+     * §9.2 requires **all** of its checks before a payment may be treated as made, so a receipt set
+     * that is complete, correctly routed and undisputed is still not `paid` while some check that
+     * applies to it was performed by nobody. That is refused here, and the order does not move. In
+     * practice no priced order can reach `paid` until checks 4, 5 and check 3's provenance exist;
+     * a free order — price `0`, no fee — owes no receipt, leaves the set empty and still advances.
+     * That cost is the decision, not a side effect of it: an order marked `paid` releases a
+     * deliverable against a payment whose amount nobody checked.
+     *
+     * Two details of the placement are load-bearing.
+     *
+     * - It runs **last**. Ahead of the missing-receipt rule it would answer "some check was not
+     *   performed" to a caller who had simply not sent the fee receipt yet — true, useless, and it
+     *   would hide §8.5's deadlock probe, which needs `RECEIPTS_INCOMPLETE` to stay reachable.
+     * - It asks what **applies** to each payee and subtracts what that receipt says it *performed*.
+     *   It never reads `checksNotPerformedHere`. The two are the same set today and are different
+     *   questions: a settlement path that came to subtract a check it had not done would make its
+     *   own omission invisible to the refusal that exists to catch it, and §9.1's whole point is
+     *   that a value's assertion about itself is not evidence. Only "applicable minus performed"
+     *   fails closed.
      */
     private fun receipts(order: Order, event: OrderEvent.ReceiptsVerified): OrderOutcome {
         val required = Payee.requiredPayees(order.terms.split)
@@ -889,6 +987,16 @@ public class OrderMachine(
                 "§11.2 enters `paid` only when **all** required receipts have verified per §9.2; " +
                     "at least one has not",
             )
+        }
+        // Decision B, and the last thing asked before the order moves: §9.2's checks must all have
+        // been performed, not merely recorded as skipped. `applicableChecks` and never the
+        // receipt's own `checksNotPerformedHere` — a record that wrongly subtracted a check would
+        // otherwise hide its own omission from the refusal that exists to catch it.
+        val unperformed = event.receipts.flatMapTo(LinkedHashSet()) {
+            applicableChecks(it.payee) - it.checksPerformed
+        }
+        if (unperformed.isNotEmpty()) {
+            return refuseChecks(order, unperformed)
         }
         return advance(
             order.with(
@@ -1144,7 +1252,38 @@ private class NotMoved(
     override fun toString(): String = "Refused($reason: $detail)"
 }
 
+/**
+ * The single implementation of [OrderOutcome.Refused.ChecksNotPerformed].
+ *
+ * Its own class rather than a field on [NotMoved], so the only way to obtain a `missing` set is
+ * the one refusal it is true of, and so [NotMoved] cannot come to carry an empty one that reads as
+ * "nothing was skipped".
+ */
+private class ChecksMissing(
+    override val order: Order,
+    override val missing: Set<PaymentCheck>,
+    override val detail: String,
+) : OrderOutcome.Refused.ChecksNotPerformed {
+
+    override val reason: TransitionRejection get() = TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED
+
+    /** The check names are §9.2's rules, not identifiers, so §12 item 11 permits them. */
+    override fun toString(): String = "Refused($reason: missing=$missing: $detail)"
+}
+
 private fun advance(order: Order): OrderOutcome.Advanced = Moved(order)
 
 private fun refuse(order: Order, reason: TransitionRejection, detail: String): OrderOutcome.Refused =
     NotMoved(order, reason, detail)
+
+private fun refuseChecks(
+    order: Order,
+    missing: Set<PaymentCheck>,
+): OrderOutcome.Refused.ChecksNotPerformed = ChecksMissing(
+    order,
+    readOnlySetOf(missing),
+    "§9.2 requires an implementation to perform **all** of its checks before treating a payment " +
+        "as made, and §11.1, §11.2 and §17 item 6 all define `paid` as receipts verified per " +
+        "§9.2. At least one check that applies to these receipts was performed by nobody, so this " +
+        "order fails closed rather than advancing on partial evidence",
+)

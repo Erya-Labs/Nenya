@@ -849,29 +849,54 @@ class FeeTermCheckTest {
         assertNull(refused.tag, "§8.5's rule is about a state and names no tag")
     }
 
-    @JsName("a_fee_receipt_arriving_once_the_order_is_already_past_awaiting_payment_is_refused_too")
+    /**
+     * **A coverage gap, stated openly rather than papered over.**
+     *
+     * This test used to offer a fee receipt to a **fee-bearing** order in `paid`, `released` and
+     * `settled`, and assert `FEE_RECEIPT_STATE_NOT_AWAITING_PAYMENT`. Decision B means no such
+     * order exists: a fee-bearing order cannot pass `awaiting_payment` while §9.2's checks 4 and 5
+     * and check 3's provenance are performed by nobody. The only order that reaches those states is
+     * a free one, which owes no fee at all — so `verifyFeeReceipt` answers `PAYEE_NOT_REQUIRED`
+     * first and check 6's state precondition is never consulted.
+     *
+     * Rewriting it to assert `PAYEE_NOT_REQUIRED` would be the silent weakening STOP RULE 1
+     * forbids: it would read as "the state rule is covered" while covering something else entirely.
+     * So this asserts the fact that actually holds — a fee-bearing order does not reach those
+     * states — and the `!= awaiting_payment` branch keeps its coverage from the `committed` control
+     * immediately above, which is unaffected and still fee-bearing.
+     *
+     * T25 restores the original: once the payment hash comes from the stored invoice's `p` field, a
+     * priced order can be `paid` again and the three states above become reachable with a fee owed.
+     */
+    @JsName("a_fee_bearing_order_cannot_reach_the_states_past_awaiting_payment_at_all")
     @Test
-    fun `a fee receipt arriving once the order is already past awaiting_payment is refused too`() {
-        // §9.2 check 6 says "the state MUST already be `awaiting_payment`", which is an equality
-        // and not §8.5's "before". Past that state a fee receipt is a duplicate or a replay, it
-        // evidences nothing the order does not already carry, and refusing it is the fail-closed
-        // direction. The constant is named for the equality rather than for "before", so the
-        // refusal does not state the opposite of what happened.
+    fun `a fee-bearing order cannot reach the states past awaiting_payment at all`() {
         val messages = FeeOrderMessages()
+        val terms = messages.terms()
+        assertTrue(
+            Payee.FEE in Payee.requiredPayees(terms.split),
+            "this test is about a fee-bearing order, or it is about nothing",
+        )
 
-        for (state in listOf(OrderState.PAID, OrderState.RELEASED, OrderState.SETTLED)) {
-            val refused = assertFailsWith<SettlementException>("at $state") {
-                Settlement.verifyFeeReceipt(
-                    messages.feeReceipt,
-                    messages.feePaymentHash,
-                    messages.store(),
-                    messages.order(state),
-                    messages.earlierPoints(),
-                )
-            }
+        val machine = OrderFixtures.machineBeforeDeadlines()
+        val awaiting = messages.order(OrderState.AWAITING_PAYMENT, terms)
+        assertEquals(
+            OrderState.AWAITING_PAYMENT,
+            awaiting.state,
+            "the fee-bearing chain must still reach `awaiting_payment` — §8.5's deadlock probe",
+        )
 
-            assertEquals(SettlementRejection.FEE_RECEIPT_STATE_NOT_AWAITING_PAYMENT, refused.reason)
-        }
+        val refused = OrderFixtures.refusedForChecks(
+            machine,
+            awaiting,
+            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+        )
+        assertEquals(
+            OrderState.AWAITING_PAYMENT,
+            refused.order.state,
+            "decision B: the order is held at `awaiting_payment`, so `paid`, `released` and " +
+                "`settled` carry no fee-bearing order for check 6's state rule to be tested on",
+        )
     }
 
     @JsName("the_paired_positive_control_the_fee_payment_request_is_accepted_at_committed")
