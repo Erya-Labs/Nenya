@@ -83,19 +83,24 @@ public enum class Payee(
 public enum class PaymentCheck {
 
     /**
-     * §9.2 check 1 — the BOLT-11 string is byte-identical to the one in the stored `type=2`
-     * payment request for the same order and payee — **and** the provenance of the payment
-     * hash check 3 compares against, which is the 256-bit `p` tagged field parsed out of that
-     * invoice. Two obligations under one constant, which is why it is not named
-     * `PREIMAGE_HASH`; see [PREIMAGE_HASH_COMPARISON].
+     * §9.2 check 1, and **only** check 1 — the BOLT-11 string is byte-identical to the one in
+     * the stored `type=2` payment request for the same order and payee. One obligation, one
+     * constant.
      *
-     * The comparison needs no parser, and
+     * It used to carry a second: the provenance of the payment hash check 3 compares against.
+     * That is now [PAYMENT_HASH_PROVENANCE], and the split matters because the two are
+     * performed in different places at different times. The comparison needs no parser, and
      * [dev.eryalabs.nenya.settlement.Settlement.verify] performs it against the persisted
      * store of accepted payment requests that §17 item 6 requires — recording it in **that**
-     * result's own performed-set. The provenance still needs a BOLT-11 parser this library does
-     * not have, so a bare [VerifiedPayment.verify] performs neither obligation, this constant
-     * stays in `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED`, and
-     * [VerifiedPayment.CHECKS_PERFORMED_HERE] MUST NOT be widened to claim otherwise.
+     * result's own performed-set. While the two shared a constant, that path subtracted the
+     * whole of it, so a result reported check 3's provenance closed when nothing had parsed an
+     * invoice at all. A refusal reading such a record would let an order past on a payment hash
+     * that was still a caller-supplied parameter.
+     *
+     * A bare [VerifiedPayment.verify] performs this check no more than it performs the
+     * provenance: it holds no store, so this constant stays in
+     * `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED` and [VerifiedPayment.CHECKS_PERFORMED_HERE]
+     * MUST NOT be widened to claim otherwise.
      */
     INVOICE_IDENTITY,
 
@@ -105,12 +110,30 @@ public enum class PaymentCheck {
     /**
      * §9.2 check 3's **comparison only**: `SHA-256(preimage)` equals the payment hash this
      * library was handed. The name says `COMPARISON` because check 3 as the specification
-     * states it also fixes where `payment_hash` comes from — the 256-bit `p` tagged field
-     * parsed out of the BOLT-11 invoice — and that provenance is [INVOICE_IDENTITY]'s, which
-     * is in the *not*-performed set. A consumer reading `PREIMAGE_HASH` alone would over-read
-     * it, so the constant does not exist under that name.
+     * states it also fixes where `payment_hash` comes from, and that provenance is
+     * [PAYMENT_HASH_PROVENANCE]'s — a separate constant, in the *not*-performed set. A consumer
+     * reading `PREIMAGE_HASH` alone would over-read it, so the constant does not exist under
+     * that name.
      */
     PREIMAGE_HASH_COMPARISON,
+
+    /**
+     * §9.2 check 3's **operand**: the payment hash compared against was the 256-bit `p` tagged
+     * field parsed out of the BOLT-11 invoice (Appendix C), and not a value the caller chose.
+     *
+     * Nothing in this library performs it. `Bolt11Reference` recognises the *shape* of an
+     * invoice and slices no tagged field, so [PaymentHash] arrives at every entry point here as
+     * a parameter — which means a caller that hands in `SHA-256(its own preimage)` gets a
+     * `VerifiedPayment` whose comparison is true and whose subject is an invoice nobody issued.
+     * That is the whole content of this constant, and it is worth one of its own: a record that
+     * folded it into [INVOICE_IDENTITY] reported it performed the moment check 1's byte
+     * comparison succeeded, which is the over-claim §17 forbids and the one a refusal that
+     * reads this record must not inherit.
+     *
+     * In both [VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_PROVIDER] and
+     * [VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_FEE], because check 3 applies to every receipt.
+     */
+    PAYMENT_HASH_PROVENANCE,
 
     /**
      * §9.2 check 4 — the amount in the invoice's human-readable part equals the expected
@@ -226,25 +249,31 @@ public sealed interface VerifiedPayment {
             )
 
         /**
-         * What a [Payee.PROVIDER] receipt still needs: the three invoice checks that require
-         * a BOLT-11 parser and a persisted payment-request store. Check 6 is not listed
-         * because it does not apply to a provider receipt at all — recording an inapplicable
-         * obligation as "not performed" would be a different false statement.
+         * What a [Payee.PROVIDER] receipt still needs: the four obligations that require a
+         * BOLT-11 parser or a persisted payment-request store. Check 6 is not listed because it
+         * does not apply to a provider receipt at all — recording an inapplicable obligation as
+         * "not performed" would be a different false statement.
+         *
+         * [PaymentCheck.PAYMENT_HASH_PROVENANCE] is here, and is the one constant no path in
+         * this library subtracts: check 1's comparison closes on the store path, and check 3's
+         * operand does not close until something parses the invoice's `p` field.
          */
         public val CHECKS_NOT_PERFORMED_FOR_PROVIDER: Set<PaymentCheck> =
             readOnlySetOf(
                 linkedSetOf(
                     PaymentCheck.INVOICE_IDENTITY,
+                    PaymentCheck.PAYMENT_HASH_PROVENANCE,
                     PaymentCheck.INVOICE_AMOUNT,
                     PaymentCheck.INVOICE_EXPIRY,
                 ),
             )
 
-        /** The provider's three, plus check 6's three fee-receipt obligations (§9.2). */
+        /** The provider's four, plus check 6's three fee-receipt obligations (§9.2). */
         public val CHECKS_NOT_PERFORMED_FOR_FEE: Set<PaymentCheck> =
             readOnlySetOf(
                 linkedSetOf(
                     PaymentCheck.INVOICE_IDENTITY,
+                    PaymentCheck.PAYMENT_HASH_PROVENANCE,
                     PaymentCheck.INVOICE_AMOUNT,
                     PaymentCheck.INVOICE_EXPIRY,
                     PaymentCheck.FEE_TERM_MATCH,

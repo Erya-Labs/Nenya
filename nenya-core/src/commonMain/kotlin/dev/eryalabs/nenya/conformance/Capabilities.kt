@@ -393,6 +393,7 @@ public object Capabilities {
             ),
             notPerformed = setOf(
                 PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
                 PaymentCheck.INVOICE_AMOUNT,
                 PaymentCheck.INVOICE_EXPIRY,
             ),
@@ -410,11 +411,20 @@ public object Capabilities {
                 "§9.2 check 1 IS performed: Settlement.verify compares the receipt's BOLT-11 " +
                 "string byte-identically against the stored one and rejects a receipt for which " +
                 "nothing was stored. **INVOICE_IDENTITY stays in this set anyway, and that is a " +
-                "statement rather than an oversight.** The constant carries two things — check 1's " +
-                "comparison, and the provenance of the payment hash check 3 compares against, " +
-                "which is the 256-bit `p` field parsed out of the invoice — and only the first is " +
-                "closed: this library recognises the shape of a BOLT-11 string and parses no field " +
-                "of one, so the payment hash is still a caller-supplied parameter. Nor is the " +
+                "statement rather than an oversight:** it is a claim about a bare " +
+                "VerifiedPayment.verify, which holds no store and compares nothing, and the " +
+                "machine-readable record of what the store path did is that result's own " +
+                "checksPerformed. INVOICE_IDENTITY is now check 1's byte comparison and nothing " +
+                "else. The provenance of the payment hash check 3 compares against — the 256-bit " +
+                "`p` field parsed out of the invoice — is PAYMENT_HASH_PROVENANCE, a constant of " +
+                "its own, and it is in this set for a stronger reason: no path in this library " +
+                "subtracts it. This library recognises the shape of a BOLT-11 string and parses no " +
+                "field of one, so the payment hash is a caller-supplied parameter on every entry " +
+                "point, and a caller that hands in the SHA-256 of a preimage it chose gets a true " +
+                "comparison about an invoice nobody issued. While the two obligations shared one " +
+                "constant the store path subtracted both, and the record said the provenance was " +
+                "closed on the strength of the byte comparison; splitting them is what lets a " +
+                "refusal read this record without inheriting that over-claim. Nor is the " +
                 "settlement result wired into OrderMachine, so an order can still reach `paid` on " +
                 "a bare VerifiedPayment that performed no check 1; this item is the one that " +
                 "governs reaching `paid`. A caller that wants the machine-readable record of what " +

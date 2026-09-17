@@ -278,10 +278,16 @@ class FeeTermCheckTest {
                 "on this path: ${evidenced.checksPerformed}",
         )
         assertEquals(
-            setOf(PaymentCheck.INVOICE_AMOUNT, PaymentCheck.INVOICE_EXPIRY),
+            setOf(
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
+                PaymentCheck.INVOICE_AMOUNT,
+                PaymentCheck.INVOICE_EXPIRY,
+            ),
             evidenced.checksNotPerformedHere,
-            "what is left is checks 4 and 5, which need the BOLT-11 parser this library does not " +
-                "have — and a check may never be on both sides of the same statement",
+            "what is left is check 3's provenance and checks 4 and 5, all three of which need the " +
+                "BOLT-11 parser this library does not have — and a check may never be on both " +
+                "sides of the same statement. The provenance is what this expectation gained: the " +
+                "fullest path in the library still takes the payment hash as a parameter",
         )
     }
 
@@ -353,6 +359,7 @@ class FeeTermCheckTest {
         assertEquals(
             setOf(
                 PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
                 PaymentCheck.INVOICE_AMOUNT,
                 PaymentCheck.INVOICE_EXPIRY,
             ),

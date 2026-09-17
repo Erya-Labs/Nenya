@@ -66,9 +66,10 @@ public class PaymentException internal constructor(
  * §9.2 check 3 defines `payment_hash` as the 256-bit `p` tagged field **parsed out of the
  * BOLT-11 invoice** (Appendix C). This library has no BOLT-11 parser, so the hash is taken
  * from the caller and the *comparison* is what this package implements. That is a deliberate
- * narrowing, stated rather than papered over, and it is recorded machine-readably as
- * [PaymentCheck.INVOICE_IDENTITY], [PaymentCheck.INVOICE_AMOUNT] and
- * [PaymentCheck.INVOICE_EXPIRY] on every [VerifiedPayment] this package issues.
+ * narrowing, stated rather than papered over, and the constant that records it is
+ * [PaymentCheck.PAYMENT_HASH_PROVENANCE] — named on every [VerifiedPayment] this package issues,
+ * alongside [PaymentCheck.INVOICE_IDENTITY], [PaymentCheck.INVOICE_AMOUNT] and
+ * [PaymentCheck.INVOICE_EXPIRY], and subtracted by no path anywhere in this library.
  *
  * ### Case
  *

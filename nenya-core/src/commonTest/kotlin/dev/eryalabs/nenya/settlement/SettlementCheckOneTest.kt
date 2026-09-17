@@ -115,11 +115,19 @@ class SettlementCheckOneTest {
             PaymentCheck.INVOICE_IDENTITY in evidenced.checksNotPerformedHere,
             "a check cannot be on both sides of the same statement",
         )
-        assertTrue(
-            PaymentCheck.INVOICE_AMOUNT in evidenced.checksNotPerformedHere &&
-                PaymentCheck.INVOICE_EXPIRY in evidenced.checksNotPerformedHere,
-            "checks 4 and 5 need the BOLT-11 parser this library does not have, and the recogniser " +
-                "reads no amount and no expiry: ${evidenced.checksNotPerformedHere}",
+        // Exact, not containment: this path subtracts INVOICE_IDENTITY and must subtract nothing
+        // else, and only an exact set can say so. PAYMENT_HASH_PROVENANCE is the one this test
+        // gained — check 3's operand is still the caller's parameter however well check 1 went —
+        // so the expectation is strictly stronger than the containment pair it replaces.
+        assertEquals(
+            setOf(
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
+                PaymentCheck.INVOICE_AMOUNT,
+                PaymentCheck.INVOICE_EXPIRY,
+            ),
+            evidenced.checksNotPerformedHere,
+            "checks 4 and 5 need the BOLT-11 parser this library does not have, and so does check " +
+                "3's provenance: the recogniser reads no amount, no expiry and no payment hash",
         )
     }
 
@@ -156,6 +164,23 @@ class SettlementCheckOneTest {
             "check 6 does not apply to a provider receipt at all, and recording an inapplicable " +
                 "obligation as not-performed is a different false statement",
         )
+        // And exactly, on both sides: the fee result is the provider result plus check 6 and
+        // nothing else. A containment assertion alone cannot see a check dropped from the record,
+        // which is what this file's own §17 rule is about.
+        assertEquals(
+            setOf(
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
+                PaymentCheck.INVOICE_AMOUNT,
+                PaymentCheck.INVOICE_EXPIRY,
+            ),
+            providerResult.checksNotPerformedHere,
+        )
+        assertEquals(
+            providerResult.checksNotPerformedHere + CHECK_SIX,
+            feeResult.checksNotPerformedHere,
+            "the same three, plus check 6's three — composed from the provider's record rather " +
+                "than listed again",
+        )
     }
 
     /**
@@ -183,9 +208,17 @@ class SettlementCheckOneTest {
         assertEquals(ConformanceStatus.PARTIAL, item.status)
         assertTrue(
             PaymentCheck.INVOICE_IDENTITY in item.notPerformed,
-            "that constant carries the provenance of check 3's payment hash as well as check 1's " +
-                "comparison — the 256-bit `p` field parsed out of the invoice — and nothing in " +
-                "this library parses one, so it stays where it is",
+            "the item is a claim about a bare VerifiedPayment.verify, which holds no store and " +
+                "compares no invoice string, so check 1 stays where it is",
+        )
+        assertTrue(
+            PaymentCheck.PAYMENT_HASH_PROVENANCE in item.notPerformed,
+            "and check 3's provenance stays for a stronger reason — no path in this library " +
+                "subtracts it, because nothing here parses the invoice's `p` field",
+        )
+        assertTrue(
+            PaymentCheck.PAYMENT_HASH_PROVENANCE in Capabilities.PAYMENT_CHECKS_NOT_PERFORMED,
+            "the derived union picks the new constant up by subtraction, and must",
         )
     }
 

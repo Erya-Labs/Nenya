@@ -235,16 +235,25 @@ abstract class PortablePaymentEvidenceTest {
 
     // ------------------------------------------------------------ §17: what was not checked
 
-    @JsName("a_provider_receipt_names_the_three_invoice_checks_this_library_did_not_perform")
+    @JsName("a_provider_receipt_names_the_four_invoice_checks_this_library_did_not_perform")
     @Test
-    fun `a provider receipt names the three invoice checks this library did not perform`() {
+    fun `a provider receipt names the four invoice checks this library did not perform`() {
         val verified = VerifiedPayment.verify(Payee.PROVIDER, anchorPaymentHash(), anchorPreimage())
 
         assertEquals(
-            setOf(PaymentCheck.INVOICE_IDENTITY, PaymentCheck.INVOICE_AMOUNT, PaymentCheck.INVOICE_EXPIRY),
+            setOf(
+                PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
+                PaymentCheck.INVOICE_AMOUNT,
+                PaymentCheck.INVOICE_EXPIRY,
+            ),
             verified.checksNotPerformedHere,
             "§17 forbids reporting unverified things as verified; a provider receipt verified here " +
-                "has had neither the invoice identity, nor the amount, nor the expiry checked",
+                "has had neither the invoice identity, nor the provenance of the payment hash that " +
+                "was compared, nor the amount, nor the expiry checked. The provenance is a constant " +
+                "of its own and this expectation is stricter for it, not looser: the payment hash " +
+                "is a parameter this function is handed, so a caller passing the SHA-256 of a " +
+                "preimage it chose gets a true comparison about an invoice nobody issued",
         )
         assertTrue(
             PaymentCheck.INVOICE_AMOUNT in verified.checksNotPerformedHere,
@@ -260,6 +269,7 @@ abstract class PortablePaymentEvidenceTest {
         assertEquals(
             setOf(
                 PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
                 PaymentCheck.INVOICE_AMOUNT,
                 PaymentCheck.INVOICE_EXPIRY,
                 PaymentCheck.FEE_TERM_MATCH,
@@ -267,7 +277,7 @@ abstract class PortablePaymentEvidenceTest {
                 PaymentCheck.FEE_STATE_PRECONDITION,
             ),
             verified.checksNotPerformedHere,
-            "a fee receipt recording only the first three would silently imply §9.2 check 6 — the " +
+            "a fee receipt recording only the first four would silently imply §9.2 check 6 — the " +
                 "fee-term match, the sealing key and the awaiting_payment precondition — was performed",
         )
     }

@@ -78,8 +78,8 @@ public enum class PaymentMedium(
  * It does **not** verify the bech32 checksum. It slices no tagged field, and reads no amount, no
  * timestamp, no expiry and **no payment hash** — which is why `PaymentCheck.INVOICE_AMOUNT` and
  * `PaymentCheck.INVOICE_EXPIRY` stay exactly where they are, in the not-performed set, and why
- * `PaymentCheck.INVOICE_IDENTITY` stays there too: that constant carries the provenance of check
- * 3's payment hash as well as check 1's comparison, and nothing here supplies the first.
+ * `PaymentCheck.PAYMENT_HASH_PROVENANCE` does too: check 3's operand is the `p` field parsed out
+ * of the invoice, and this recogniser supplies no field of one.
  *
  * Appendix C states the obligation this leaves open in its own words: an implementation that skips
  * the signature "MUST still parse past it correctly and MUST verify the bech32 checksum". This

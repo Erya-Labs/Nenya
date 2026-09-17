@@ -181,9 +181,15 @@ public class PaymentReceipt internal constructor(
  * package adds, and a global claim would be the §17 over-claim one layer below where the
  * conformance surface is watching for it. `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED` is derived
  * from that constant and is unchanged, and `PaymentCheck.INVOICE_IDENTITY` therefore stays in §17
- * item 6's not-performed set, which is correct for a second reason: that constant carries the
- * provenance of check 3's payment hash as well as check 1's comparison — the 256-bit `p` field
- * parsed out of the invoice — and nothing in this library parses one.
+ * item 6's not-performed set.
+ *
+ * What this path closes is check 1's byte comparison and **nothing more**. The provenance of the
+ * payment hash check 3 compares against — the 256-bit `p` field parsed out of the invoice — is
+ * `PaymentCheck.PAYMENT_HASH_PROVENANCE`, a constant of its own, and no path here subtracts it:
+ * [Settlement.verify] takes that hash as a parameter and nothing in this library parses an
+ * invoice field. While the two shared one constant this path subtracted both, so a result
+ * reported the provenance closed on the strength of a byte comparison that says nothing about
+ * where the hash came from.
  *
  * The three check-6 constants are a different case and are treated differently, which is the point
  * of publishing per-result sets at all: they are not global claims about `VerifiedPayment.verify`
@@ -279,6 +285,12 @@ public sealed interface Settlement {
          * numbers 6. Deriving it means a fourth obligation added to check 6 later lands here the
          * moment `CHECKS_NOT_PERFORMED_FOR_FEE` names it, rather than being silently left out of
          * [verifyFeeReceipt]'s claim.
+         *
+         * A constant that applies to **both** payees cancels out of the subtraction and can never
+         * appear here, which is what keeps this derivation honest as the two sets grow:
+         * `PaymentCheck.PAYMENT_HASH_PROVENANCE` is in both and is absent from this set. The
+         * suite asserts that outcome rather than assuming it — an obligation that reached
+         * [verifyFeeReceipt]'s performed-set by accident would be claimed, not merely listed.
          */
         public val CHECK_SIX: Set<PaymentCheck> = readOnlySetOf(
             VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_FEE -
@@ -309,7 +321,8 @@ public sealed interface Settlement {
          *
          * @param paymentHash §9.2 check 3's operand. **Still a caller-supplied parameter**, and the
          *   narrowing T3 stated is unchanged: check 3 defines it as the 256-bit `p` tagged field
-         *   parsed out of the BOLT-11 invoice, and [Bolt11Reference] parses no field at all. Unused
+         *   parsed out of the BOLT-11 invoice, and [Bolt11Reference] parses no field at all. Every
+         *   result therefore names `PaymentCheck.PAYMENT_HASH_PROVENANCE` as not performed. Unused
          *   for an [Unverified] result — a caller that wants to avoid computing one reads
          *   [PaymentReceipt.medium] first, and putting the branch here rather than in the caller is
          *   what keeps §9.4's decision out of the caller's hands.
@@ -766,7 +779,14 @@ public sealed interface Settlement {
                 payment.checksPerformed + PaymentCheck.INVOICE_IDENTITY + alsoPerformed,
             )
 
-            /** T3's not-performed set, minus the ones this path closed. Composed, not listed. */
+            /**
+             * T3's not-performed set, minus the ones this path closed. Composed, not listed.
+             *
+             * `INVOICE_IDENTITY` and no more: `PaymentCheck.PAYMENT_HASH_PROVENANCE` survives
+             * every subtraction here on purpose, because nothing on this path parses the
+             * invoice's `p` field. Subtracting it too would be the under-report T18 split the
+             * constant to remove.
+             */
             override val checksNotPerformedHere: Set<PaymentCheck> = readOnlySetOf(
                 payment.checksNotPerformedHere - PaymentCheck.INVOICE_IDENTITY - alsoPerformed,
             )
