@@ -38,10 +38,10 @@ internal object SpecTagShapes {
     private val HEADING_LINE = Regex("""^#{1,6} """)
 
     /** A bracketed tag array inside single backticks — the document's inline, normative form. */
-    private val INLINE_TAG = Regex("""`(\[[^`\]]*])`""")
+    private val INLINE_TAG = Regex("""`(\[[^`\]]*\])`""")
 
     /** A bracketed tag array on a line of its own, which is how a fenced block prints one. */
-    private val BLOCK_TAG = Regex("""^\s*(\[[^\]]*])\s*$""")
+    private val BLOCK_TAG = Regex("""^\s*(\[[^\]]*\])\s*$""")
 
     /** A double-quoted element of a tag array. */
     private val ELEMENT = Regex(""""([^"]*)"""")
