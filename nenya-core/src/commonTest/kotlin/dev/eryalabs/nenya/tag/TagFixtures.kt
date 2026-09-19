@@ -92,6 +92,35 @@ internal object TagFixtures {
         keys
     }
 
+    /**
+     * The same column with repeats removed, in file order — the list a fixture indexes when the
+     * keys it draws have to be **different people**.
+     *
+     * The vendored file is a signature-verification suite, not a key list: eight of its nineteen
+     * rows reuse `DFF1…` and four reuse `778C…`, because those rows vary the message or the
+     * signature rather than the key. A fixture that took "the key at index i" and "the key at index
+     * i + 1" off [uppercasePubkeys] could therefore draw one key twice — and from revision `1.5`
+     * that is not a harmless coincidence but a fixture whose buyer *is* its provider, which §7.6
+     * refuses outright. The party offsets `ProposalFixtures` and `SettlementFixtures` use are all
+     * below [DISTINCT_PUBKEYS], so every party to an order is a different key at every index.
+     *
+     * [uppercasePubkeys] is left exactly as it is: the tag-layer controls that read it want the
+     * file's rows, repeats included.
+     */
+    val distinctPubkeys: List<String> by lazy {
+        val keys = uppercasePubkeys.distinct()
+        assertTrue(
+            keys.size == DISTINCT_PUBKEYS,
+            "expected $DISTINCT_PUBKEYS distinct public keys among the ${uppercasePubkeys.size} " +
+                "vendored rows and found ${keys.size}; the party offsets these fixtures use are " +
+                "chosen against that number, and a smaller one would let two parties share a key",
+        )
+        keys
+    }
+
+    /** How many of [BIP340_ROWS] name a key no other row names. See [distinctPubkeys]. */
+    private const val DISTINCT_PUBKEYS: Int = 8
+
     /** A generated 64-character lowercase-hex pubkey, unique per [index] and never typed. */
     fun pubkeyFor(index: Int): String =
         lowerHex(oracleSha256("nenya-tag-fixture-$index".utf8Bytes()))

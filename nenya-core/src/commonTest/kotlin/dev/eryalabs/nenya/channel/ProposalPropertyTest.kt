@@ -49,7 +49,9 @@ class ProposalPropertyTest {
                 "the re-encoded proposal must hash to the id the original did; fixture ${fixture.index}",
             )
 
-            val announced = ProposalFixtures.bound(fixture.acceptanceTags, fixture.index)
+            // Sealed by the provider — one key along from the buyer — because §7.6 (revision `1.5`)
+            // refuses an acceptance under any other, the buyer's included.
+            val announced = ProposalFixtures.bound(fixture.acceptanceTags, fixture.index + 1)
             val update = OrderStatusMessage.decode(announced)
             assertEquals(fixture.acceptanceTags, update.encode().tags, "fixture ${fixture.index}")
             assertEquals(
@@ -58,9 +60,9 @@ class ProposalPropertyTest {
                 "the re-encoded acceptance must hash to the id the original did; fixture ${fixture.index}",
             )
             assertIs<Acceptance.Accepted>(
-                proposal.accepts(update),
-                "§7.6: an acceptance repeating the proposal's four terms byte for byte is an " +
-                    "acceptance; fixture ${fixture.index}",
+                proposal.accepts(update, ProposalFixtures.pubkey(fixture.index + 1)),
+                "§7.6: an acceptance repeating the proposal's four terms byte for byte, sealed by " +
+                    "the provider's own key, is an acceptance; fixture ${fixture.index}",
             )
         }
     }

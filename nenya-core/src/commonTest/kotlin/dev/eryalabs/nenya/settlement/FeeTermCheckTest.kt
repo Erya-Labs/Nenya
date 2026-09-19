@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.settlement
 
+import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.channel.ChannelException
 import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.ChannelVocabulary
@@ -126,6 +127,14 @@ class FeeTermCheckTest {
             index + 1,
         )
 
+        /**
+         * §7.6's answer, checked against the provider key the caller resolved — the value
+         * `AcceptedPaymentRequest.accept` derives the order, the provider's key and §9.2 check 4's
+         * expected amount from.
+         */
+        val accepted: Acceptance.Accepted = proposal.accepts(acceptance, SettlementFixtures.provider(index))
+            .let { it as? Acceptance.Accepted ?: fail("the fixture acceptance must accept, not $it") }
+
         val split = SettlementFixtures.split(priceMsat, basisPoints)
 
         val preimages: List<String> = PaymentFixtures.preimageHex(2)
@@ -210,14 +219,30 @@ class FeeTermCheckTest {
             FeeTermSighting.onPaymentRequest(feeRequest),
         )
 
-        /** Both `type=2`s accepted and stored, at a pinned clock reading (§17 item 6). */
+        /**
+         * Both `type=2`s accepted and stored, at a pinned clock reading (§17 item 6).
+         *
+         * Since revision `1.5` this is a **checking** door rather than a recording one: the fee
+         * request goes through §8.4 and §8.7 and both go through §9.2 checks 4 and 5, so a fixture
+         * built to break one of those throws here instead of storing. [storeRefusal] is what the
+         * four controls about those breakages now assert on.
+         */
         fun store(): PaymentRequestStore {
             val store = PaymentRequestStore.inMemory()
             val clock = FakeClock(acceptedAt)
-            AcceptedPaymentRequest.accept(feeRequest, store, clock)
-            AcceptedPaymentRequest.accept(providerRequest, store, clock)
+            AcceptedPaymentRequest.accept(feeRequest, accepted, store, clock, signedPoints())
+            AcceptedPaymentRequest.accept(providerRequest, accepted, store, clock)
             return store
         }
+
+        /** §8.4's two points that precede any `type=2` — the signed term §8.7 compares against. */
+        fun signedPoints(): List<FeeTermSighting> = listOf(
+            FeeTermSighting.onProposal(proposal),
+            FeeTermSighting.onAcceptance(acceptance),
+        )
+
+        /** The refusal [store] made, failing loudly if it stored instead. */
+        fun storeRefusal(): SettlementException = assertFailsWith { store() }
 
         /** The order these messages are about, in [state], reached by real §11.2 transitions. */
         fun order(state: OrderState = OrderState.AWAITING_PAYMENT, terms: OrderTerms = terms()): Order =
@@ -343,18 +368,48 @@ class FeeTermCheckTest {
      * invoice a fee recipient sends, which passes §8.4's term comparison (the `fee` tag is
      * byte-identical everywhere), passes §8.7's seal, passes §8.5's state precondition and carries
      * a preimage that hashes. Check 4 is the only thing between it and an `Evidenced`.
+     *
+     * ### Since revision `1.5` it is caught one message earlier, and both doors are asserted
+     *
+     * Decision I as amended applies check 4 to the `type=2` at acceptance, so the padded invoice
+     * never reaches the store at all — which is the better outcome, because the buyer has not yet
+     * been shown a bill. The first half below asserts that. The second half keeps
+     * `Settlement.verifyFeeReceipt`'s own copy of check 4 falsifiable, by handing it an [Order]
+     * whose terms owe the fee recipient a different `fee_msat`: that path reads the expected amount
+     * off `order.terms.split` and off nothing else, so a fee receipt judged against another order's
+     * terms is refused there. Without it, deleting the check-4 call on the fee-receipt path would
+     * leave this file green and the result over-claiming `INVOICE_AMOUNT`.
      */
-    @JsName("a_fee_invoice_padded_by_one_msat_is_refused_on_the_fee_receipt_path")
+    @JsName("a_padded_fee_invoice_is_refused_at_acceptance_and_check_4_still_bites_at_settlement")
     @Test
-    fun `a fee invoice padded by one msat is refused on the fee-receipt path`() {
-        val messages = FeeOrderMessages(feeAmountDelta = 1L)
+    fun `a padded fee invoice is refused at acceptance, and check 4 still bites at settlement`() {
+        assertEquals(
+            SettlementRejection.INVOICE_AMOUNT_MISMATCH,
+            FeeOrderMessages(feeAmountDelta = 1L).storeRefusal().reason,
+            "§9.2 check 4 is performed on the `type=2` as well as on the receipt (decision I as " +
+                "amended), so a fee recipient's padded invoice is refused before it is stored",
+        )
+
+        val messages = FeeOrderMessages()
+        val otherTerms = OrderTerms.of(
+            Msat.ofMsat(messages.priceMsat),
+            FeeTerm.of(BASIS_POINTS + 1),
+            OrderFixtures.EXPIRATION,
+            OrderFixtures.DELIVER_BY,
+        )
+        assertNotEquals(
+            messages.split.fee,
+            otherTerms.split.fee,
+            "the two terms must owe the fee recipient different amounts, or the refusal below " +
+                "would be check 4 agreeing with itself",
+        )
 
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
                 messages.feePaymentHash,
                 messages.store(),
-                messages.order(OrderState.AWAITING_PAYMENT),
+                messages.order(OrderState.AWAITING_PAYMENT, otherTerms),
                 messages.earlierPoints(),
             )
         }
@@ -363,7 +418,7 @@ class FeeTermCheckTest {
             SettlementRejection.INVOICE_AMOUNT_MISMATCH,
             refused.reason,
             "§9.2 check 4 applies to a fee receipt exactly as it does to a provider one, and the " +
-                "expected amount is §8.3's `fee_msat` read off this implementation's own order",
+                "expected amount is §8.3's `fee_msat` read off the order this path was handed",
         )
     }
 
@@ -371,25 +426,22 @@ class FeeTermCheckTest {
      * §9.2 check 5 on the fee path, for the reason the control above exists.
      *
      * Both `type=2`s are accepted one second past the fee invoice's own `timestamp + expiry`, so
-     * the stored fee invoice was already dead when this implementation took it — and check 5's
-     * operand is that acceptance reading and nothing later.
+     * the fee invoice was already dead when this implementation took it — and check 5's operand is
+     * that acceptance reading and nothing later.
+     *
+     * Since revision `1.5` the refusal is made **at acceptance**, and unlike check 4 there is no
+     * shape that also puts it on the receipt path: `verifyFeeReceipt` measures against
+     * `AcceptedPaymentRequest.acceptedAt`, which is the very reading `accept` measured against, so
+     * for a record this library minted the two can never disagree. The receipt path keeps the check
+     * for an injected store that hands back a record this library never minted (§13).
      */
-    @JsName("a_fee_invoice_already_expired_at_acceptance_is_refused_on_the_fee_receipt_path")
+    @JsName("a_fee_invoice_already_expired_at_acceptance_is_refused_at_acceptance")
     @Test
-    fun `a fee invoice already expired at acceptance is refused on the fee-receipt path`() {
+    fun `a fee invoice already expired at acceptance is refused at acceptance`() {
         val deadline = SettlementFixtures.ACCEPTED_AT -
             SettlementFixtures.INVOICE_AGE_SECONDS + SettlementFixtures.INVOICE_EXPIRY_SECONDS
-        val messages = FeeOrderMessages(acceptedAt = deadline + 1L)
 
-        val refused = assertFailsWith<SettlementException> {
-            Settlement.verifyFeeReceipt(
-                messages.feeReceipt,
-                messages.feePaymentHash,
-                messages.store(),
-                messages.order(OrderState.AWAITING_PAYMENT),
-                messages.earlierPoints(),
-            )
-        }
+        val refused = FeeOrderMessages(acceptedAt = deadline + 1L).storeRefusal()
         assertEquals(SettlementRejection.INVOICE_EXPIRED, refused.reason)
 
         // The pair that makes it the boundary and not merely "some late reading": at the deadline
@@ -538,6 +590,16 @@ class FeeTermCheckTest {
         assertEquals(FeeTermElement.RECIPIENT, diverged.element)
     }
 
+    /**
+     * §8.4 at the fee `type=2`, which since revision `1.5` is refused when the request is
+     * **accepted** rather than when a receipt for it is judged.
+     *
+     * The point and the side still travel on the exception, which is what §8.4 requires ("surfaced
+     * to the user as a terms mismatch"), and the point named is still `FEE_PAYMENT_REQUEST` — so
+     * what moved is the door and not the answer. `Settlement.checkFeePaymentRequest` is the same
+     * function it always was; `AcceptedPaymentRequest.accept` now calls it, so a fee request with a
+     * re-quoted term is never stored and no receipt for it can exist.
+     */
     @JsName("a_different_bps_at_the_fee_type_2_is_a_terms_mismatch_naming_that_point")
     @Test
     fun `a different bps at the fee type=2 is a terms mismatch naming that point`() {
@@ -545,15 +607,7 @@ class FeeTermCheckTest {
             feeOnFeeRequest = ProposalFixtures.feeTag(0, BASIS_POINTS + 1),
         )
 
-        val refused = assertFailsWith<SettlementException> {
-            Settlement.verifyFeeReceipt(
-                messages.feeReceipt,
-                messages.feePaymentHash,
-                messages.store(),
-                messages.order(),
-                messages.earlierPoints(),
-            )
-        }
+        val refused = messages.storeRefusal()
 
         assertEquals(SettlementRejection.FEE_TERM_MISMATCH, refused.reason)
         val diverged = assertIs<FeeTermAgreement.Diverged>(refused.feeTermDivergence)
@@ -761,25 +815,100 @@ class FeeTermCheckTest {
         )
     }
 
-    @JsName("a_fee_receipt_settling_an_invoice_that_arrived_from_the_provider_is_refused")
+    /**
+     * §8.7 on the way **into** the store, which is where §8.7 itself puts it — and since revision
+     * `1.5` there is no way past it.
+     *
+     * The control above proves `Settlement.checkFeePaymentRequest` refuses a forwarded fee invoice
+     * when a caller asks it to. This one proves a caller cannot decline to ask:
+     * `AcceptedPaymentRequest.accept` runs the same function, so the forwarded invoice is never
+     * stored and no `kind:17` settling it can reach check 1.
+     *
+     * `verifyFeeReceipt` keeps its own §8.7 comparison against
+     * [AcceptedPaymentRequest.sealedBy] — a store is the embedding client's own persistence and
+     * §13 does not defend against it — and for a record this library minted the two operands now
+     * agree by construction, which is why the refusal is asserted here rather than there.
+     */
+    @JsName("a_fee_type_2_forwarded_by_the_provider_never_reaches_the_store")
     @Test
-    fun `a fee receipt settling an invoice that arrived from the provider is refused`() {
-        // §9.2 check 6's second third, at settlement. The operand is the seal the **stored**
-        // `type=2` arrived under, because the receipt's own seal is the buyer's (§9.2's example)
-        // and a check that required otherwise would refuse every conformant fee receipt.
+    fun `a fee type=2 forwarded by the provider never reaches the store`() {
         val messages = FeeOrderMessages(feeRequestSealedBy = SettlementFixtures.provider(0))
+
+        val refused = messages.storeRefusal()
+
+        assertEquals(SettlementRejection.FEE_SEAL_NOT_RECIPIENT, refused.reason)
+    }
+
+    /**
+     * §9.2 check 6's second third, at **settlement** — the copy of §8.7 `verifyFeeReceipt` makes
+     * against [AcceptedPaymentRequest.sealedBy], which nothing else in this suite can falsify since
+     * revision `1.5`.
+     *
+     * ### Why it needs a fixture this contrived, and why it is not contrived at all
+     *
+     * For a record this library minted the two operands of that comparison now agree by
+     * construction: `accept` refuses a fee `type=2` unless its seal is the recipient in the signed
+     * term, so `stored.sealedBy` *is* the agreed recipient. Every ordinary route therefore passes
+     * the check without exercising it, and the branch would survive deletion — which it did, until
+     * this control. `Settlement.verifyFeeReceipt` states the narrowing that opens it: the
+     * `earlierPoints` a caller hands in are **not** checked against the order the receipt names, and
+     * "sightings taken from another order's messages agree with each other, and only the caller
+     * knows which order they came from".
+     *
+     * So this is that caller: the store holds **this** order's fee invoice, sealed by this order's
+     * fee recipient, and the sightings — including the receipt's own `fee` tag — all name
+     * *another* order's recipient. §8.4 is satisfied, because they agree with each other; §8.7 is
+     * not, because the key that sealed the stored invoice is not the one they name. That is not a
+     * synthetic shape either: it is a client that assembled one order's history against another
+     * order's receipt, and §13 is why the library has to fail closed on it rather than trust the
+     * assembly.
+     */
+    @JsName("a_fee_receipt_whose_signed_term_names_another_recipient_than_the_stored_invoices_seal")
+    @Test
+    fun `a fee receipt whose signed term names another recipient than the stored invoice's seal`() {
+        // `feeOnFeeRequest` defaults to index 0's term, so the second order has to be told its own
+        // — otherwise its three sightings diverge among themselves and §8.4 speaks before §8.7,
+        // which is the right answer to a different question.
+        val other = FeeOrderMessages(index = 1, feeOnFeeRequest = ProposalFixtures.feeTag(1, BASIS_POINTS))
+        val own = FeeOrderMessages(feeOnFeeReceipt = other.feeTag)
+
+        assertNotEquals(
+            SettlementFixtures.feeRecipient(0),
+            SettlementFixtures.feeRecipient(1),
+            "the two orders must name different fee recipients, or there is nothing to disagree " +
+                "about",
+        )
 
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
-                messages.feeReceipt,
-                messages.feePaymentHash,
-                messages.store(),
-                messages.order(),
-                messages.earlierPoints(),
+                own.feeReceipt,
+                own.feePaymentHash,
+                own.store(),
+                own.order(),
+                other.earlierPoints(),
             )
         }
 
-        assertEquals(SettlementRejection.FEE_SEAL_NOT_RECIPIENT, refused.reason)
+        assertEquals(
+            SettlementRejection.FEE_SEAL_NOT_RECIPIENT,
+            refused.reason,
+            "§8.7's operand at settlement is the seal the **stored** `type=2` arrived under, and " +
+                "it is not the recipient this order's signed term names. Refusing here is what " +
+                "stops a fee being credited against an invoice somebody else issued",
+        )
+
+        // The pair, so the refusal is about the disagreement and not about the shape: the same
+        // receipt judged against its **own** order's points and store evidences.
+        val consistent = FeeOrderMessages()
+        assertIs<Settlement.Evidenced>(
+            Settlement.verifyFeeReceipt(
+                consistent.feeReceipt,
+                consistent.feePaymentHash,
+                consistent.store(),
+                consistent.order(),
+                consistent.earlierPoints(),
+            ),
+        )
     }
 
     @JsName("the_fee_receipt_is_the_buyers_and_that_is_why_its_own_seal_is_not_the_operand")

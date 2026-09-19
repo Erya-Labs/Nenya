@@ -96,8 +96,17 @@ internal object ProposalFixtures {
     /** The same key in the vendored file's own **uppercase** spelling — §4.3's read rule, live. */
     fun uppercasePubkey(index: Int): String = raw(index)
 
+    /**
+     * [TagFixtures.distinctPubkeys] and **not** `uppercasePubkeys`, and the difference is
+     * load-bearing since revision `1.5`.
+     *
+     * The vendored file reuses one key across eight of its rows, so indexing the raw column would
+     * hand this generator the same key for a buyer at one index and a provider at the next — and
+     * §7.6 now refuses an acceptance whose resolved provider is the proposal's own author. That
+     * would be a fixture failure wearing a library failure's clothes.
+     */
     private fun raw(index: Int): String {
-        val keys = TagFixtures.uppercasePubkeys
+        val keys = TagFixtures.distinctPubkeys
         return keys[((index % keys.size) + keys.size) % keys.size]
     }
 

@@ -50,6 +50,25 @@ import kotlin.test.fail
  * is exactly the confusion the three constants exist to prevent — so each asserts the
  * [SettlementRejection] and, where the order of the checks is the point, asserts *which* check
  * spoke first.
+ *
+ * ### Which door these refusals come out of, since revision `1.5`
+ *
+ * Decision I as amended applies checks 4 and 5 to the `type=2` **at acceptance** as well as to the
+ * `kind:17` at settlement, "so a stored invoice is never one a later receipt check would reject" —
+ * and `Settlement` performs both through one helper, so the two doors cannot come to disagree.
+ * [settle] therefore now refuses at `AcceptedPaymentRequest.accept` for most of the controls below:
+ * an invoice that names no amount, one that asks for the wrong figure under the split it is
+ * accepted with, one already expired at the acceptance reading and one that does not parse are all
+ * refused before anything reaches the store. Every control still asserts the same
+ * [SettlementRejection] it always did, because it is the same rule in the same helper; what changed
+ * is that it now also proves the invoice was never stored.
+ *
+ * Two of them deliberately still exercise `Settlement.verify`'s own copy, because a store is the
+ * embedding client's and §13 does not defend against it: "a wrong amount is reported before a wrong
+ * preimage" accepts under the split the invoice satisfies and verifies under one it does not, and
+ * the corpus floor at the end of this file does the same ten thousand times over both payees.
+ * Check 5 has no such shape and says so in its own control: `verify`'s operand is the very reading
+ * `accept` measured against, so for a record this library minted the two can never disagree.
  */
 class SettlementCheckFourAndFiveTest {
 
@@ -207,20 +226,33 @@ class SettlementCheckFourAndFiveTest {
         payee: Payee = Payee.PROVIDER,
         preimageHex: String = PaymentFixtures.preimageHex(1).single(),
         paymentHash: PaymentHash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimageHex)),
+        acceptUnder: FeeSplit = split,
     ): Settlement {
         val order = SettlementFixtures.orderHex(0)
+        val accepted = SettlementFixtures.acceptedFor(acceptUnder)
         val store = PaymentRequestStore.inMemory()
-        AcceptedPaymentRequest.accept(
-            SettlementFixtures.request(
+        SettlementFixtures.accept(
+            SettlementFixtures.requestFrom(
+                payee,
                 SettlementFixtures.requestTags(
                     order = order,
                     payment = SettlementFixtures.requestPaymentTag(invoice),
                     payeeTag = SettlementFixtures.payeeTag(payee),
+                    // §8.4 marks the tag REQUIRED on a fee `type=2`, and revision `1.5` makes the
+                    // §8.4/§8.7 check unskippable there. Byte-identical to the proposal's, which
+                    // means the basis points come off the split `acceptedFor` built it from — a
+                    // default rate here would diverge from the signed term on every fee fixture.
+                    fee = if (payee == Payee.FEE) {
+                        SettlementFixtures.feeTag(basisPoints = acceptUnder.term.basisPoints)
+                    } else {
+                        null
+                    },
                 ),
-                split,
+                acceptUnder,
             ),
             store,
             FakeClock(acceptedAt),
+            accepted,
         )
         val receipt = SettlementFixtures.receipt(
             SettlementFixtures.receiptTags(
@@ -535,12 +567,23 @@ class SettlementCheckFourAndFiveTest {
      * the buyer really did pay the invoice the provider really did issue — so a library that ran
      * check 3 first would report `PREIMAGE_MISMATCH` on the one case where the preimage is fine and
      * the *figure* is not. Here both are wrong at once and the answer must be the amount.
+     *
+     * ### Reaching `Settlement.verify`'s check 4 at all, since revision `1.5`
+     *
+     * The request is accepted under the split its invoice **satisfies** and verified under one it
+     * does not, which is the one shape that still puts this refusal on the receipt path:
+     * `AcceptedPaymentRequest.accept` now performs check 4 too (decision I as amended), so a
+     * request whose invoice disagrees with the split it is accepted under never reaches the store.
+     * The two splits are the same object in every other control here, and the divergence is this
+     * one's whole subject — a caller that hands `verify` an unrelated order's terms is where §13
+     * draws the line, and it is what keeps the later check from being dead weight.
      */
     @JsName("a_wrong_amount_is_reported_before_a_wrong_preimage")
     @Test
     fun `a wrong amount is reported before a wrong preimage`() {
         val example = oneMinuteExample()
         val acceptedAt = example.timestamp!! + ONE_MINUTE
+        val stored = priceOf(statedMsat(example))
         val preimages = PaymentFixtures.preimageHex(2)
         val wrongHash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimages[1]))
 
@@ -549,7 +592,7 @@ class SettlementCheckFourAndFiveTest {
             settle(
                 example.invoice,
                 acceptedAt,
-                priceOf(statedMsat(example)),
+                stored,
                 preimageHex = preimages[0],
                 paymentHash = wrongHash,
             )
@@ -568,6 +611,7 @@ class SettlementCheckFourAndFiveTest {
                 priceOf(Msat.ofMsat(statedMsat(example).millisatoshis + 1L)),
                 preimageHex = preimages[0],
                 paymentHash = wrongHash,
+                acceptUnder = stored,
             )
         }
         assertEquals(
@@ -578,10 +622,27 @@ class SettlementCheckFourAndFiveTest {
         )
     }
 
-    /** The same, for check 5: an expired invoice is reported expired and not as a preimage failure. */
-    @JsName("an_expired_invoice_is_reported_before_a_wrong_preimage")
+    /**
+     * Check 5's counterpart, and since revision `1.5` it is a **stronger** statement than the
+     * precedence it used to make.
+     *
+     * It used to say: a receipt for an expired invoice is told the invoice expired rather than
+     * being told about its preimage. Decision I as amended moved that refusal one message earlier —
+     * `AcceptedPaymentRequest.accept` measures §9.2 check 5 against the clock reading it is about
+     * to persist — so an invoice already dead when it arrived is never stored, and there is no
+     * receipt for it to carry a preimage at all. The refusal is asserted where the library now
+     * makes it, by the same reason constant.
+     *
+     * Unlike check 4 there is no way to put this refusal back on the receipt path: `verify`'s
+     * operand is [AcceptedPaymentRequest.acceptedAt], which is the very reading `accept` measured
+     * against, so the two can never disagree about one record. `Settlement.verify` keeps the check
+     * regardless, because an injected store is the client's own and may hand back a record this
+     * library never minted (§13) — and that is stated here rather than left as an untested branch
+     * nobody remembers the reason for.
+     */
+    @JsName("an_expired_invoice_is_refused_before_any_receipt_for_it_can_exist")
     @Test
-    fun `an expired invoice is reported before a wrong preimage`() {
+    fun `an expired invoice is refused before any receipt for it can exist`() {
         val example = oneMinuteExample()
         val preimages = PaymentFixtures.preimageHex(2)
 
@@ -724,10 +785,11 @@ class SettlementCheckFourAndFiveTest {
 
         for (fixture in SettlementFixtures.pairs(CORPUS)) {
             val store = PaymentRequestStore.inMemory()
-            AcceptedPaymentRequest.accept(
-                SettlementFixtures.request(fixture.requestTags, split),
+            SettlementFixtures.accept(
+                SettlementFixtures.requestFrom(fixture.payee, fixture.requestTags, split, fixture.index),
                 store,
                 FakeClock(SettlementFixtures.ACCEPTED_AT),
+                SettlementFixtures.accepted(fixture.index),
             )
             val receipt = SettlementFixtures.receipt(fixture.receiptTags)
 

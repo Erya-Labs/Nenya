@@ -118,6 +118,49 @@ public enum class ChannelRejection {
     NOT_A_STATUS_UPDATE,
 
     /**
+     * The `provider` key handed to [OrderProposal.accepts] is not §4.3's 64 hex characters.
+     *
+     * The *caller's* argument and never something a counterparty wrote, so it is its own constant
+     * for the reason [MALFORMED_SEAL_PUBKEY] has one: the fix is in the client's own
+     * provider-resolution code — the offer's author, or the bidder it chose — and not in the peer's
+     * implementation. Reported rather than tolerated, because §7.6's comparison against an operand
+     * no seal can equal would refuse every acceptance for this order and look like a peer problem.
+     */
+    MALFORMED_PROVIDER_PUBKEY,
+
+    /**
+     * The `provider` key handed to [OrderProposal.accepts] is the proposal's own buyer.
+     *
+     * §7.6 (revision `1.5`): "an acceptance is the counterparty's act, and an implementation MUST
+     * reject an acceptance sealed by the buyer even where every term is byte-identical." A caller
+     * whose provider resolution returned the buyer's key has resolved it out of the proposal — its
+     * `pubkey`, or the `p` tag the buyer itself wrote — which is the one place §7.6 forbids taking
+     * it from, and a buyer that accepts its own order then sends itself the provider's invoice
+     * (§8.6).
+     *
+     * Refused on the **argument** and before the seal is looked at, so it fires even where the
+     * update really was sealed by that key: told [ACCEPTANCE_NOT_FROM_PROVIDER] instead, a caller
+     * would go looking at the counterparty's message for a fault that is in its own resolution.
+     */
+    PROVIDER_IS_BUYER,
+
+    /**
+     * §7.6: a `type=3` `status=accepted` whose seal pubkey is not the provider's key.
+     *
+     * The refusal revision `1.5` states for what §7.6 and §11.2's `proposed → accepted` row already
+     * named — "from the provider", "from the **provider's** key". Deliberately **not**
+     * [IMPERSONATION], which is §7.2's different and earlier check: the rumor's claimed `pubkey`
+     * *does* equal the seal's here, so nobody wrote somebody else's key into a message. What is
+     * wrong is that the key is a real key belonging to the wrong party.
+     *
+     * Narrow on purpose: it applies to an **acceptance** and not to every `type=3`. §11.2 accepts a
+     * cancellation from either party before `paid`, so a `["status", "cancelled"]` sealed by the
+     * buyer is still reported as [Acceptance.NotAnAcceptance] rather than refused — a rule that
+     * refused it would take §11.2's own row away from the buyer.
+     */
+    ACCEPTANCE_NOT_FROM_PROVIDER,
+
+    /**
      * An `amount_msat` or `amount` value that is not §4.4's canonical decimal.
      *
      * Strict rather than permissive, and that is §7.6's byte-identity rule reaching down into the

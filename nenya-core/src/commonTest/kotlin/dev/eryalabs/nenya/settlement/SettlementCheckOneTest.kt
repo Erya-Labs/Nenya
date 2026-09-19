@@ -74,13 +74,25 @@ class SettlementCheckOneTest {
 
     private fun settled(index: Int = 0): Settled {
         val fixture = SettlementFixtures.pairs(index + 1)[index]
+        return Settled(fixture, storing(fixture))
+    }
+
+    /**
+     * [fixture]'s own `type=2` accepted into a fresh store, through revision `1.5`'s door.
+     *
+     * Sealed by the key §8.6 requires for that fixture's payee and judged against that order's own
+     * §7.6 acceptance — which is the shape every control in this file now needs, and which is why
+     * it is a helper rather than four copies.
+     */
+    private fun storing(fixture: SettlementFixtures.Fixture): PaymentRequestStore {
         val store = PaymentRequestStore.inMemory()
-        AcceptedPaymentRequest.accept(
-            SettlementFixtures.request(fixture.requestTags),
+        SettlementFixtures.accept(
+            SettlementFixtures.requestFrom(fixture.payee, fixture.requestTags, index = fixture.index),
             store,
             FakeClock(SettlementFixtures.ACCEPTED_AT),
+            SettlementFixtures.accepted(fixture.index),
         )
-        return Settled(fixture, store)
+        return store
     }
 
     // ---------------------------------------------------------------------------------------
@@ -292,12 +304,7 @@ class SettlementCheckOneTest {
         // would be right and the reason would send a reader to the wrong place.
         val fixture = SettlementFixtures.pairs(HOMOGLYPH_SEARCH).firstOrNull { LONG_S_FOLD in it.invoice }
             ?: fail("no generated invoice in the first $HOMOGLYPH_SEARCH carries a `$LONG_S_FOLD`")
-        val store = PaymentRequestStore.inMemory()
-        AcceptedPaymentRequest.accept(
-            SettlementFixtures.request(fixture.requestTags),
-            store,
-            FakeClock(SettlementFixtures.ACCEPTED_AT),
-        )
+        val store = storing(fixture)
         val homoglyph = fixture.invoice.replaceFirst(LONG_S_FOLD, LONG_S)
         val receipt = SettlementFixtures.receipt(
             SettlementFixtures.replacing(
@@ -362,19 +369,23 @@ class SettlementCheckOneTest {
             SettlementFixtures.invoice(preimages[1], SettlementFixtures.amountFor(Payee.FEE, SPLIT)),
         )
         val order = SettlementFixtures.orderHex(0)
+        val accepted = SettlementFixtures.accepted(0)
         val store = PaymentRequestStore.inMemory()
         val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
         // Only the fee payee's request is stored, so a provider receipt finds nothing at all.
-        AcceptedPaymentRequest.accept(
-            SettlementFixtures.request(
+        SettlementFixtures.accept(
+            SettlementFixtures.requestFrom(
+                Payee.FEE,
                 SettlementFixtures.requestTags(
                     order = order,
                     payment = SettlementFixtures.requestPaymentTag(invoices[1]),
                     payeeTag = SettlementFixtures.payeeTag(Payee.FEE),
+                    fee = SettlementFixtures.feeTag(),
                 ),
             ),
             store,
             clock,
+            accepted,
         )
         val preimageHex = preimages[0]
         val providerReceipt = SettlementFixtures.receipt(
@@ -393,8 +404,9 @@ class SettlementCheckOneTest {
 
         // Now store the provider's own request too, and present a provider receipt carrying the
         // **fee** invoice: the key finds a record and the bytes disagree.
-        AcceptedPaymentRequest.accept(
-            SettlementFixtures.request(
+        SettlementFixtures.accept(
+            SettlementFixtures.requestFrom(
+                Payee.PROVIDER,
                 SettlementFixtures.requestTags(
                     order = order,
                     payment = SettlementFixtures.requestPaymentTag(invoices[0]),
@@ -403,6 +415,7 @@ class SettlementCheckOneTest {
             ),
             store,
             clock,
+            accepted,
         )
         val crossed = SettlementFixtures.receipt(
             SettlementFixtures.receiptTags(

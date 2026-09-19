@@ -13,6 +13,7 @@ import dev.eryalabs.nenya.tag.ItemRef
 import dev.eryalabs.nenya.tag.PubkeyRef
 import dev.eryalabs.nenya.tag.TagException
 import dev.eryalabs.nenya.tag.TagRejection
+import dev.eryalabs.nenya.tag.readPubkeyHex
 import dev.eryalabs.nenya.tag.readStrictDecimal
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.WireEvent
@@ -322,15 +323,26 @@ internal object ChannelTerms {
  *
  * Nothing in [dev.eryalabs.nenya.order] is touched. T7's types are consumed as they are.
  *
- * ### One stated narrowing: this type does not know who the provider is
+ * ### Who the provider is: resolved by the caller, checked by this type
  *
- * §7.6 says an acceptance is a `type=3` "from the provider". §7.2 gives this library the key the
- * message was **sealed** by, and nothing here can establish that that key is the provider's: the
- * proposal's `p` tag is a counterparty pubkey the *buyer* wrote, and §5.3 gives `p` cardinality
- * `0–n`. So [accepts] compares the terms and the order id, and the caller compares
- * [OrderStatusMessage.sender] against the key it knows to be the provider's — the same division
- * `Party` records one package over, where the resolution is the layer above's and never a claim
- * this library verified. The obligation is stated here rather than silently absorbed.
+ * §7.6 says an acceptance is a `type=3` "from the provider", and revision `1.5` states the refusal
+ * that follows from it. The division of labour is exact, and both halves are stated rather than one
+ * being silently absorbed:
+ *
+ * - **The caller resolves the key.** Nothing in a proposal establishes it: the `p` tag is a
+ *   counterparty pubkey the *buyer* wrote and §5.3 gives `p` cardinality `0–n`, so reading the
+ *   provider out of the message being judged would let the buyer nominate its own counterparty.
+ *   §7.6 names the two places the answer really comes from — the author of the offer the `item`
+ *   coordinate names, or the bidder the buyer chose in response to a request — and both are a
+ *   layer above this one, exactly as `Party` records.
+ * - **This type checks it.** [accepts] takes that key as a parameter and refuses an acceptance
+ *   sealed by any other, the buyer's included, before comparing a single term. What it *cannot*
+ *   check is whether the caller resolved the right key; that is §13's line, and it is the same one
+ *   `Settlement.verifyFeeReceipt` draws about the [OrderTerms] it is handed.
+ *
+ * Before revision `1.5` the second half was the caller's too, and the hole it left is worth naming:
+ * a buyer knows its own terms exactly, so it could seal a byte-identical `type=3` with its own key,
+ * be told [Acceptance.Accepted], and go on to send itself the `payee=provider` invoice (§8.6).
  *
  * Pure computation: no clock, no randomness, no I/O.
  */
@@ -410,10 +422,59 @@ public class OrderProposal internal constructor(
      * takes an [OrderStatusMessage], which only [OrderStatusMessage.decode] mints and only from a
      * `kind:16` `type=3`, so there is no value of any of those shapes to hand it.
      *
-     * @throws ChannelException [ChannelRejection.DIFFERENT_ORDER] if [update] names another order.
-     *   Not a counter-proposal: see that constant.
+     * ### The four refusals, in the order they are made
+     *
+     * 1. [ChannelRejection.MALFORMED_PROVIDER_PUBKEY] and 2. [ChannelRejection.PROVIDER_IS_BUYER]
+     *    are about the **argument**, so they are made first and fire whatever the update says. A
+     *    caller whose resolution produced a 63-character string, or produced the buyer, has a bug
+     *    in its own code and must not be sent to read a counterparty's message about it.
+     * 3. [ChannelRejection.DIFFERENT_ORDER] comes next, because a message about another order is
+     *    not about this one at all and calling it "not from the provider" would be a true
+     *    statement about the wrong subject.
+     * 4. [ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER] is made **after** the status is read and
+     *    before a term is compared, and the ordering is §7.6's own scope rather than convenience:
+     *    §7.6 is about *acceptance*, so the rule is about a `status=accepted`. A
+     *    `["status", "cancelled"]` sealed by the buyer is §11.2's cancellation "from either party"
+     *    and is still reported as [Acceptance.NotAnAcceptance] — refusing it would take that row
+     *    away from the buyer, which is the over-strict direction that fails closed and breaks a
+     *    conformant flow.
+     *
+     * @param provider the provider's pubkey **as the caller resolved it**, independently of both
+     *   messages — the author of the offer [item] names, or the bidder the buyer chose. Never read
+     *   out of the proposal's `p` tag: see this class's note on who resolves what. Accepted in
+     *   either case and normalised to §4.3's lowercase, exactly as [AttributedRumor] normalises the
+     *   seal pubkey it is compared against, so a caller holding an uppercase key from a vendored
+     *   file is not refused for a spelling §4.3 requires be accepted.
+     * @throws ChannelException [ChannelRejection.MALFORMED_PROVIDER_PUBKEY],
+     *   [ChannelRejection.PROVIDER_IS_BUYER], [ChannelRejection.DIFFERENT_ORDER] or
+     *   [ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER] — see the list above for the order and each
+     *   constant for why it is not one of the others.
      */
-    public fun accepts(update: OrderStatusMessage): Acceptance {
+    public fun accepts(update: OrderStatusMessage, provider: String): Acceptance {
+        val resolved = try {
+            readPubkeyHex(provider, "the provider's pubkey")
+        } catch (refused: TagException) {
+            throw ChannelException(
+                ChannelRejection.MALFORMED_PROVIDER_PUBKEY,
+                ChannelVocabulary.COUNTERPARTY,
+                "§4.3 fixes a pubkey as exactly 64 hex characters and §7.6 compares the provider's " +
+                    "against the key that sealed the acceptance; an operand no seal can equal " +
+                    "would refuse every acceptance for this order and look like a fault in the " +
+                    "counterparty's implementation",
+                refused,
+            )
+        }
+        if (resolved == buyer) {
+            throw ChannelException(
+                ChannelRejection.PROVIDER_IS_BUYER,
+                ChannelVocabulary.COUNTERPARTY,
+                "§7.6 requires the provider's key be established independently of the proposal and " +
+                    "says an acceptance sealed by the buyer MUST be rejected even where every term " +
+                    "is byte-identical: an acceptance is the counterparty's act. A resolution that " +
+                    "returned this proposal's own author has read the provider out of the message " +
+                    "being judged, which is the one place §7.6 forbids taking it from",
+            )
+        }
         if (update.order != order) {
             throw ChannelException(
                 ChannelRejection.DIFFERENT_ORDER,
@@ -424,8 +485,21 @@ public class OrderProposal internal constructor(
             )
         }
         if (update.status != OrderState.ACCEPTED) return Acceptance.NotAnAcceptance(update.status)
+        if (update.sender != resolved) {
+            throw ChannelException(
+                ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER,
+                ChannelVocabulary.STATUS,
+                "§7.6: acceptance is a `${ChannelVocabulary.STATUS}=${OrderState.ACCEPTED.token}` " +
+                    "update **from the provider**, and §11.2's `${OrderState.PROPOSED.token} → " +
+                    "${OrderState.ACCEPTED.token}` row says from the provider's **key**. This one " +
+                    "was sealed by another. §7.2's equality still holds — the rumor's claimed " +
+                    "pubkey is the seal's — so this is not impersonation; it is a real key " +
+                    "belonging to the wrong party, and the four terms being byte-identical is " +
+                    "exactly what a buyer accepting its own order would achieve",
+            )
+        }
         val divergent = signedTerms.divergenceFrom(update.signedTerms)
-        return if (divergent.isEmpty()) Acceptance.Accepted(order, terms)
+        return if (divergent.isEmpty()) Acceptance.Accepted(order, terms, resolved)
         else Acceptance.CounterProposal(readOnlyListOf(divergent))
     }
 
@@ -671,8 +745,8 @@ public class OrderStatusMessage internal constructor(
 public sealed interface Acceptance {
 
     /**
-     * §7.6 satisfied: `["status", "accepted"]` and `item`, `amount_msat`, `fee` and `deliver_by`
-     * byte-identical to the proposal's.
+     * §7.6 satisfied: `["status", "accepted"]` from the provider's key, and `item`, `amount_msat`,
+     * `fee` and `deliver_by` byte-identical to the proposal's.
      */
     public class Accepted internal constructor(
 
@@ -681,9 +755,29 @@ public sealed interface Acceptance {
 
         /** The proposal's terms, which are now the **accepted** terms §8.4 and §11.2 read. */
         public val terms: OrderTerms,
+
+        /**
+         * The provider's key this acceptance was **checked against** (§7.6), in §4.3's canonical
+         * lowercase.
+         *
+         * Carried rather than left for the caller to remember, because the next message in the
+         * order depends on it: §8.6 (revision `1.5`) requires a `payee=provider` `type=2` to arrive
+         * under "the same key the acceptance for that order was checked against", and
+         * `AcceptedPaymentRequest.accept` makes that comparison against this field. A caller that
+         * had to re-supply the key there could supply a different one, and the two checks would be
+         * about two different providers while looking like one rule.
+         *
+         * It is the key the **caller resolved**, not one this library discovered: what the check
+         * establishes is that the seal's pubkey equals it, and §13 leaves the resolution itself
+         * where only the caller can do it. See [OrderProposal]'s note.
+         */
+        public val provider: String,
     ) : Acceptance {
 
-        /** Names the outcome and nothing else: this value holds an order id (§12 item 11). */
+        /**
+         * Names the outcome and nothing else: this value holds an order id (§12 item 11) and a
+         * counterparty pubkey (§12 item 2).
+         */
         override fun toString(): String = "Acceptance.Accepted(redacted)"
     }
 

@@ -851,14 +851,48 @@ public sealed interface Settlement {
          * check 4 can never be taken from two different computations of the terms — which is the
          * mistake that would have a provider checked against `total_msat` and a fee recipient
          * against `price_msat`, both of which pass a casual reading and neither of which is the rule.
+         *
+         * Internal rather than private since revision `1.5`: [AcceptedPaymentRequest.accept] applies
+         * §9.2 check 4 to the `type=2` as well (decision I as amended), and the expected amount it
+         * compares against MUST be the one this file computes — a second reading of §9.2's sentence
+         * beside this one is how a request comes to be stored against a figure the receipt is then
+         * refused against.
          */
-        private fun expectedAmount(payee: Payee, split: FeeSplit): Msat = when (payee) {
+        internal fun expectedAmount(payee: Payee, split: FeeSplit): Msat = when (payee) {
             Payee.PROVIDER -> split.price
             Payee.FEE -> split.fee
         }
 
         /**
          * §9.2 checks 4 and 5 over the **stored** invoice, parsed here for the first time.
+         *
+         * A two-line dispatcher onto [checkParsedAmountAndExpiry], which holds the rules and the
+         * reasoning. The pair of operands it supplies is the whole content of this overload: check
+         * 5's reading is [AcceptedPaymentRequest.acceptedAt] and never a clock read here.
+         */
+        private fun checkAmountAndExpiry(stored: AcceptedPaymentRequest, expected: Msat) =
+            checkParsedAmountAndExpiry(Bolt11Invoice.parse(stored.invoice), stored.acceptedAt, expected)
+
+        /**
+         * The same two checks over a reference and an acceptance reading that are not yet a
+         * record — which is the shape [AcceptedPaymentRequest.accept] is in when it makes them.
+         *
+         * **One helper and not two**, and that is the point of the indirection rather than a
+         * tidying of it. Decision I as amended requires §9.2 checks 4 and 5 be applied to a
+         * `type=2` *at acceptance* as well as to a `kind:17` at settlement, "so a stored invoice is
+         * never one a later receipt check would reject". Two copies of an equality and a
+         * subtraction is how the two come to disagree, and a disagreement here is the worst kind:
+         * the store would hold an invoice this library accepted and will not honour, which strands
+         * the order after the buyer has paid.
+         *
+         * Internal rather than published: a caller holding a reference and a number has no §9.2
+         * question to ask that [accept] or [verify] does not ask on its behalf.
+         */
+        internal fun checkAmountAndExpiry(invoice: Bolt11Reference, acceptedAt: Long, expected: Msat) =
+            checkParsedAmountAndExpiry(Bolt11Invoice.parse(invoice), acceptedAt, expected)
+
+        /**
+         * §9.2 checks 4 and 5 over an invoice Appendix C's parser has already read.
          *
          * ### Check 4 is an equality, and absence is its own answer
          *
@@ -887,14 +921,17 @@ public sealed interface Settlement {
          * that was live when the buyer paid it does not become unpaid because it has since expired".
          *
          * @throws SettlementException [SettlementRejection.INVOICE_AMOUNT_MISSING],
-         *   [SettlementRejection.INVOICE_AMOUNT_MISMATCH] or [SettlementRejection.INVOICE_EXPIRED],
-         *   or whichever [SettlementRejection.APPENDIX_C_PARSER] reason the stored invoice fails
-         *   on — which reaches the caller as [Bolt11Invoice.parse] threw it, because a string this
-         *   library recognised and stored and cannot now decode is the parser's news to break and
-         *   not something to re-badge as a settlement mismatch.
+         *   [SettlementRejection.INVOICE_AMOUNT_MISMATCH] or [SettlementRejection.INVOICE_EXPIRED].
+         *   Whichever [SettlementRejection.APPENDIX_C_PARSER] reason the invoice fails on is thrown
+         *   by [Bolt11Invoice.parse] one step earlier and reaches the caller as it was thrown,
+         *   because a string this library recognised and cannot now decode is the parser's news to
+         *   break and not something to re-badge as a settlement mismatch.
          */
-        private fun checkAmountAndExpiry(stored: AcceptedPaymentRequest, expected: Msat) {
-            val invoice = Bolt11Invoice.parse(stored.invoice)
+        private fun checkParsedAmountAndExpiry(
+            invoice: Bolt11Invoice,
+            acceptedAt: Long,
+            expected: Msat,
+        ) {
             val amount = invoice.amount ?: throw SettlementException(
                 SettlementRejection.INVOICE_AMOUNT_MISSING,
                 SettlementVocabulary.PAYMENT,
@@ -915,7 +952,7 @@ public sealed interface Settlement {
                 )
             }
             // See this function's note: the subtraction is what makes the comparison total.
-            if (invoice.expirySeconds < stored.acceptedAt - invoice.timestamp) {
+            if (invoice.expirySeconds < acceptedAt - invoice.timestamp) {
                 throw SettlementException(
                     SettlementRejection.INVOICE_EXPIRED,
                     SettlementVocabulary.PAYMENT,

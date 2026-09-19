@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.settlement
 
+import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.seam.OrderId
@@ -111,13 +112,49 @@ public sealed interface AcceptedPaymentRequest {
     public companion object {
 
         /**
-         * Accept [request], recording the injected clock's reading, and store it in [into].
+         * Accept [request] against [acceptance], recording the injected clock's reading, and store
+         * it in [into].
          *
          * One call rather than two, so "mint the record" and "persist it" cannot come apart: §17
          * item 6's obligation is about what an implementation *has kept*, and a factory a caller
          * could forget to follow with a store call would satisfy the type system and not the
-         * clause.
+         * clause. Revision `1.5` makes the same argument about the checks: every one below is a
+         * rule about what may be **stored**, so none of them is a step a caller can take or skip.
          *
+         * ### The seven refusals, in the order they are made
+         *
+         * The clock is read first and is unchanged: §9.2 check 5 is unperformable without that
+         * value and there is no shape here that holds an invoice and no time, so a store that
+         * cannot record *when* accepts nothing at all. Then, before anything reaches [into]:
+         *
+         * 1. [SettlementRejection.REQUEST_FOR_ANOTHER_ORDER] — [acceptance] is the source of every
+         *    operand below, so one for another order would check this request against a provider, a
+         *    price and a fee term nobody signed for it, and report each check performed.
+         * 2. **Who sealed it**, by payee. A `payee=provider` request is held to §8.6's revision
+         *    `1.5` rule — the seal's pubkey is [Acceptance.Accepted.provider], the key §7.6 checked
+         *    the acceptance against — and a `payee=fee` one to §8.4 and §8.7 through
+         *    [Settlement.checkFeePaymentRequest], so an unchecked fee request can no longer be
+         *    stored at all.
+         * 3. **Appendix C**, then 4. **§9.2 check 4** and 5. **check 5**, by way of
+         *    `Settlement.checkAmountAndExpiry` — the same helper the receipt path uses, not a
+         *    second reading of the same two sentences. Decision I as amended: an invoice this
+         *    library would refuse a receipt against is an invoice it must not have stored.
+         * 6. [SettlementRejection.REQUEST_ALREADY_STORED] and
+         *    7. [SettlementRejection.INVOICE_STORED_FOR_OTHER_PAYEE], §8.6's two revision `1.5`
+         *    uniqueness rules. Both leave every existing record exactly as it was.
+         *
+         * **The order is a decision and not an accident.** Who sealed the message is settled before
+         * anything about its contents, because a request that is both from the wrong key and
+         * over-priced is first of all not the provider's message — a caller told "wrong amount"
+         * would go and negotiate a price with a stranger.
+         *
+         * @param acceptance §7.6's checked acceptance **for this order**, from
+         *   [dev.eryalabs.nenya.channel.OrderProposal.accepts]. It carries the three things this
+         *   function cannot obtain honestly any other way: the order it is about, the provider key
+         *   the seal is compared against, and the accepted terms §8.3's split — and therefore §9.2
+         *   check 4's expected amount — is computed from. Taking them as separate parameters would
+         *   let a caller assemble three halves of three different orders (decision J), and taking
+         *   the provider key alone would let the amount be checked against terms nobody accepted.
          * @param into the client's persistence. No default value, deliberately:
          *   [PaymentRequestStore.inMemory] exists and a default would construct a **fresh** one per
          *   call, silently discarding every record and turning every later receipt into
@@ -125,20 +162,26 @@ public sealed interface AcceptedPaymentRequest {
          * @param clock §4.6's injected clock, defaulting to the fail-closed one — which accepts
          *   nothing, and says so. A default that read the system clock would record a time the
          *   client never chose against an invoice it will later be asked to judge.
-         * @return the record now in the store. If a request was already stored under the same
-         *   `(order, payee)` key it is **replaced**, and the displaced record is not returned or
-         *   merged: NENYA-1 states no rule for a second `type=2` under one key, and this library
-         *   neither invents one nor de-duplicates — a caller that must refuse a replacement asks
-         *   [PaymentRequestStore.find] first, which is the one shape that cannot get the rule wrong
-         *   on its behalf.
+         * @param feeTermPoints §8.4's points observed **before** this request, for a `payee=fee`
+         *   one; ignored for a provider request, which §8.4 makes the `fee` tag OPTIONAL on and
+         *   forbids requiring one there. Empty by default, and that default is a refusal rather
+         *   than a convenience: [Settlement.checkFeePaymentRequest] requires the proposal and the
+         *   acceptance to be among them, so a caller that names none has its fee request rejected
+         *   [SettlementRejection.FEE_TERM_POINT_MISSING] rather than stored unchecked.
+         * @return the record this function minted and handed to [into] — never the value [into]
+         *   returned, which a client store chooses and which §13 does not make trustworthy.
          * @throws SettlementException [SettlementRejection.CLOCK_UNAVAILABLE] when the clock
          *   declined, or [SettlementRejection.CLOCK_BEFORE_EPOCH] when it reported a time before
-         *   1970 — never defaulted, never stored as absent.
+         *   1970 — never defaulted, never stored as absent; then whichever of the seven above
+         *   refused it, or any [SettlementRejection.APPENDIX_C_PARSER] reason the invoice does not
+         *   decode under.
          */
         public fun accept(
             request: PaymentRequest,
+            acceptance: Acceptance.Accepted,
             into: PaymentRequestStore,
             clock: NenyaClock = NenyaClock.FAIL_CLOSED,
+            feeTermPoints: List<FeeTermSighting> = emptyList(),
         ): AcceptedPaymentRequest {
             val reading = clock.now()
             val seconds = when (reading) {
@@ -162,9 +205,116 @@ public sealed interface AcceptedPaymentRequest {
                         "it is broken, and no acceptance moment can honestly be recorded from it",
                 )
             }
+            if (request.order != acceptance.order) {
+                throw SettlementException(
+                    SettlementRejection.REQUEST_FOR_ANOTHER_ORDER,
+                    SettlementVocabulary.ORDER,
+                    "this `type=2` names one order and the §7.6 acceptance it was offered against " +
+                        "names another. Every check below is derived from that acceptance — the " +
+                        "provider's key, §8.3's expected amount, the signed fee term — so judging " +
+                        "the request against it would compare it to terms nobody signed for it, " +
+                        "and would report each of those checks as performed",
+                )
+            }
+            checkSender(request, acceptance, feeTermPoints)
+            Settlement.checkAmountAndExpiry(
+                request.invoice,
+                seconds,
+                Settlement.expectedAmount(request.payee, acceptance.terms.split),
+            )
+            checkNotAlreadyStored(request, into)
             val record = Record(request.order, request.payee, request.invoice, seconds, request.sender)
             into.store(record)
+            // The record this function minted, and **not** whatever [into] handed back. A store is
+            // the embedding client's own persistence (§13) and may return another record entirely;
+            // a caller that took the store's value would be told "this is what you just accepted"
+            // about a value this library did not build for this request.
             return record
+        }
+
+        /**
+         * §8.6's and §8.7's two sender rules, one per payee — which is why this is a `when` over
+         * [Payee] and not an `if`.
+         *
+         * A constant added to that enum later must not be able to fall through to "no sender check
+         * performed", which is the one outcome here that is silent and wrong. The same reasoning
+         * `MoneyException.asChannelRejection` gives for its own exhaustive `when`.
+         *
+         * The fee side is delegated whole to [Settlement.checkFeePaymentRequest] rather than
+         * reimplemented: §8.7's operand is the recipient in the **signed fee term**, which is a
+         * sequence of raw tags across §8.4's points and not anything a `FeeSplit` holds, and that
+         * function is where both halves already meet. What is new is that it is now unskippable —
+         * before revision `1.5` a client could store a fee request without ever calling it.
+         */
+        private fun checkSender(
+            request: PaymentRequest,
+            acceptance: Acceptance.Accepted,
+            feeTermPoints: List<FeeTermSighting>,
+        ) {
+            when (request.payee) {
+                Payee.PROVIDER -> if (request.sender != acceptance.provider) {
+                    throw SettlementException(
+                        SettlementRejection.PROVIDER_REQUEST_NOT_FROM_PROVIDER,
+                        SettlementVocabulary.PAYEE,
+                        "§8.6: a `type=2` with `[\"${SettlementVocabulary.PAYEE}\", " +
+                            "\"${Payee.PROVIDER.token}\"]` MUST arrive in a gift wrap whose seal " +
+                            "(kind:13) `pubkey` is the provider's key — the same key the " +
+                            "acceptance for this order was checked against (§7.6, §11.2) — and " +
+                            "any other MUST be rejected. This is not a missing or a malformed " +
+                            "`${SettlementVocabulary.PAYEE}` tag: the tag is present and well " +
+                            "formed, and what is wrong is who sealed the message. A provider " +
+                            "invoice from another key is somebody else's bill under the " +
+                            "provider's name, and §9.2 check 1 would anchor this order's whole " +
+                            "payment evidence to it",
+                    )
+                }
+
+                Payee.FEE -> Settlement.checkFeePaymentRequest(request, feeTermPoints)
+            }
+        }
+
+        /**
+         * §8.6's two revision `1.5` uniqueness rules, in the order the document states them.
+         *
+         * Neither writes anything: both are asked of [into] before [accept] mints a record, so a
+         * refusal leaves every existing record exactly as it was — which is the whole content of
+         * [SettlementRejection.REQUEST_ALREADY_STORED], whose point is that the **first** record
+         * survives.
+         *
+         * The cross-payee sweep walks [Payee] rather than asking the store for a collection, and
+         * that is §8.6's non-custodial rule showing through the shape: no method on
+         * [PaymentRequestStore] takes or returns a collection of payees, because there is to be no
+         * value anywhere in this package that names two payees of one order at once.
+         */
+        private fun checkNotAlreadyStored(request: PaymentRequest, into: PaymentRequestStore) {
+            if (into.find(request.order, request.payee) != null) {
+                throw SettlementException(
+                    SettlementRejection.REQUEST_ALREADY_STORED,
+                    SettlementVocabulary.PAYMENT,
+                    "§8.6: once a `type=2` has been accepted for an order and payee, a second MUST " +
+                        "be rejected rather than replacing it — §9.2 check 1 compares a receipt " +
+                        "against *the* stored request, so a replacement re-points this order's " +
+                        "payment evidence after the fact, including after the buyer has paid the " +
+                        "first. The record already held is untouched. A provider re-sending its " +
+                        "own invoice is refused too: an invoice that expires unpaid is not " +
+                        "re-issued inside the order",
+                )
+            }
+            for (other in Payee.entries) {
+                if (other == request.payee) continue
+                val held = into.find(request.order, other) ?: continue
+                if (held.invoice.text != request.invoice.text) continue
+                throw SettlementException(
+                    SettlementRejection.INVOICE_STORED_FOR_OTHER_PAYEE,
+                    SettlementVocabulary.PAYMENT,
+                    "§8.6: an invoice already accepted for one payee on an order MUST be rejected " +
+                        "for any other payee on that order. One payment cannot settle two payees, " +
+                        "and a combined bill is custody — somebody would hold " +
+                        "`price_msat + fee_msat` and owe another party the difference, which §1 " +
+                        "rules out. Both records are untouched. The comparison is over the " +
+                        "verbatim BOLT-11 string, which is the byte-identity §9.2 check 1 makes",
+                )
+            }
         }
 
         /**
@@ -227,11 +377,28 @@ public sealed interface AcceptedPaymentRequest {
 public interface PaymentRequestStore {
 
     /**
-     * Persist [accepted], replacing any record under the same `(order, payee)` key.
+     * Persist [accepted]. **A record already held under the same `(order, payee)` key is not
+     * replaced**, and an implementation MUST refuse rather than overwrite it.
+     *
+     * §8.6 (revision `1.5`): "Once a `type=2` has been accepted for an `(order, payee)` pair, a
+     * second MUST be rejected rather than replacing it." Before that revision this method
+     * documented the opposite, and the hole it left is gap G1d: §9.2 check 1 compares a receipt
+     * against *the* stored request, so a party who can get a second one accepted re-points this
+     * order's payment evidence at an invoice of its choosing, including after the buyer has paid
+     * the first.
+     *
+     * [AcceptedPaymentRequest.accept] asks [find] and refuses before ever calling this, so a store
+     * reached through the only door that mints a record never sees a duplicate key. The obligation
+     * is stated here as well, and [inMemory] keeps it, for the reason §13 draws its line where it
+     * does: a store is the embedding client's own persistence, and a client and this library
+     * disagreeing about what a second `store` means is precisely how a record gets silently
+     * replaced behind a check that refused the replacement.
      *
      * @return the record now held under that key, which is [accepted]. A value rather than `Unit`
      *   for the reason every seam method returns one: an implementation that fails can only do so
      *   by throwing, and a caller holding the record it was given back can assert on it.
+     * @throws SettlementException [SettlementRejection.REQUEST_ALREADY_STORED] when a record is
+     *   already held under that key, leaving it untouched.
      */
     public fun store(accepted: AcceptedPaymentRequest): AcceptedPaymentRequest
 
@@ -272,8 +439,28 @@ private class InMemoryPaymentRequestStore : PaymentRequestStore {
 
     private val records = mutableMapOf<Key, AcceptedPaymentRequest>()
 
+    /**
+     * §8.6's no-replacement rule, kept by the store this library ships as well as by the door that
+     * reaches it — see [PaymentRequestStore.store] for why both.
+     *
+     * The refusal is made **before** the write and by `put`-free lookup, so the record already held
+     * survives byte for byte. `records[key] = accepted` guarded by an `if` afterwards would be the
+     * same rule written the one way that can still lose the first record to an early return.
+     */
     override fun store(accepted: AcceptedPaymentRequest): AcceptedPaymentRequest {
-        records[Key(accepted.order, accepted.payee)] = accepted
+        val key = Key(accepted.order, accepted.payee)
+        if (key in records) {
+            throw SettlementException(
+                SettlementRejection.REQUEST_ALREADY_STORED,
+                SettlementVocabulary.PAYMENT,
+                "§8.6: a `type=2` has already been accepted for this order and payee, and a second " +
+                    "MUST be rejected rather than replacing it. The record already held is " +
+                    "untouched. This is the library's own store keeping the rule its own " +
+                    "`AcceptedPaymentRequest.accept` enforces one step earlier, so that a client " +
+                    "store and this one cannot come to mean different things by a second `store`",
+            )
+        }
+        records[key] = accepted
         return accepted
     }
 

@@ -130,6 +130,76 @@ public enum class SettlementRejection {
     PAYEE_NOT_REQUIRED,
 
     /**
+     * A `type=2` offered against an [dev.eryalabs.nenya.channel.Acceptance.Accepted] for a
+     * **different** order.
+     *
+     * Every other refusal [AcceptedPaymentRequest.accept] makes is derived from that acceptance —
+     * the provider's key, the expected amount, the fee term's recipient — so a request judged
+     * against another order's acceptance would be checked against a provider, a price and a fee
+     * nobody signed for it, and every one of those checks would report itself performed. Refused
+     * first and by name for that reason, rather than being left to fail confusingly at whichever
+     * of the derived checks happened to notice.
+     *
+     * The caller's mistake rather than the peer's, and its own constant for the reason
+     * [NOT_A_PAYMENT_REQUEST] has one:
+     * [dev.eryalabs.nenya.channel.ChannelRejection.DIFFERENT_ORDER] is this refusal's counterpart
+     * one message earlier.
+     */
+    REQUEST_FOR_ANOTHER_ORDER,
+
+    /**
+     * §8.6 (revision `1.5`): a `payee=provider` `type=2` that did not arrive sealed by the
+     * provider's key — "the same key the acceptance for that order was checked against (§7.6,
+     * §11.2)".
+     *
+     * The provider-side counterpart of [FEE_SEAL_NOT_RECIPIENT], and it is kept apart from it for
+     * the reason the whole enum exists: the two name different keys and send a reader to different
+     * places. §8.7's operand is the recipient in the signed fee term, and this one's is the key
+     * the acceptance was checked against — which is why this refusal cannot be made without an
+     * `Acceptance.Accepted` and why `accept` takes one.
+     *
+     * Gap G1c, closed: the standard shape of the attack is the **buyer's** own key, reached by a
+     * buyer that also sealed the acceptance. Both halves are needed —
+     * [dev.eryalabs.nenya.channel.ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER] stops the
+     * acceptance, and this stops a request offered against an honest acceptance by anyone else.
+     */
+    PROVIDER_REQUEST_NOT_FROM_PROVIDER,
+
+    /**
+     * §8.6 (revision `1.5`): a second `type=2` for an `(order, payee)` pair one has already been
+     * accepted for. The first record is left exactly as it was.
+     *
+     * §9.2 check 1 compares a receipt against *the* stored payment request, and a replacement
+     * re-points that comparison after the fact: whoever can get a second request accepted can aim
+     * the order's payment evidence at an invoice of their choosing, including after the buyer has
+     * paid the first. Before revision `1.5` this library documented the opposite — a second request
+     * replaced the first, silently — which is gap G1d.
+     *
+     * It refuses one flow that looks conformant, and saying so is the point rather than a caveat: a
+     * provider re-sending its own invoice, because the first went unanswered, is refused too. §8.6
+     * states why — an invoice that expires unpaid is not re-issued inside the order.
+     */
+    REQUEST_ALREADY_STORED,
+
+    /**
+     * §8.6 (revision `1.5`): a `type=2` whose BOLT-11 string is byte-identical to one already
+     * accepted for a **different** payee on the same order. Both records are left untouched.
+     *
+     * §8.6's non-custodial rule, enforced at the moment of storage rather than at settlement: one
+     * invoice presented as both payees' bills is a combined invoice with extra steps, and whoever
+     * is paid holds `price_msat + fee_msat` and owes somebody the difference. Keying the store by
+     * `(order, payee)` makes the two records two records; it does not, on its own, make them two
+     * *invoices*.
+     *
+     * Decision I as amended, from the test program's own run: the app issued one combined bill and
+     * had both the provider and itself send it, and the library stored it twice without comment —
+     * catching the trick only when the two payment proofs arrived, which is after the buyer has
+     * paid. The comparison is over the verbatim string, the same byte-identity §9.2 check 1 uses,
+     * because that is what the store holds and what a receipt is checked against.
+     */
+    INVOICE_STORED_FOR_OTHER_PAYEE,
+
+    /**
      * A BOLT-11 reference carrying an uppercase character (§4.3, Appendix C).
      *
      * Appendix C: an invoice is "all of it lowercase; a mixed-case invoice is invalid", and §4.3

@@ -68,9 +68,14 @@ class SettlementPropertyTest {
          */
         val SPLIT: FeeSplit = SettlementFixtures.split()
 
-        /** Every request decoded through §8.6's codec. */
+        /**
+         * Every request decoded through §8.6's codec, sealed by the key revision `1.5` requires for
+         * its payee — the provider's, or the fee recipient's.
+         */
         val requests: List<PaymentRequest> by lazy {
-            corpus.map { SettlementFixtures.request(it.requestTags) }
+            corpus.map {
+                SettlementFixtures.requestFrom(it.payee, it.requestTags, index = it.index)
+            }
         }
 
         /** Every receipt decoded through §9.2's codec. */
@@ -78,13 +83,55 @@ class SettlementPropertyTest {
             corpus.map { SettlementFixtures.receipt(it.receiptTags) }
         }
 
+        /**
+         * One checked §7.6 acceptance per fixture order, minted by `OrderProposal.accepts` from a
+         * proposal sealed by the buyer and a `type=3` sealed by the provider.
+         *
+         * One per order rather than one shared: `AcceptedPaymentRequest.accept` refuses a request
+         * whose `order` is not the acceptance's, so a single acceptance would store exactly one of
+         * the ten thousand. It is the cost of the corpus rising by two event ids per fixture, and
+         * it buys the thing this file could not state before — that every stored record went
+         * through a door that checked who sent it.
+         */
+        val acceptances: List<SettlementFixtures.Accepted> by lazy {
+            corpus.map { SettlementFixtures.accepted(it.index) }
+        }
+
         /** Every request accepted at a pinned clock reading and stored under its own key. */
         val store: PaymentRequestStore by lazy {
             val out = PaymentRequestStore.inMemory()
-            for (request in requests) {
-                AcceptedPaymentRequest.accept(request, out, FakeClock(SettlementFixtures.ACCEPTED_AT))
+            for ((index, request) in requests.withIndex()) {
+                SettlementFixtures.accept(
+                    request,
+                    out,
+                    FakeClock(SettlementFixtures.ACCEPTED_AT),
+                    acceptances[index],
+                )
             }
             out
+        }
+
+        /**
+         * For each payee, the first [EXHAUSTIVE] preimages re-composed as invoices for **that**
+         * payee's expected amount under [SPLIT].
+         *
+         * `crossInvoices[p][i]` is byte-identical to `corpus[i].invoice` exactly when `corpus[i]`
+         * is for payee `p`, because `SettlementFixtures.pairs` composes it from the same preimage
+         * and the same amount — which is what makes the diagonal of the all-pairs sweep a match
+         * and every other cell a real comparison rather than an amount refusal.
+         *
+         * Precomputed, because the sweep would otherwise compose `EXHAUSTIVE × EXHAUSTIVE` bech32
+         * invoices for `2 × EXHAUSTIVE` distinct values.
+         */
+        val crossInvoices: Map<Payee, List<String>> by lazy {
+            Payee.entries.associateWith { payee ->
+                List(EXHAUSTIVE) { index ->
+                    SettlementFixtures.invoice(
+                        corpus[index].preimageHex,
+                        SettlementFixtures.amountFor(payee, SPLIT),
+                    )
+                }
+            }
         }
 
         /** The role a fixture is *not* for, for the cross-key assertions. */
@@ -227,23 +274,40 @@ class SettlementPropertyTest {
     @JsName("every_receipt_is_refused_when_its_own_key_holds_a_neighbours_invoice")
     @Test
     fun `every receipt is refused when its own key holds a neighbour's invoice`() {
-        // The rotated store holds, under each fixture's own (order, payee) key, the **next**
-        // fixture's invoice. So every lookup succeeds and every comparison must fail: a comparator
-        // that answered `matched` unconditionally dies here, and one that answered `no stored
-        // request` would fail the test above instead.
+        // The rotated store holds, under each fixture's own (order, payee) key, a **neighbour's**
+        // invoice. So every lookup succeeds and every comparison must fail: a comparator that
+        // answered `matched` unconditionally dies here, and one that answered `no stored request`
+        // would fail the test above instead.
+        //
+        // The rotation is by two and not by one, and the reason is revision `1.5` rather than
+        // taste: `accept` now performs §9.2 check 4 on the way in, so a record can only be planted
+        // under a key at all if its invoice is for the amount **that key's payee** is owed.
+        // `pairs` alternates the two roles, so index + 1 is always the other payee and its invoice
+        // always the other amount — every plant would be refused INVOICE_AMOUNT_MISMATCH and this
+        // test would prove nothing about check 1. Index + 2 is the same payee (the corpus size is
+        // even, so the parity survives the wrap) and a different preimage, which is a different
+        // invoice for the same figure. Asserted rather than assumed, below.
         val rotated = PaymentRequestStore.inMemory()
         for (fixture in corpus) {
-            val neighbour = corpus[(fixture.index + 1) % CORPUS]
+            val neighbour = corpus[(fixture.index + 2) % CORPUS]
+            assertEquals(
+                fixture.payee,
+                neighbour.payee,
+                "the neighbour must be the same payee, or the plant is refused by check 4 rather " +
+                    "than compared by check 1",
+            )
             val tags = SettlementFixtures.requestTags(
                 index = fixture.index,
                 order = fixture.orderHex,
                 payment = SettlementFixtures.requestPaymentTag(neighbour.invoice),
                 payeeTag = SettlementFixtures.payeeTag(fixture.payee, fixture.index),
+                fee = if (fixture.payee == Payee.FEE) SettlementFixtures.feeTag(fixture.index) else null,
             )
-            AcceptedPaymentRequest.accept(
-                SettlementFixtures.request(tags),
+            SettlementFixtures.accept(
+                SettlementFixtures.requestFrom(fixture.payee, tags, index = fixture.index),
                 rotated,
                 FakeClock(SettlementFixtures.ACCEPTED_AT),
+                acceptances[fixture.index],
             )
         }
 
@@ -260,22 +324,36 @@ class SettlementPropertyTest {
     fun `within a sub-corpus, a receipt matches exactly the request with its own index`() {
         // The all-pairs half: EXHAUSTIVE × EXHAUSTIVE ordered pairs, each stored under the
         // receipt's own key so the lookup always succeeds and only the bytes decide.
+        //
+        // The invoice planted for (receiptIndex, requestIndex) is the request fixture's own
+        // **preimage** re-composed at the amount the receipt fixture's payee is owed — see the
+        // rotation test for why the raw neighbouring invoice cannot be used: check 4 now runs at
+        // acceptance. On the diagonal that re-composition is byte-identical to the fixture's own
+        // invoice, because `pairs` builds it from the same two inputs, and off it the `p` field
+        // differs. So exactly the intended comparison is left for check 1 to make.
         var matched = 0
         var refused = 0
         for (receiptIndex in 0 until EXHAUSTIVE) {
             val fixture = corpus[receiptIndex]
+            val planted = crossInvoices.getValue(fixture.payee)
             for (requestIndex in 0 until EXHAUSTIVE) {
                 val paired = PaymentRequestStore.inMemory()
                 val tags = SettlementFixtures.requestTags(
                     index = fixture.index,
                     order = fixture.orderHex,
-                    payment = SettlementFixtures.requestPaymentTag(corpus[requestIndex].invoice),
+                    payment = SettlementFixtures.requestPaymentTag(planted[requestIndex]),
                     payeeTag = SettlementFixtures.payeeTag(fixture.payee, fixture.index),
+                    fee = if (fixture.payee == Payee.FEE) {
+                        SettlementFixtures.feeTag(fixture.index)
+                    } else {
+                        null
+                    },
                 )
-                AcceptedPaymentRequest.accept(
-                    SettlementFixtures.request(tags),
+                SettlementFixtures.accept(
+                    SettlementFixtures.requestFrom(fixture.payee, tags, index = fixture.index),
                     paired,
                     FakeClock(SettlementFixtures.ACCEPTED_AT),
+                    acceptances[fixture.index],
                 )
                 if (receiptIndex == requestIndex) {
                     assertIs<Settlement.Evidenced>(

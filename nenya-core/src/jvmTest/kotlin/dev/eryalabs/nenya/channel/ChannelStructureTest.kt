@@ -92,6 +92,14 @@ class ChannelStructureTest {
             "ChannelRejection.valueOf",             // ditto
             "OrderMessageKind.valueOf",             // ditto
             "RumorKind.valueOf",                    // ditto
+            // §7.6, revision `1.5`: the provider's pubkey **as the caller resolved it**, 64 hex
+            // characters, read the way §4.3 reads one. It is the opposite of the shape this list
+            // guards against — not a claim a counterparty made and this codec believed, but a fact
+            // the caller established outside both messages and this codec now checks the seal
+            // against. It could not be a richer type without inventing one for "64 hex characters"
+            // that `AttributedRumor.attribute` above does not use either.
+            "OrderProposal.accepts",
+            "Acceptance\$Accepted.<init>",          // that same checked key, carried on the answer
         )
 
         /**
@@ -420,21 +428,38 @@ class ChannelStructureTest {
                 "stopped seeing the package",
         )
         // And nothing on the answer type itself hands a caller a bare verdict back out: no member
-        // of Acceptance or its cases returns a Boolean or a String at all.
+        // of Acceptance or its cases returns a Boolean, and none returns a String **except** the
+        // one that is not a verdict at all.
+        //
+        // `Accepted.getProvider` is that exception and it is pinned by name rather than waved
+        // through by a pattern: it is §4.3's 64-hex pubkey the caller resolved and §7.6 checked the
+        // seal against, carried so §8.6's `type=2` rule has the same operand. A String there is a
+        // key, not an answer — the shape this sweep exists to refuse is a *decision* handed back as
+        // text, which is what `divergentTerms` being a list of tag names and `status` being an
+        // `OrderState` keep out. A new String accessor on any of these types has to be looked at,
+        // which is why the list is exact.
         val cases = publishedClasses().filter { it.name.startsWith("$PACKAGE.Acceptance") }
         assertTrue(cases.size > 1, "the sweep must find the sealed type and its cases; found $cases")
+        val stringAccessors = mutableSetOf<String>()
         for (type in cases) {
             for (executable in publishedExecutables(type)) {
                 val method = executable as? Method ?: continue
                 if (method.name in OBJECT_METHODS) continue
                 val returned = method.genericReturnType.typeName
                 assertFalse(
-                    returned == "boolean" || returned == "java.lang.Boolean" ||
-                        returned == String::class.java.name,
+                    returned == "boolean" || returned == "java.lang.Boolean",
                     "${label(type, method)} returns $returned; §7.6's outcome is the type itself",
                 )
+                if (returned == String::class.java.name) stringAccessors += label(type, method)
             }
         }
+        assertEquals(
+            setOf("Acceptance\$Accepted.getProvider"),
+            stringAccessors,
+            "the only String an Acceptance case may hand back is the checked provider key; a " +
+                "second one is a decision arriving as text (STOP RULE 12, §11.1), and a missing " +
+                "one means the sweep stopped seeing the package",
+        )
     }
 
     /**

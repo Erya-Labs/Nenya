@@ -478,7 +478,7 @@ class ProposalCodecTest {
     fun `a byte-identical status update is an acceptance`() {
         val (proposal, update) = pair()
 
-        val answer = proposal.accepts(update)
+        val answer = proposal.accepts(update, PROVIDER)
 
         val accepted = assertIs<Acceptance.Accepted>(answer)
         assertEquals(proposal.order, accepted.order)
@@ -524,11 +524,11 @@ class ProposalCodecTest {
         for ((name, tag) in altered) {
             val proposalTags = ProposalFixtures.proposalTags()
             val proposal = ProposalFixtures.proposal(proposalTags)
-            val update = ProposalFixtures.statusMessage(
+            val update = acceptance(
                 ProposalFixtures.replacing(ProposalFixtures.acceptanceTags(proposalTags), tag),
             )
 
-            val counter = assertIs<Acceptance.CounterProposal>(proposal.accepts(update), name)
+            val counter = assertIs<Acceptance.CounterProposal>(proposal.accepts(update, PROVIDER), name)
             assertEquals(listOf(name), counter.divergentTerms, name)
         }
     }
@@ -551,14 +551,14 @@ class ProposalCodecTest {
         val proposal = ProposalFixtures.proposal(proposalTags)
         val padded = listOf(ChannelVocabulary.DELIVER_BY, "0$deliverBy")
 
-        val recased = ProposalFixtures.statusMessage(
+        val recased = acceptance(
             ProposalFixtures.replacing(ProposalFixtures.acceptanceTags(proposalTags), padded),
         )
-        val counter = assertIs<Acceptance.CounterProposal>(proposal.accepts(recased))
+        val counter = assertIs<Acceptance.CounterProposal>(proposal.accepts(recased, PROVIDER))
         assertEquals(listOf(ChannelVocabulary.DELIVER_BY), counter.divergentTerms)
 
-        val identical = ProposalFixtures.statusMessage(ProposalFixtures.acceptanceTags(proposalTags))
-        assertIs<Acceptance.Accepted>(proposal.accepts(identical))
+        val identical = acceptance(ProposalFixtures.acceptanceTags(proposalTags))
+        assertIs<Acceptance.Accepted>(proposal.accepts(identical, PROVIDER))
 
         // The padded spelling is a legal timestamp, not a malformed one: it decodes, and it decodes
         // to the same instant. The divergence above is §7.6's byte rule and not a parse failure.
@@ -571,47 +571,147 @@ class ProposalCodecTest {
     }
 
     /**
-     * The stated narrowing, made visible in the suite rather than only in a KDoc: [OrderProposal]
-     * does not know who the provider is, so [OrderProposal.accepts] answers about the **terms** and
-     * the caller answers about the key.
+     * §7.6's sender rule, which revision `1.5` states as a refusal: an acceptance counts only if
+     * the **provider's** key sealed it, and byte-identical terms are no substitute.
      *
-     * §7.6 says an acceptance is a `type=3` "from the provider". §7.2 gives this library the key the
-     * message was *sealed* by, and nothing here can establish that that key is the provider's: the
-     * proposal's `p` tag is a counterparty pubkey the **buyer** wrote and §5.3 gives `p` cardinality
-     * `0–n`. So an acceptance sealed by a key that is not the buyer's still compares byte-identical
-     * and is still [Acceptance.Accepted] — and [OrderStatusMessage.sender] is what a caller compares
-     * against the key it knows to be the provider's.
+     * Before this revision `accepts` compared the four terms and the order id and left the key
+     * entirely to the caller, which left gap G1c open through a route no term comparison can see: a
+     * buyer knows its own terms exactly, so it can seal a `type=3` that is byte-identical **by
+     * construction**, be told [Acceptance.Accepted], and go on to send itself the `payee=provider`
+     * `type=2`. The buyer-sealed half below is that attack, and the stranger-sealed half is the
+     * generic case; the paired positive is what stops the refusal being unconditional.
      *
-     * Written down because every other §7.6 fixture here authors both messages with the same key,
-     * which would leave a future change that started trusting the sender invisible.
+     * Every acceptance in this file is now sealed by the provider, so this is the one place the
+     * seal is varied deliberately — which is why the negative halves assert the key they were sealed
+     * by as well as the refusal.
      */
-    @JsName("an_acceptance_is_about_terms_and_the_sender_is_the_callers_to_resolve")
+    @JsName("an_acceptance_sealed_by_anyone_but_the_provider_is_refused")
     @Test
-    fun `an acceptance is about terms, and the sender is the caller's to resolve`() {
+    fun `an acceptance sealed by anyone but the provider is refused`() {
         val proposalTags = ProposalFixtures.proposalTags()
         val proposal = ProposalFixtures.proposal(proposalTags)
+        val acceptanceTags = ProposalFixtures.acceptanceTags(proposalTags)
 
-        // Authored by the key the proposal's own `p` tag names — the provider, as far as the buyer
-        // is concerned — which is a different key from the one that sealed the proposal.
-        val update = ProposalFixtures.statusMessage(
-            ProposalFixtures.acceptanceTags(proposalTags),
-            index = PROVIDER_INDEX,
+        // The buyer accepting its own order, and a stranger accepting somebody else's. Index 0 is
+        // the buyer — the key that sealed the proposal — and STRANGER_INDEX is neither party.
+        for ((who, index) in listOf("the buyer" to 0, "a stranger" to STRANGER_INDEX)) {
+            val update = ProposalFixtures.statusMessage(acceptanceTags, index)
+            assertEquals(
+                ProposalFixtures.pubkey(index),
+                update.sender,
+                "$who must really have sealed this update, or the refusal below is about nothing",
+            )
+            assertEquals(
+                emptyList(),
+                proposal.signedTerms.divergenceFrom(update.signedTerms),
+                "$who's acceptance must be byte-identical on all four terms, or it would be " +
+                    "refused as a counter-proposal and the sender check would never be reached",
+            )
+
+            val refused = assertFailsWith<ChannelException>(who) { proposal.accepts(update, PROVIDER) }
+            assertEquals(ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER, refused.reason, who)
+            assertEquals(ChannelVocabulary.STATUS, refused.tag, who)
+        }
+
+        // And the pair: the same terms sealed by the resolved provider key are an acceptance, which
+        // carries that key so §8.6's `type=2` rule has an operand it did not have to be told.
+        val accepted = assertIs<Acceptance.Accepted>(
+            proposal.accepts(acceptance(acceptanceTags), PROVIDER),
         )
-
+        assertEquals(PROVIDER, accepted.provider)
         assertNotEquals(
             proposal.buyer,
-            update.sender,
+            accepted.provider,
             "the fixture must seal the two messages with different keys, or this proves nothing",
         )
-        assertIs<Acceptance.Accepted>(
-            proposal.accepts(update),
-            "§7.6's comparison is over the four terms and the order id; the sender is §7.2's " +
-                "attribution and is the caller's to resolve",
+    }
+
+    /**
+     * §7.6's other refusal, and it is about the **argument** rather than about the message: a
+     * `provider` equal to the proposal's own buyer is rejected even where that key really did seal
+     * the update.
+     *
+     * A caller reaches this by resolving the provider out of the message being judged — the
+     * proposal's `pubkey`, or the `p` tag the buyer itself wrote, which §5.3 gives cardinality
+     * `0–n`. §7.6 forbids exactly that, and the refusal has its own constant because the fix is in
+     * the caller's resolution: told [ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER] instead, a
+     * caller would go looking at the counterparty's message for a fault that is in its own code.
+     *
+     * The update here is sealed by the buyer, so the sender check *would* also have refused it —
+     * which is the point. The ordering is what makes the two distinguishable.
+     */
+    @JsName("a_provider_resolved_to_the_buyer_is_refused_before_the_seal_is_looked_at")
+    @Test
+    fun `a provider resolved to the buyer is refused before the seal is looked at`() {
+        val proposalTags = ProposalFixtures.proposalTags()
+        val proposal = ProposalFixtures.proposal(proposalTags)
+        val update = ProposalFixtures.statusMessage(ProposalFixtures.acceptanceTags(proposalTags), 0)
+
+        assertEquals(proposal.buyer, update.sender, "the buyer must really have sealed this update")
+
+        val refused = assertFailsWith<ChannelException> { proposal.accepts(update, proposal.buyer) }
+
+        assertEquals(ChannelRejection.PROVIDER_IS_BUYER, refused.reason)
+        assertEquals(ChannelVocabulary.COUNTERPARTY, refused.tag)
+    }
+
+    /**
+     * §4.3 on the provider argument: 64 hex characters, accepted in either case and normalised —
+     * the same reading [AttributedRumor] gives the seal pubkey it is compared against.
+     *
+     * The uppercase half is not decoration. `TagFixtures`' keys are the vendored BIP-340 file's own
+     * **uppercase** spelling, so a caller holding one straight out of a vectors file is the ordinary
+     * case, and a comparison that did not normalise would refuse every acceptance for that order
+     * while looking like a counterparty fault. The wrong-length and non-hex halves are the refusal.
+     */
+    @JsName("the_provider_argument_is_read_as_s4_3_reads_a_pubkey")
+    @Test
+    fun `the provider argument is read as §4_3 reads a pubkey`() {
+        val proposalTags = ProposalFixtures.proposalTags()
+        val proposal = ProposalFixtures.proposal(proposalTags)
+        val update = acceptance(ProposalFixtures.acceptanceTags(proposalTags))
+
+        val accepted = assertIs<Acceptance.Accepted>(
+            proposal.accepts(update, ProposalFixtures.uppercasePubkey(PROVIDER_INDEX)),
+            "§4.3 requires a pubkey be accepted and normalised, and the vendored vectors spell " +
+                "theirs uppercase",
         )
+        assertEquals(PROVIDER, accepted.provider, "and the key recorded is §4.3's canonical form")
+
+        for (malformed in listOf(PROVIDER.dropLast(1), PROVIDER.dropLast(1) + "g", "")) {
+            val refused = assertFailsWith<ChannelException>(malformed) {
+                proposal.accepts(update, malformed)
+            }
+            assertEquals(ChannelRejection.MALFORMED_PROVIDER_PUBKEY, refused.reason, malformed)
+            assertEquals(ChannelVocabulary.COUNTERPARTY, refused.tag, malformed)
+        }
+    }
+
+    /**
+     * §11.2's cancellation row is "from either party", so the sender check MUST NOT reach it.
+     *
+     * The over-strict direction, and the one that looks correct: refusing every `type=3` not sealed
+     * by the provider fails closed, reads as a tightening, and quietly takes §11.2's
+     * `proposed → cancelled` away from the buyer. §7.6 is about **acceptance**, so the refusal is
+     * made after the status is read — and a buyer's own cancellation is still reported as what it
+     * is.
+     */
+    @JsName("a_buyer_sealed_cancellation_is_still_reported_and_not_refused_as_a_wrong_sender")
+    @Test
+    fun `a buyer-sealed cancellation is still reported, and not refused as a wrong sender`() {
+        val proposalTags = ProposalFixtures.proposalTags()
+        val proposal = ProposalFixtures.proposal(proposalTags)
+        val cancelled = ProposalFixtures.statusMessage(
+            ProposalFixtures.acceptanceTags(proposalTags, status = "cancelled"),
+            0,
+        )
+
+        assertEquals(proposal.buyer, cancelled.sender, "sealed by the buyer, which is the point")
         assertEquals(
-            ProposalFixtures.pubkey(PROVIDER_INDEX),
-            update.sender,
-            "§7.2: the sender is the key the seal was signed by, in §4.3's canonical lowercase",
+            OrderState.CANCELLED,
+            assertIs<Acceptance.NotAnAcceptance>(proposal.accepts(cancelled, PROVIDER)).status,
+            "§11.2 accepts a cancellation from either party before `paid`; a sender check that " +
+                "refused this would make the buyer unable to cancel its own order",
         )
     }
 
@@ -631,9 +731,9 @@ class ProposalCodecTest {
             listOf(ChannelVocabulary.EXPIRATION, (ProposalFixtures.CREATED_AT + 1L).toString()),
         )
 
-        val update = ProposalFixtures.statusMessage(echoed)
+        val update = acceptance(echoed)
 
-        assertIs<Acceptance.Accepted>(proposal.accepts(update))
+        assertIs<Acceptance.Accepted>(proposal.accepts(update, PROVIDER))
     }
 
     /**
@@ -645,11 +745,11 @@ class ProposalCodecTest {
     fun `a status update carrying no terms is a counter-proposal on all four`() {
         val proposalTags = ProposalFixtures.proposalTags()
         val proposal = ProposalFixtures.proposal(proposalTags)
-        val update = ProposalFixtures.statusMessage(
+        val update = acceptance(
             ProposalFixtures.acceptanceTags(proposalTags, terms = emptyList()),
         )
 
-        val counter = assertIs<Acceptance.CounterProposal>(proposal.accepts(update))
+        val counter = assertIs<Acceptance.CounterProposal>(proposal.accepts(update, PROVIDER))
 
         assertEquals(ProposalFixtures.TERM_NAMES, counter.divergentTerms)
     }
@@ -660,11 +760,11 @@ class ProposalCodecTest {
     fun `an acceptance naming another order is refused as a different order`() {
         val proposalTags = ProposalFixtures.proposalTags()
         val proposal = ProposalFixtures.proposal(proposalTags)
-        val update = ProposalFixtures.statusMessage(
+        val update = acceptance(
             ProposalFixtures.acceptanceTags(proposalTags, order = ProposalFixtures.orderHex(1)),
         )
 
-        val refused = assertFailsWith<ChannelException> { proposal.accepts(update) }
+        val refused = assertFailsWith<ChannelException> { proposal.accepts(update, PROVIDER) }
 
         assertEquals(ChannelRejection.DIFFERENT_ORDER, refused.reason)
         assertEquals(ChannelTags.ORDER, refused.tag)
@@ -710,15 +810,15 @@ class ProposalCodecTest {
                 OrderState.entries.none { it.token == token },
                 "`$token` is §5.2's listing vocabulary and MUST NOT be an order state",
             )
-            val update = ProposalFixtures.statusMessage(
+            val update = acceptance(
                 ProposalFixtures.acceptanceTags(proposalTags, status = token),
             )
             assertEquals(OrderState.UNKNOWN, update.status, token)
-            val answer = assertIs<Acceptance.NotAnAcceptance>(proposal.accepts(update), token)
+            val answer = assertIs<Acceptance.NotAnAcceptance>(proposal.accepts(update, PROVIDER), token)
             assertEquals(OrderState.UNKNOWN, answer.status)
         }
 
-        val cancelled = ProposalFixtures.statusMessage(
+        val cancelled = acceptance(
             ProposalFixtures.acceptanceTags(proposalTags, status = "cancelled"),
         )
         assertEquals(
@@ -729,7 +829,7 @@ class ProposalCodecTest {
         )
         assertEquals(
             OrderState.CANCELLED,
-            assertIs<Acceptance.NotAnAcceptance>(proposal.accepts(cancelled)).status,
+            assertIs<Acceptance.NotAnAcceptance>(proposal.accepts(cancelled, PROVIDER)).status,
         )
     }
 
@@ -759,16 +859,17 @@ class ProposalCodecTest {
     fun `no string representation of a proposal carries an order id or a coordinate`() {
         val proposalTags = ProposalFixtures.proposalTags()
         val proposal = ProposalFixtures.proposal(proposalTags)
-        val update = ProposalFixtures.statusMessage(ProposalFixtures.acceptanceTags(proposalTags))
-        val accepted = assertIs<Acceptance.Accepted>(proposal.accepts(update))
+        val update = acceptance(ProposalFixtures.acceptanceTags(proposalTags))
+        val accepted = assertIs<Acceptance.Accepted>(proposal.accepts(update, PROVIDER))
         val counter = assertIs<Acceptance.CounterProposal>(
             proposal.accepts(
-                ProposalFixtures.statusMessage(
+                acceptance(
                     ProposalFixtures.replacing(
                         ProposalFixtures.acceptanceTags(proposalTags),
                         listOf(ChannelTags.AMOUNT_MSAT, "1"),
                     ),
                 ),
+                PROVIDER,
             ),
         )
 
@@ -802,9 +903,20 @@ class ProposalCodecTest {
 
     private fun pair(): Pair<OrderProposal, OrderStatusMessage> {
         val proposalTags = ProposalFixtures.proposalTags()
-        return ProposalFixtures.proposal(proposalTags) to
-            ProposalFixtures.statusMessage(ProposalFixtures.acceptanceTags(proposalTags))
+        return ProposalFixtures.proposal(proposalTags) to acceptance(ProposalFixtures.acceptanceTags(proposalTags))
     }
+
+    /**
+     * [tags] decoded as a `type=3` sealed by the **provider**, which is the only seal §7.6 accepts
+     * an acceptance under since revision `1.5`.
+     *
+     * Every §7.6 control here goes through this rather than through
+     * `ProposalFixtures.statusMessage`, whose default seal is the buyer's — that default is right
+     * for the decode-level controls above, which are about §7.4's envelope and never reach
+     * [OrderProposal.accepts], and is now a refusal for everything below.
+     */
+    private fun acceptance(tags: List<List<String>>): OrderStatusMessage =
+        ProposalFixtures.statusMessage(tags, PROVIDER_INDEX)
 
     /**
      * A satoshi count whose **wrapped** 64-bit product with 1000 is exactly [priceMsat].
@@ -850,6 +962,22 @@ class ProposalCodecTest {
 
         /** And the provider — the `p` tag of a proposal at index 0 — one key along. */
         const val PROVIDER_INDEX: Int = 1
+
+        /**
+         * That key itself, which §7.6 (revision `1.5`) makes an operand of every acceptance check.
+         *
+         * Named here rather than at each call site, because it is the value a caller resolved
+         * *outside* both messages: writing `ProposalFixtures.pubkey(PROVIDER_INDEX)` into twenty
+         * `accepts` calls would read as a key taken off the proposal, which is what §7.6 forbids.
+         */
+        val PROVIDER: String = ProposalFixtures.pubkey(PROVIDER_INDEX)
+
+        /**
+         * A key that is neither this order's buyer (0), its provider (1) nor its fee recipient (2).
+         *
+         * The generic §7.6 attacker: somebody who saw the proposal on a relay and answered it.
+         */
+        const val STRANGER_INDEX: Int = 7
 
         /** Newton doubles from 3 correct bits: 6, 12, 24, 48, 96 — six rounds covers 64. */
         const val NEWTON_ROUNDS: Int = 6

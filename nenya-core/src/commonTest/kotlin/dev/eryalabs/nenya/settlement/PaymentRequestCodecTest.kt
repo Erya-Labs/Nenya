@@ -38,6 +38,21 @@ class PaymentRequestCodecTest {
 
         /** One basis point — non-zero, so the *term* names a recipient while the *amount* is zero. */
         const val ZERO_FEE_BASIS_POINTS: Int = 1
+
+        /**
+         * §7.6's checked acceptance for the order at index 0, which is the one
+         * `SettlementFixtures.requestTags()` names by default.
+         *
+         * Built once: `AcceptedPaymentRequest.accept` takes one, and every clock control below
+         * needs an acceptance that is beside the point of what it is testing.
+         */
+        val ORDER_ZERO: SettlementFixtures.Accepted by lazy { SettlementFixtures.accepted(0) }
+
+        /** The same for the second order the store-keying control uses. */
+        val ORDER_ONE: SettlementFixtures.Accepted by lazy { SettlementFixtures.accepted(1) }
+
+        fun acceptanceFor(index: Int): SettlementFixtures.Accepted =
+            if (index == 0) ORDER_ZERO else ORDER_ONE
     }
 
     // ---------------------------------------------------------------------------------------
@@ -277,35 +292,48 @@ class PaymentRequestCodecTest {
         }
     }
 
-    @JsName("a_second_request_under_one_key_replaces_the_first_and_nothing_merges_them")
+    /**
+     * §8.6 (revision `1.5`): a second `type=2` under one `(order, payee)` key is **refused**, and
+     * the first record survives byte for byte.
+     *
+     * This file used to pin the opposite, and the inversion is gap G1d: `AcceptedPaymentRequest`
+     * documented that a second request replaced the first, so a stranger — or the provider itself —
+     * could re-point §9.2 check 1 at another invoice after the fact, including after the buyer had
+     * paid the one it displaced. Check 1 is a comparison against *the* stored string, and there is
+     * no version of that sentence that survives the string being replaceable.
+     *
+     * Both invoices here are for the provider's own expected amount, so what refuses the second is
+     * the uniqueness rule and not §9.2 check 4 — the wrong verdict for the right reason is exactly
+     * what this file's constants exist to keep apart.
+     */
+    @JsName("a_second_request_under_one_key_is_refused_and_the_first_record_survives")
     @Test
-    fun `a second request under one key replaces the first, and nothing merges them`() {
-        // NENYA-1 states no rule for a second `type=2` under one (order, payee) key, so this
-        // library invents none: it neither merges, nor de-duplicates, nor silently keeps the older
-        // record. The behaviour is pinned here rather than left as prose, because a provider that
-        // reissues an invoice is an ordinary wire event and a caller that must refuse a replacement
-        // has to be able to see one — which it does by asking `find` before accepting.
+    fun `a second request under one key is refused, and the first record survives`() {
         val store = PaymentRequestStore.inMemory()
-        val invoices = invoices(2)
         val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
-        val order = SettlementFixtures.orderHex(0)
+        val owed = SettlementFixtures.amountFor(Payee.PROVIDER, SettlementFixtures.split())
+        val invoices = PaymentFixtures.preimageHex(2).map { SettlementFixtures.invoice(it, owed) }
         assertEquals(
             invoices.size,
             invoices.toSet().size,
-            "the two fixtures must be different invoices, or `replaced` and `kept` look the same",
+            "the two fixtures must be different invoices, or `refused` and `kept` look the same",
         )
-        val first = store(store, clock, order, Payee.PROVIDER, invoices[0])
+
+        val first = store(store, clock, 0, Payee.PROVIDER, invoices[0])
         assertSame(first, store.find(first.order, Payee.PROVIDER))
 
-        val second = store(store, clock, order, Payee.PROVIDER, invoices[1])
+        val refused = assertFailsWith<SettlementException> {
+            store(store, clock, 0, Payee.PROVIDER, invoices[1])
+        }
 
-        assertSame(second, store.find(first.order, Payee.PROVIDER))
-        assertEquals(invoices[1], second.invoice.text)
-        assertEquals(
-            first.order,
-            second.order,
-            "both are under the same key, or this test is about two different records",
+        assertEquals(SettlementRejection.REQUEST_ALREADY_STORED, refused.reason)
+        assertSame(
+            first,
+            store.find(first.order, Payee.PROVIDER),
+            "the record already held is untouched — the whole content of the rule is that the " +
+                "**first** one survives",
         )
+        assertEquals(invoices[0], store.find(first.order, Payee.PROVIDER)?.invoice?.text)
     }
 
     @JsName("a_payee_tag_at_the_other_roles_arity_is_refused")
@@ -546,12 +574,13 @@ class PaymentRequestCodecTest {
     @Test
     fun `an accepted request records the clock reading, and is findable by order and payee`() {
         val store = PaymentRequestStore.inMemory()
-        val request = SettlementFixtures.request(SettlementFixtures.requestTags())
+        val request = SettlementFixtures.requestFrom(Payee.PROVIDER, SettlementFixtures.requestTags())
 
-        val accepted = AcceptedPaymentRequest.accept(
+        val accepted = SettlementFixtures.accept(
             request,
             store,
             FakeClock(SettlementFixtures.ACCEPTED_AT),
+            ORDER_ZERO,
         )
 
         assertEquals(SettlementFixtures.ACCEPTED_AT, accepted.acceptedAt)
@@ -567,10 +596,10 @@ class PaymentRequestCodecTest {
     @Test
     fun `with a fail-closed clock a well-formed request is not stored at all`() {
         val store = PaymentRequestStore.inMemory()
-        val request = SettlementFixtures.request(SettlementFixtures.requestTags())
+        val request = SettlementFixtures.requestFrom(Payee.PROVIDER, SettlementFixtures.requestTags())
 
         val refused = assertFailsWith<SettlementException> {
-            AcceptedPaymentRequest.accept(request, store, NenyaClock.FAIL_CLOSED)
+            SettlementFixtures.accept(request, store, NenyaClock.FAIL_CLOSED, ORDER_ZERO)
         }
 
         assertEquals(
@@ -589,10 +618,10 @@ class PaymentRequestCodecTest {
     @Test
     fun `a clock reporting before 1970 is refused as broken`() {
         val store = PaymentRequestStore.inMemory()
-        val request = SettlementFixtures.request(SettlementFixtures.requestTags())
+        val request = SettlementFixtures.requestFrom(Payee.PROVIDER, SettlementFixtures.requestTags())
 
         val refused = assertFailsWith<SettlementException> {
-            AcceptedPaymentRequest.accept(request, store, FakeClock(-1L))
+            SettlementFixtures.accept(request, store, FakeClock(-1L), ORDER_ZERO)
         }
 
         assertEquals(SettlementRejection.CLOCK_BEFORE_EPOCH, refused.reason)
@@ -606,9 +635,9 @@ class PaymentRequestCodecTest {
         // usable, and only a *negative* reading is broken. The boundary is asserted, because an
         // implementation written from memory writes `<= 0`.
         val store = PaymentRequestStore.inMemory()
-        val request = SettlementFixtures.request(SettlementFixtures.requestTags())
+        val request = SettlementFixtures.requestFrom(Payee.PROVIDER, SettlementFixtures.requestTags())
 
-        val accepted = AcceptedPaymentRequest.accept(request, store, FakeClock(0L))
+        val accepted = SettlementFixtures.accept(request, store, FakeClock(0L), ORDER_ZERO)
 
         assertEquals(0L, accepted.acceptedAt)
     }
@@ -620,13 +649,11 @@ class PaymentRequestCodecTest {
         val invoices = invoices(4)
         val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
         // Two payees under one order, and two orders under one payee.
-        val order = SettlementFixtures.orderHex(0)
-        val other = SettlementFixtures.orderHex(1)
         val requests = listOf(
-            store(store, clock, order, Payee.PROVIDER, invoices[0]),
-            store(store, clock, order, Payee.FEE, invoices[1]),
-            store(store, clock, other, Payee.PROVIDER, invoices[2]),
-            store(store, clock, other, Payee.FEE, invoices[3]),
+            store(store, clock, 0, Payee.PROVIDER, invoices[0]),
+            store(store, clock, 0, Payee.FEE, invoices[1]),
+            store(store, clock, 1, Payee.PROVIDER, invoices[2]),
+            store(store, clock, 1, Payee.FEE, invoices[3]),
         )
 
         for (accepted in requests) {
@@ -652,11 +679,12 @@ class PaymentRequestCodecTest {
     fun `no string representation here carries an invoice, an order id or a preimage`() {
         val fixture = SettlementFixtures.pairs(1).single()
         val store = PaymentRequestStore.inMemory()
-        val request = SettlementFixtures.request(fixture.requestTags)
-        val accepted = AcceptedPaymentRequest.accept(
+        val request = SettlementFixtures.requestFrom(fixture.payee, fixture.requestTags)
+        val accepted = SettlementFixtures.accept(
             request,
             store,
             FakeClock(SettlementFixtures.ACCEPTED_AT),
+            ORDER_ZERO,
         )
         val receipt = SettlementFixtures.receipt(fixture.receiptTags)
         val settlement =
@@ -723,18 +751,33 @@ class PaymentRequestCodecTest {
         )
     }
 
+    /**
+     * One `(order, payee)` record stored through the only door that mints one.
+     *
+     * [index] rather than a bare order id, because revision `1.5` made three more of this
+     * fixture's values travel together: the order the acceptance names, the provider key a
+     * `payee=provider` request must be sealed by, and the fee recipient named in both the signed
+     * `fee` term and the `payee` tag. `SettlementFixtures` derives all of them from the one index,
+     * so a helper taking the order id alone could no longer build a request that stores.
+     */
     private fun store(
         store: PaymentRequestStore,
         clock: NenyaClock,
-        order: String,
+        index: Int,
         payee: Payee,
         invoice: String,
     ): AcceptedPaymentRequest {
         val tags = SettlementFixtures.requestTags(
-            order = order,
+            index = index,
             payment = SettlementFixtures.requestPaymentTag(invoice),
-            payeeTag = SettlementFixtures.payeeTag(payee),
+            payeeTag = SettlementFixtures.payeeTag(payee, index),
+            fee = if (payee == Payee.FEE) SettlementFixtures.feeTag(index) else null,
         )
-        return AcceptedPaymentRequest.accept(SettlementFixtures.request(tags), store, clock)
+        return SettlementFixtures.accept(
+            SettlementFixtures.requestFrom(payee, tags, index = index),
+            store,
+            clock,
+            acceptanceFor(index),
+        )
     }
 }

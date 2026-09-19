@@ -1,10 +1,14 @@
 package dev.eryalabs.nenya.settlement
 
 import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.channel.AttributedRumor
 import dev.eryalabs.nenya.channel.ChannelFixtures
 import dev.eryalabs.nenya.channel.ChannelTags
 import dev.eryalabs.nenya.channel.ChannelVocabulary
+import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.OrderStatusMessage
+import dev.eryalabs.nenya.channel.ProposalFixtures
 import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
@@ -12,6 +16,7 @@ import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentFixtures
 import dev.eryalabs.nenya.payment.PaymentHash
 import dev.eryalabs.nenya.payment.Preimage
+import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
 import kotlin.test.fail
@@ -106,6 +111,9 @@ internal object SettlementFixtures {
     private const val PROVIDER_OFFSET: Int = 1
     private const val FEE_RECIPIENT_OFFSET: Int = 2
 
+    /** Clear of all three, so [stranger] is nobody's key on the order it is used against. */
+    private const val STRANGER_OFFSET: Int = 7
+
     /** Tag names §5.3 does not name and §8.6 does not read, so §4.3's unknown-tag rule applies. */
     private val UNKNOWN_NAMES: List<String> = listOf("client", "zap", "relays", "x-nenya-experiment")
 
@@ -121,14 +129,19 @@ internal object SettlementFixtures {
     private const val DESCRIPTION_HASH_FIELD: Char = 'h'
 
     /** A real BIP-340 public key, in §4.3's canonical lowercase. */
-    fun pubkey(index: Int): String {
-        val keys = TagFixtures.uppercasePubkeys
-        return keys[((index % keys.size) + keys.size) % keys.size].lowercase()
-    }
+    fun pubkey(index: Int): String = uppercasePubkey(index).lowercase()
 
-    /** The same key in the vendored file's own **uppercase** spelling — §4.3's read rule, live. */
+    /**
+     * The same key in the vendored file's own **uppercase** spelling — §4.3's read rule, live.
+     *
+     * Read out of [TagFixtures.distinctPubkeys] and not out of the raw column, for the reason
+     * `ProposalFixtures.raw` gives: the file reuses one key across eight rows, and since revision
+     * `1.5` a fixture whose buyer and provider are the same key is refused by §7.6 itself. The two
+     * generators must index the same list, because an order's buyer and provider are drawn there
+     * and its `payee` tags and seals here.
+     */
     fun uppercasePubkey(index: Int): String {
-        val keys = TagFixtures.uppercasePubkeys
+        val keys = TagFixtures.distinctPubkeys
         return keys[((index % keys.size) + keys.size) % keys.size]
     }
 
@@ -349,6 +362,16 @@ internal object SettlementFixtures {
     /** The fee recipient at [index] — §8.1's third `fee` element and §8.7's required seal. */
     fun feeRecipient(index: Int = 0): String = pubkey(index + FEE_RECIPIENT_OFFSET)
 
+    /**
+     * A key that is none of the three parties to the order at [index].
+     *
+     * Every revision `1.5` sender rule has two attackers and they are different people: the
+     * counterparty overstepping its role — a buyer accepting its own order, a provider forwarding
+     * the fee recipient's invoice — and a stranger who simply saw the order id. A fixture that only
+     * ever tried the first would pass over a check that compared against "not the buyer".
+     */
+    fun stranger(index: Int = 0): String = pubkey(index + STRANGER_OFFSET)
+
     /** [tags] as a `kind:16` rumor attributed to the key that authored it — §7.2's positive case. */
     fun bound(tags: List<List<String>>, kind: Int = NenyaKind.ORDER_MESSAGE, index: Int = 0):
         AttributedRumor.Bound = boundSealedBy(buyer(index), tags, kind)
@@ -376,6 +399,134 @@ internal object SettlementFixtures {
     /** The same, sealed by [author] — §8.7's operand. */
     fun requestSealedBy(author: String, tags: List<List<String>>, split: FeeSplit = split()): PaymentRequest =
         PaymentRequest.decode(boundSealedBy(author, tags, NenyaKind.ORDER_MESSAGE), split)
+
+    /**
+     * The same, sealed by the key §8.6 requires for [payee] on the order at [index] — the provider
+     * for a `payee=provider` request (revision `1.5`), the fee recipient for a `payee=fee` one
+     * (§8.7).
+     *
+     * A `when` over the enum and never a default, so a third role added to [Payee] later cannot
+     * fall through to "sealed by whoever": the point of these two rules is that each message has
+     * exactly one key it may arrive under.
+     */
+    fun requestFrom(
+        payee: Payee,
+        tags: List<List<String>>,
+        split: FeeSplit = split(),
+        index: Int = 0,
+    ): PaymentRequest = requestSealedBy(
+        when (payee) {
+            Payee.PROVIDER -> provider(index)
+            Payee.FEE -> feeRecipient(index)
+        },
+        tags,
+        split,
+    )
+
+    /** §8.1's `fee` tag for [index], read through the proposal fixtures so the two cannot diverge. */
+    fun feeTag(index: Int = 0, basisPoints: Int = BASIS_POINTS): List<String> =
+        ProposalFixtures.feeTag(index, basisPoints)
+
+    /**
+     * §7.6's **checked** acceptance for the order at [index], together with §8.4's two points that
+     * precede any `type=2` for it.
+     *
+     * Every value `AcceptedPaymentRequest.accept` now derives its checks from arrives through this
+     * one object, and each half comes out of a real codec rather than out of a constructor: the
+     * proposal is sealed by the buyer, the `type=3` by the provider, and
+     * [OrderProposal.accepts] is what mints the [acceptance]. `Acceptance.Accepted`'s constructor is
+     * `internal` and therefore reachable from this source set — building one directly would make
+     * every store test pass with §7.6's own sender check deleted, which is half of what T24 closes.
+     */
+    class Accepted internal constructor(
+
+        /** §8.4 point 1, and the message whose terms the acceptance repeats. */
+        val proposal: OrderProposal,
+
+        /** §8.4 point 2 — the `type=3`, sealed by the provider. */
+        val update: OrderStatusMessage,
+
+        /** What [OrderProposal.accepts] answered, checked against the resolved provider key. */
+        val acceptance: Acceptance.Accepted,
+    ) {
+
+        /** §8.4's two REQUIRED points that precede every `type=2`, in message order. */
+        val feeTermPoints: List<FeeTermSighting> = listOf(
+            FeeTermSighting.onProposal(proposal),
+            FeeTermSighting.onAcceptance(update),
+        )
+
+        /** Names neither key nor order (§12 items 2 and 11). */
+        override fun toString(): String = "SettlementFixtures.Accepted(redacted)"
+    }
+
+    /**
+     * [Accepted] for the order at [index], priced at [priceMsat] under [basisPoints] — or under no
+     * `fee` tag at all when that is `null`, which §8.1's read rule makes a signed zero.
+     *
+     * The order id is [orderHex]'s, so a request built by [requestTags] at the same index names the
+     * same order; the provider is [provider]'s, so a request built by [requestFrom] at the same
+     * index is sealed by the key this acceptance was checked against; and the fee recipient is
+     * [feeRecipient]'s, because [feeTag] and [payeeTag] read the same offset.
+     */
+    fun accepted(
+        index: Int = 0,
+        priceMsat: Long = PRICE_MSAT,
+        basisPoints: Int? = BASIS_POINTS,
+    ): Accepted {
+        val proposalTags = ProposalFixtures.proposalTags(
+            index = index,
+            amountMsat = priceMsat.toString(),
+            fee = basisPoints?.let { feeTag(index, it) },
+        )
+        val proposal = ProposalFixtures.proposal(proposalTags, index)
+        val update = ProposalFixtures.statusMessage(
+            ProposalFixtures.acceptanceTags(proposalTags, index),
+            index + PROVIDER_OFFSET,
+        )
+        val answer = proposal.accepts(update, provider(index))
+        return Accepted(
+            proposal,
+            update,
+            answer as? Acceptance.Accepted
+                ?: fail("the fixture proposal and its byte-identical type=3 must accept, not $answer"),
+        )
+    }
+
+    /**
+     * [Accepted] for the order at [index] whose accepted terms produce exactly [split].
+     *
+     * Derived from the split rather than restated beside it, because `AcceptedPaymentRequest.accept`
+     * now reads §9.2 check 4's expected amount off `acceptance.terms.split`: a fixture that named
+     * the price twice could have a request checked against one figure and a receipt against
+     * another, which is a disagreement no control in this suite would attribute correctly.
+     *
+     * §8.1's two zero shapes are kept apart — `FeeTerm.Absent` is a proposal carrying no `fee` tag
+     * and `FeeTerm.Stated(0)` is one carrying `["fee", "0"]` — because §8.4 compares the tag's
+     * presence and the two are different signed statements.
+     */
+    fun acceptedFor(split: FeeSplit, index: Int = 0): Accepted = accepted(
+        index,
+        split.price.millisatoshis,
+        if (split.term == FeeTerm.Absent) null else split.term.basisPoints,
+    )
+
+    /**
+     * [request] accepted into [into] against [order]'s own §7.6 acceptance and §8.4 points.
+     *
+     * The one-line shorthand every call site here would otherwise repeat. It supplies the fee-term
+     * points for **both** payees rather than only the fee one, deliberately: `accept` ignores them
+     * for a provider request (§8.4 makes the `fee` tag OPTIONAL there and forbids requiring one),
+     * and a fixture that decided which payee needed them would be a second copy of the rule under
+     * test.
+     */
+    fun accept(
+        request: PaymentRequest,
+        into: PaymentRequestStore,
+        clock: NenyaClock,
+        order: Accepted,
+    ): AcceptedPaymentRequest =
+        AcceptedPaymentRequest.accept(request, order.acceptance, into, clock, order.feeTermPoints)
 
     /** [tags] decoded as §9.2's receipt. */
     fun receipt(tags: List<List<String>>, index: Int = 0): PaymentReceipt =
@@ -442,6 +593,12 @@ internal object SettlementFixtures {
             order = order,
             payment = requestPaymentTag(invoice),
             payeeTag = payeeTag,
+            // §8.4 marks the `fee` tag REQUIRED on a fee `type=2` and OPTIONAL on a provider one,
+            // and revision `1.5` makes `checkFeePaymentRequest` unskippable for the fee side — so
+            // a corpus whose fee requests carried none would be a corpus none of which can be
+            // stored. The provider's carries none, because §8.4 forbids requiring one there and a
+            // fixture that supplied one anyway would never exercise the branch that drops it.
+            fee = if (payee == Payee.FEE) feeTag(index) else null,
         )
         val receipt = receiptTags(
             index = index,

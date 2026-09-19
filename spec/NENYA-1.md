@@ -21,7 +21,7 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.4`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.5`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
 **Revision history**
@@ -33,6 +33,7 @@ nothing in it is deployed, and the identifiers it reserves are not registered.
 | `1.2` | 2026-09-09 | Consistency repair, no new wire semantics. Canonical JSON escaping (§4.1) aligned with the deployed ecosystem — the seven shortcut escapes, every other character below `0x20` as `\u00XX` — recorded as a deliberate, reasoned deviation from NIP-01's literal wording. Twenty internal contradictions resolved, chiefly: the fee-invoice deadlock (§8.5 vs §11.2), the zero-`fee_msat` deadlock (§8.3 vs §11.1), the simultaneously mandatory and optional `fee` tag (§7.5 vs §8.1), the undefined "release deadline" (§11.2), the unbound `kind:15` release (§7.4, §10.3), and the `m`/`file-type` identity (§10.1 vs §10.3). `kind:16` `type=6` assigned to the private bid, closing the §6.1 interop hole; `item` given a normative row in §5.3. The confirmation floor above `500` bps (§8.1) is recorded as a **standing disclosure duty, promoted from interim as part of the `OPEN-2` closure**. `OPEN-8` broadened to cover `type=6`; new `OPEN-9` (registering `30404`) gives the previously unnumbered publication question a number. Two example timestamps corrected (§6, §7.5). |
 | `1.3` | 2026-09-16 | Text with no UTF-8 encoding (§4.1). A `content` or tag value containing an unpaired UTF-16 surrogate MUST now be **rejected**, never serialised with a substituted replacement character: platforms substitute differently (`?` on the JVM, U+FFFD in JavaScript), so substitution gave one event two ids. Stated in §4.1, cross-referenced from §4.3, and added to §18's event-id vectors. |
 | `1.4` | 2026-09-17 | Appendix C corrected against BOLT-11 itself, and completed as a reader specification. Three errors of fact repaired: BOLT-11 does **not** define invoices as all-lowercase (it prescribes uppercase for QR codes and its own example 13 is all uppercase), so refusing an uppercase invoice is stated as **Nenya's** rule and not as BOLT-11's (§4.3, Appendix C); a tagged field of the wrong length is **skipped** as unknown rather than rejecting the invoice, which is BOLT-11's own reader rule; and the payment secret (`s`) is now REQUIRED. Appendix C additionally states, rather than leaves to the reference implementation, the reader rules Nenya enforces, and states which BOLT-11 rules Nenya does **not** perform and MUST NOT report as performed. No tag meaning, fee arithmetic or state changes. |
+| `1.5` | 2026-09-19 | Four refusals stated where the document previously named a sender, or presumed a uniqueness, without saying what to do about anything else. §7.6: an implementation MUST know the provider's key independently of the proposal and MUST reject a `type=3` acceptance sealed by any other key, the buyer's included. §8.6: a `payee=provider` `type=2` MUST arrive under a seal whose pubkey is that same provider key, the counterpart to §8.7's rule for the fee side; a second `type=2` for an `(order, payee)` already accepted MUST be rejected rather than replacing the first; an invoice already accepted for one payee on an order MUST be rejected for any other payee on that order; and a `type=2` whose invoice has already expired at the moment it would be accepted MUST be rejected then rather than at settlement. No tag meaning, fee arithmetic or state changes. |
 
 Revision `1.1` changes no tag meaning, no fee arithmetic, no evidence rule and no state, so
 the `["nenya", "1"]` version tag is unchanged and revision `1.0` and revision `1.1` are wire
@@ -85,11 +86,41 @@ Both corrections follow the precedent §4.1 set for canonical JSON escaping: whe
 of a document and every working implementation disagree, interoperability wins, and the
 reasoning is written down once in the place it applies.
 
-Everything else Appendix C gains in this revision is a rule Nenya's implementation already
+Everything else Appendix C gains in revision `1.4` is a rule Nenya's implementation already
 had to apply in order to read an invoice at all — the bech32 checksum, the last-`1` split, the
 amount rules, the data-part floor — written down so another implementer need not re-derive it,
 plus an explicit statement of what Nenya does **not** check. Neither adds an obligation on a
 sender, so no conformant invoice becomes non-conformant because of them.
+
+Revision `1.5` changes no tag meaning, no fee arithmetic and no state, and the
+`["nenya", "1"]` version tag is unchanged. It adds no field, no tag and no message; each of
+its four edits states, as a refusal, something an earlier revision had already named as a
+fact about the sender or presumed about uniqueness. Per Appendix B that is a **tightening**
+and not a version change: an implementation conformant with revision `1.4` emits nothing
+revision `1.5` rejects, because §7.4's Sender column and §7.6's "from the provider" already
+said who sends each of these messages. What changes is that a *receiver* now has a stated
+obligation to check.
+
+- **§7.6 — the acceptance's sealing key.** §7.6 already called acceptance "a `type=3` status
+  update **from the provider**" and §11.2's `proposed → accepted` row already read "from the
+  provider's key". Neither said what to do with one sealed by another key, and an
+  implementation that compared only the four terms would accept a buyer's own `type=3`
+  carrying byte-identical terms — the buyer accepting its own order.
+- **§8.6 — the provider invoice's sealing key.** §7.4's Sender column gives a `type=2` as
+  "provider, or fee recipient", and §8.7 turned that into a refusal for the fee side alone.
+  The provider side is now stated in the same shape.
+- **§8.6 — one accepted `type=2` per `(order, payee)`, and one invoice per order.** §9.2
+  check 1 compares a receipt against *the* stored payment request, which presumes there is
+  exactly one; nothing said so. The two refusals that follow from it — a replacement, and one
+  invoice offered as two payees' — are now written down.
+- **§8.6 — an expired invoice is refused when it arrives.** §9.2 check 5 already required an
+  invoice to be live at the moment it was accepted, but stated the consequence at settlement,
+  where the buyer may already have paid. It is now also a rule about accepting the `type=2`.
+
+The third is the only one that refuses a flow somebody might have built: a provider that
+re-sends its invoice, for instance because the first went unanswered, now has the second
+rejected rather than silently replacing the first. That is deliberate and §8.6 states the
+reasoning in place. An invoice that expires unpaid is not re-issued within the order.
 
 Some decisions are still **not yet made**. They are marked `OPEN-n` inline and indexed in
 §16.2; the ones already closed are recorded with their rationale in §16.1. An OPEN item is a
@@ -989,6 +1020,28 @@ chat message, a public event, or a status update with altered terms as acceptanc
 acceptance carrying different terms is a **counter-proposal**, and the correct response is
 a new `type=1` from the buyer, with a new order id.
 
+**The key that sealed the acceptance is a term of the check, not context around it.**
+"From the provider" is stated above and in §11.2's `proposed → accepted` row, and it is a
+requirement on the *receiver* as much as on the sender:
+
+> **An implementation MUST establish the provider's pubkey independently of the proposal —
+> it is the author of the offer the proposal's `item` coordinate names, or the bidder the
+> buyer chose in response to a request (§5, §6) — and MUST NOT read it out of the
+> proposal's `p` tag, which the buyer wrote and which §5.3 gives cardinality `0–n`. It MUST
+> reject a `type=3` acceptance whose seal (`kind:13`) `pubkey` is not that key. The buyer's
+> own key is not an exception: an acceptance is the counterparty's act, and an
+> implementation MUST reject an acceptance sealed by the buyer even where every term is
+> byte-identical.**
+
+Without that, the four-term comparison is the only thing standing between a buyer and its
+own order: the buyer knows its own terms exactly, so it can seal a `type=3` that is
+byte-identical by construction, reach `accepted`, and then — §8.6 — send itself the
+provider's invoice. The comparison is about *what* was agreed and this rule is about *who*
+agreed; an implementation needs both, and neither substitutes for the other.
+
+Resolving the key is the implementation's own work and NENYA-1 states no procedure for it.
+What NENYA-1 requires is that the answer not come from the message being judged.
+
 ---
 
 ## 8. The fee term
@@ -1235,6 +1288,53 @@ Concretely:
   tag. GammaMarkets permits a static Lightning address (`lud16`) in that position; Nenya
   forbids it (§9.3), and an implementation MUST reject a `payment` tag whose reference is
   not a BOLT-11 invoice string.
+
+**The provider invoice's sealing key, which is §8.7's counterpart on this side.** §7.4's
+Sender column gives a `type=2` as "provider, or fee recipient", and §8.7 makes that a
+refusal for the fee side. It is a refusal on this side too:
+
+> **A `type=2` payment request with `["payee", "provider"]` MUST arrive in a gift wrap whose
+> seal (`kind:13`) `pubkey` is the provider's key — the same key the acceptance for that
+> order was checked against (§7.6, §11.2) — and any other MUST be rejected.**
+
+A provider invoice from another key is somebody else's bill under the provider's name, and
+§9.2 check 1 would then anchor the whole order's payment evidence to it.
+
+**One accepted `type=2` per `(order, payee)`, and one invoice per order.** §9.2 check 1
+compares a receipt against *the* payment request stored for that order and payee, which
+presumes there is exactly one. Two rules make that true:
+
+> **Once a `type=2` has been accepted for an `(order, payee)` pair, a second MUST be
+> rejected rather than replacing it. And a `type=2` whose BOLT-11 string is byte-identical
+> to one already accepted for a **different** payee on the same order MUST be rejected.**
+
+The first rule refuses a re-pointing after the fact: check 1 is a comparison against a
+stored string, so replacing that string retroactively changes which payment settles the
+order, and any party that can get a second `type=2` accepted can aim the check wherever it
+likes. It refuses one flow that looks conformant and is worth naming rather than smuggling
+— a provider re-sending its invoice, for instance because the first went unanswered. That
+is refused; an invoice that expires unpaid is not re-issued inside the order, and the
+correct response to an order whose invoice has died is §11.2's, not a second invoice.
+
+The second rule is the non-custodial rule above, enforced at the moment of storage instead
+of at settlement. One invoice presented as both payees' bills is a combined invoice with
+extra steps: whoever is paid holds `price_msat + fee_msat` and owes somebody the difference,
+which is the custody §8.6 exists to rule out. Caught here, it is refused before the buyer
+pays; caught at settlement, it is refused after — and the money has already moved.
+
+**And the same reasoning for time.** §9.2 check 5 measures an invoice's
+`timestamp + expiry` against the implementation's clock *as it read when the invoice was
+accepted*, so the answer is already fixed at that moment:
+
+> **An implementation MUST reject a `type=2` whose invoice has already expired at the clock
+> reading it would record for that acceptance, rather than accepting it and refusing the
+> receipt later.**
+
+The two refusals name the same fact, and only the earlier one is useful: a buyer shown a
+dead invoice has been shown a bill nothing will settle, and an implementation that stores it
+and refuses the receipt has waited until after the payment to say so. Nothing is weakened by
+this — an invoice accepted under the rule is one check 5 will accept, and check 5 stays
+where it is for evidence arriving against a store the implementation did not itself write.
 
 ### 8.7 Verifying that a fee invoice is the fee recipient's
 

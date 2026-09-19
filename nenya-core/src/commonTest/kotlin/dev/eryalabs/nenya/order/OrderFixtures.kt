@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.channel.ProposalFixtures
@@ -607,10 +608,32 @@ internal object OrderFixtures {
             )
         }
 
-        /** Both requests accepted at one pinned clock reading — §17 item 6's second value. */
+        /**
+         * §7.6's answer, checked against the provider key the caller resolved — which is what
+         * [store] now needs and what makes these fixtures a full §7.6-to-§8.6 chain rather than a
+         * set of messages that happen to name one order.
+         */
+        val accepted: Acceptance.Accepted =
+            proposal.accepts(acceptance, SettlementFixtures.provider(index)).let {
+                it as? Acceptance.Accepted ?: fail("the fixture acceptance must accept, not $it")
+            }
+
+        /**
+         * Both requests accepted at one pinned clock reading — §17 item 6's second value.
+         *
+         * The fee request is handed §8.4's two signed points, because revision `1.5` makes
+         * `Settlement.checkFeePaymentRequest` part of acceptance: a fee `type=2` stored here has
+         * passed §8.4 and §8.7 before any receipt for it exists.
+         */
         val store: PaymentRequestStore = PaymentRequestStore.inMemory().also { store ->
             val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
-            for (request in requests.values) AcceptedPaymentRequest.accept(request, store, clock)
+            val signed = listOf(
+                FeeTermSighting.onProposal(proposal),
+                FeeTermSighting.onAcceptance(acceptance),
+            )
+            for (request in requests.values) {
+                AcceptedPaymentRequest.accept(request, accepted, store, clock, signed)
+            }
         }
 
         /** §8.4's points before a fee receipt: the proposal, the acceptance and the fee `type=2`. */
