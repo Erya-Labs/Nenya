@@ -382,7 +382,7 @@ public object Capabilities {
         ),
         ConformanceItem(
             number = 6,
-            status = ConformanceStatus.PARTIAL,
+            status = ConformanceStatus.PERFORMED_HERE,
             specSections = setOf("9.2"),
             evidenceClasses = setOf(
                 "dev.eryalabs.nenya.payment.VerifiedPayment",
@@ -392,85 +392,68 @@ public object Capabilities {
                 "dev.eryalabs.nenya.settlement.Settlement",
                 "dev.eryalabs.nenya.settlement.Bolt11Invoice",
             ),
-            notPerformed = setOf(
-                PaymentCheck.INVOICE_IDENTITY,
-                PaymentCheck.PAYMENT_HASH_PROVENANCE,
-                PaymentCheck.INVOICE_AMOUNT,
-                PaymentCheck.INVOICE_EXPIRY,
-            ),
-            note = "The first half holds in full: `paid` is reachable only on a VerifiedPayment " +
-                "per required payee, VerifiedPayment is producible only by hashing a preimage " +
-                "here, and the suite's LyingWallet reports every payment settled and moves no " +
-                "order. The persistence half now has a shape, which is less than having been " +
-                "persisted: PaymentRequestStore is an injected interface keyed by (order, payee) " +
-                "holding the BOLT-11 string verbatim alongside the value the injected clock held " +
-                "at the moment the request was accepted — and with a fail-closed clock the request " +
-                "is not accepted at all rather than stored against a fabricated time. The " +
-                "implementation this library ships is in-memory and survives no restart; §17 item " +
-                "6 is about what an implementation has KEPT, so a client that needs that has to " +
-                "implement the interface. On that store, " +
-                "§9.2 check 1 IS performed: Settlement.verify compares the receipt's BOLT-11 " +
-                "string byte-identically against the stored one and rejects a receipt for which " +
-                "nothing was stored. **INVOICE_IDENTITY stays in this set anyway, and that is a " +
-                "statement rather than an oversight:** it is a claim about a bare " +
-                "VerifiedPayment.verify, which holds no store and compares nothing, and the " +
-                "machine-readable record of what the store path did is that result's own " +
-                "checksPerformed. INVOICE_IDENTITY is now check 1's byte comparison and nothing " +
-                "else. The provenance of the payment hash check 3 compares against — the 256-bit " +
-                "`p` field parsed out of the invoice — is PAYMENT_HASH_PROVENANCE, a constant of " +
-                "its own, and it is in this set for a stronger reason: no path in this library " +
-                "subtracts it. This library recognises the shape of a BOLT-11 string and parses no " +
-                "field of one, so the payment hash is a caller-supplied parameter on every entry " +
-                "point, and a caller that hands in the SHA-256 of a preimage it chose gets a true " +
-                "comparison about an invoice nobody issued. While the two obligations shared one " +
-                "constant the store path subtracted both, and the record said the provenance was " +
-                "closed on the strength of the byte comparison; splitting them is what lets a " +
-                "refusal read this record without inheriting that over-claim. INVOICE_AMOUNT and " +
-                "INVOICE_EXPIRY are in this set on the same footing as INVOICE_IDENTITY and no " +
-                "longer for want of a parser: Settlement.verify parses the STORED invoice through " +
-                "Bolt11Invoice.parse and performs both of §9.2's checks 4 and 5 — the amount " +
-                "against `price_msat` for a provider receipt and §8.3's `fee_msat` for a fee one, " +
-                "in either direction and with an any-amount invoice rejected outright; and " +
-                "`timestamp + expiry` against the clock reading persisted at acceptance, never " +
-                "against the clock at verification, because §9.2 says an invoice that was live " +
-                "when the buyer paid it does not become unpaid because it has since expired. What " +
-                "keeps all three in this set is the same thing that keeps INVOICE_IDENTITY here: " +
-                "these are claims about a bare VerifiedPayment.verify, which holds no store, " +
-                "parses no invoice and compares nothing, and the machine-readable record of what " +
-                "the store path did is that result's own checksPerformed. The settlement " +
-                "result is now what OrderMachine consumes: `awaiting_payment → paid` takes a " +
-                "Settlement.Evidenced per required payee and a bare VerifiedPayment is not " +
-                "expressible there, so no order reaches `paid` on evidence that performed no " +
-                "check 1, and a receipt naming another order is refused before any other rule " +
-                "runs. The order's own record is the union of those results' checksPerformed and " +
-                "checksNotPerformedHere, so it reports check 1 — and, for a fee receipt through " +
-                "verifyFeeReceipt, check 6's three — as performed, because on that path they were. " +
-                "This item is the one that governs reaching `paid`, and it stays PARTIAL for what " +
-                "is below: a caller that wants the machine-readable record of what the store path " +
-                "did reads Settlement.checksPerformed, which composes checks 1, 4 and 5 with " +
-                "T3's two rather than redefining VerifiedPayment's global claim. What remains " +
-                "genuinely unperformed by every path here is check 3's PROVENANCE, and it alone. " +
-                "A provider who sends a receipt for ten times `price_msat` IS now caught, by " +
-                "check 4; what is not established is that the payment hash check 3 compared " +
-                "against came out of the stored invoice's `p` field rather than out of the " +
-                "caller's hand. Parsing the invoice for its amount says nothing about that, and a " +
-                "path that subtracted the provenance because it had opened the invoice for a " +
-                "different field would be the same over-claim reached by a new route. What the " +
-                "order does about that has changed. It used to carry the " +
-                "fact forward and advance anyway; §9.2 requires ALL of its checks before a payment " +
-                "may be treated as made, so `awaiting_payment → paid` now REFUSES — " +
-                "TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED, naming the missing checks — " +
-                "while any check that applies to the receipts offered was performed by nobody. The " +
-                "refusal is computed from what applies to each payee minus what that receipt " +
-                "recorded as performed, never from its checksNotPerformedHere, so a record that " +
-                "wrongly subtracted a check cannot hide its own omission from it. The consequence " +
-                "is deliberate and is the reason this item is not CONFORMING: until the payment " +
-                "hash is read out of the stored invoice, the only order that can reach `paid` at " +
-                "all is one owing no receipt — " +
-                "price 0 and no fee, the empty set §9.2's non-zero clause produces. Every order in " +
-                "`paid`, `released` or `settled` therefore carries an empty " +
-                "paymentChecksNotPerformedHere, and that emptiness is an invariant of the gate " +
-                "rather than a claim that six checks ran.",
+            notPerformed = emptySet(),
+            note = "All six of §9.2's checks are now performed on the path OrderMachine consumes, " +
+                "which is why this item moved off PARTIAL. `awaiting_payment → paid` takes a " +
+                "Settlement.Evidenced per required payee — a bare VerifiedPayment is not " +
+                "expressible there — and Settlement.verify performs check 1 (the receipt's " +
+                "BOLT-11 string compared byte-identically against the stored one, with a receipt " +
+                "nothing was stored for rejected outright), check 2 (lowercase hex decoding to " +
+                "exactly 32 bytes), check 3 in full, check 4 (the amount against `price_msat` for " +
+                "a provider receipt and §8.3's `fee_msat` for a fee one, in either direction, with " +
+                "an any-amount invoice rejected) and check 5 (`timestamp + expiry` against the " +
+                "clock reading persisted at acceptance, never against the clock at verification, " +
+                "because §9.2 says an invoice that was live when the buyer paid it does not " +
+                "become unpaid because it has since expired). Settlement.verifyFeeReceipt " +
+                "performs check 6's three besides: §8.4's byte-identical fee term across every " +
+                "point it marks REQUIRED, §8.7's sealing key against the seal the stored `type=2` " +
+                "arrived under, and §8.5's state precondition read off this implementation's own " +
+                "order rather than off a status token a counterparty sent. What closed last was " +
+                "check 3's PROVENANCE, and it closed by SUBTRACTION of a parameter: neither entry " +
+                "point takes a payment hash any more, so check 3's operand is the 256-bit `p` " +
+                "field of the stored invoice, read off the same parse checks 4 and 5 are made " +
+                "against. There is no argument left through which a caller could hand in the " +
+                "SHA-256 of a preimage it chose and get a true comparison about an invoice nobody " +
+                "issued. Parsing the invoice for its AMOUNT never established that and was never " +
+                "claimed to. Two narrowings, stated plainly rather than implied, because this " +
+                "item is the one that governs reaching `paid`. FIRST, DURABLE PERSISTENCE IS THE " +
+                "EMBEDDING CLIENT'S: §17 item 6 is about what an implementation has KEPT, and " +
+                "PaymentRequestStore is an injected interface — keyed by (order, payee), holding " +
+                "the BOLT-11 string verbatim alongside the value the injected clock held when the " +
+                "request was accepted, and refusing to accept at all rather than storing against a " +
+                "fabricated time when the clock is fail-closed — whose one shipped implementation, " +
+                "PaymentRequestStore.inMemory, survives no restart. A client that needs an order " +
+                "to be checkable after a process dies MUST implement that interface over something " +
+                "durable; nothing here will tell it that it has not, because a store is the " +
+                "client's own persistence and §13 says this library does not defend its user " +
+                "against the client embedding it. There is no enum constant for that gap, which " +
+                "is why this item is PERFORMED_HERE with the narrowing written out rather than " +
+                "PARTIAL with nothing to point at — the structural limit ConformanceStatus.PARTIAL " +
+                "records, and the same shape items 1 and 9 take. SECOND, NO SIGNATURE IS VERIFIED " +
+                "ANYWHERE: SeamCapability.BIP340_VERIFICATION stays in the union, so check 6's " +
+                "sealing-key equality and §7.2's attribution are only as strong as the decryption " +
+                "the caller performed. PaymentCheck.INVOICE_IDENTITY, PAYMENT_HASH_PROVENANCE, " +
+                "INVOICE_AMOUNT and INVOICE_EXPIRY all remain in Capabilities.NOT_PERFORMED_HERE, " +
+                "and that is deliberate and is not a contradiction of this item's status: that " +
+                "union is derived from VerifiedPayment.CHECKS_PERFORMED_HERE and is a claim about " +
+                "a BARE VerifiedPayment.verify, which holds no store, parses no invoice and takes " +
+                "its payment hash as a parameter. The machine-readable record of what the store " +
+                "path did is each result's own Settlement.checksPerformed, which composes checks " +
+                "1, 3, 4 and 5 with T3's two rather than widening VerifiedPayment's global claim. " +
+                "Decision B's gate is unchanged and still bites: `awaiting_payment → paid` " +
+                "REFUSES with TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED while any check " +
+                "that applies to the receipts offered was performed by nobody, computed from what " +
+                "applies to each payee minus what that receipt recorded as PERFORMED and never " +
+                "from its checksNotPerformedHere, so a record that wrongly subtracted a check " +
+                "cannot hide its own omission from it. What changed is that a priced order can " +
+                "now pass that gate rather than only a free one: a fee receipt put through plain " +
+                "Settlement.verify is still refused, missing exactly check 6's three. Every order " +
+                "in `paid`, `released` or `settled` carries an empty " +
+                "paymentChecksNotPerformedHere, and that emptiness is an invariant of the gate — " +
+                "now one that six performed checks satisfy rather than one only an order owing no " +
+                "receipt could reach. It is still not a warrant: §9.1 stands one layer above this " +
+                "surface, and the thing that establishes a particular payment is VerifiedPayment " +
+                "over a preimage this library hashed itself, not a status read off this item.",
         ),
         ConformanceItem(
             number = 7,

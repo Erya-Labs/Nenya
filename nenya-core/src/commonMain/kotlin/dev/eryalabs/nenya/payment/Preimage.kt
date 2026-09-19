@@ -61,15 +61,22 @@ public class PaymentException internal constructor(
 /**
  * The 256-bit `payment_hash` an invoice commits to (§9.2 check 3).
  *
- * ### This type is a parameter, not a parse
+ * ### In **this** package it is a parameter, not a parse
  *
  * §9.2 check 3 defines `payment_hash` as the 256-bit `p` tagged field **parsed out of the
- * BOLT-11 invoice** (Appendix C). This library has no BOLT-11 parser, so the hash is taken
- * from the caller and the *comparison* is what this package implements. That is a deliberate
- * narrowing, stated rather than papered over, and the constant that records it is
+ * BOLT-11 invoice** (Appendix C). This package parses no invoice, so the hash is taken from the
+ * caller and the *comparison* is what it implements. That is a deliberate narrowing, stated
+ * rather than papered over, and the constant that records it is
  * [PaymentCheck.PAYMENT_HASH_PROVENANCE] — named on every [VerifiedPayment] this package issues,
  * alongside [PaymentCheck.INVOICE_IDENTITY], [PaymentCheck.INVOICE_AMOUNT] and
- * [PaymentCheck.INVOICE_EXPIRY], and subtracted by no path anywhere in this library.
+ * [PaymentCheck.INVOICE_EXPIRY].
+ *
+ * The settlement package's two doors do the parse and therefore **do** subtract the provenance
+ * from their own results: `Settlement.verify` and `Settlement.verifyFeeReceipt` take no payment
+ * hash at all, and check 3's operand there is the `p` field of the invoice the client's store
+ * holds for that `(order, payee)`. So a caller that wants §9.2 rather than its comparison alone
+ * uses those; what stays true here, and is why this type is still published, is that a bare
+ * [VerifiedPayment.verify] is handed its operand and can say nothing about where it came from.
  *
  * ### Case
  *

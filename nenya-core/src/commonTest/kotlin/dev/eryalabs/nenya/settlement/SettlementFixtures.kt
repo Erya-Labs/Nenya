@@ -184,9 +184,9 @@ internal object SettlementFixtures {
      *
      * @param preimageHex the preimage the matching receipt will carry. Its SHA-256 becomes the
      *   invoice's `p` field, so the stored invoice and the receipt agree about which payment
-     *   settles it. Nothing in the library reads that field yet — §9.2 check 3's operand is still
-     *   a parameter — and setting it anyway is what keeps these fixtures honest ahead of the task
-     *   that closes the provenance.
+     *   settles it. That field is §9.2 check 3's **operand** now rather than a parameter, so this
+     *   is no longer a courtesy the fixtures extend ahead of the library: a receipt whose proof
+     *   does not hash to what was written here is refused `PREIMAGE_MISMATCH`.
      * @param amount what this payee is owed, or `null` for BOLT-11's "any amount" form, which §9.2
      *   check 4 refuses. There is no third case: an amount of zero is not expressible in BOLT-11.
      * @param timestamp Appendix C's 35-bit timestamp. Defaults to [INVOICE_AGE_SECONDS] before
@@ -232,6 +232,28 @@ internal object SettlementFixtures {
             if (groups == null) base else base.plusField(EXPIRY_FIELD, groups),
         )
     }
+
+    /**
+     * [invoice] with its `p` field rewritten to `SHA-256(preimageHex)` and its checksum recomputed.
+     *
+     * The same derivation [invoice] makes and for the same reason (decision D), but starting from a
+     * base the caller chose rather than from [BASE]: a control built on one of the **vendored**
+     * examples keeps that example's amount, its timestamp and its `x`, and gains a payment hash the
+     * matching receipt can prove.
+     *
+     * Needed because §9.2 check 3's operand is the `p` field of the *stored* invoice rather than a
+     * parameter. A vendored example carries the payment hash of a preimage nobody here has, so a
+     * receipt for one would be refused `PREIMAGE_MISMATCH` before the check under test was ever
+     * reached — and the control would be green for the wrong reason on the refusing side and
+     * unreachable on the accepting one.
+     *
+     * Not for a control whose subject is the invoice **string**: recomposing recomputes the bech32
+     * checksum, so a deliberately corrupted example would come back sound.
+     */
+    fun invoiceProving(invoice: String, preimageHex: String): String = Bolt11Composer.compose(
+        Bolt11Composer.decompose(invoice)
+            .withPaymentHash(PaymentFixtures.paymentHashOf(Preimage.ofHex(preimageHex)).bytes()),
+    )
 
     /**
      * [seconds] as the fewest five-bit groups that hold it.

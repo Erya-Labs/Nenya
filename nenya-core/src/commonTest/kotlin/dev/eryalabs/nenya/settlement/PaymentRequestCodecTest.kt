@@ -688,7 +688,7 @@ class PaymentRequestCodecTest {
         )
         val receipt = SettlementFixtures.receipt(fixture.receiptTags)
         val settlement =
-            Settlement.verify(receipt, fixture.paymentHash, store, SettlementFixtures.split())
+            Settlement.verify(receipt, store, SettlementFixtures.split())
         val secrets = listOf(fixture.invoice, fixture.orderHex, fixture.preimageHex)
         val printed = listOf(
             request.toString(),

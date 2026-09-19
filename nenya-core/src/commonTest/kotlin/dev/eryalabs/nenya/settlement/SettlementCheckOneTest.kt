@@ -19,6 +19,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -105,33 +106,41 @@ class SettlementCheckOneTest {
         val settled = settled()
         val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
 
-        val settlement = Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT)
+        val settlement = Settlement.verify(receipt, settled.store, SPLIT)
 
         val evidenced = assertIs<Settlement.Evidenced>(settlement)
         assertEquals(settled.fixture.payee, evidenced.payee)
         assertEquals(PaymentMedium.LIGHTNING, evidenced.medium)
+        // The hash on the result was read out of the **stored** invoice's `p` field: nothing in
+        // this test handed one in. On its own this equality discriminates nothing — `verify` only
+        // returns `Evidenced` when the operand hashes from the proof, and the proof is this
+        // fixture's preimage — so what makes it a statement about *provenance* is the control it
+        // is paired with: `a preimage for another invoice, against the stored one, yields T3's own
+        // refusal`, which is probe G1b inverted and keeps the operand and the proof apart.
         assertEquals(settled.fixture.paymentHash, evidenced.payment.paymentHash)
     }
 
-    @JsName("the_result_records_the_union_of_check_1_and_t3s_two")
+    @JsName("the_result_records_the_union_of_checks_1_3_4_and_5_and_t3s_two")
     @Test
-    fun `the result records the union of check 1 and T3's two`() {
+    fun `the result records the union of checks 1, 3, 4 and 5 and T3's two`() {
         val settled = settled()
         val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
 
         val evidenced = assertIs<Settlement.Evidenced>(
-            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT),
+            Settlement.verify(receipt, settled.store, SPLIT),
         )
 
         assertEquals(
             VerifiedPayment.CHECKS_PERFORMED_HERE + setOf(
                 PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
                 PaymentCheck.INVOICE_AMOUNT,
                 PaymentCheck.INVOICE_EXPIRY,
             ),
             evidenced.checksPerformed,
-            "checks 1, 4 and 5 were performed on this path and T3's two were performed inside it; " +
-                "the set is composed from T3's rather than listed here",
+            "checks 1, 4 and 5 were performed on this path, check 3's operand came out of the " +
+                "stored invoice's `p` field on it, and T3's two were performed inside it; the set " +
+                "is composed from T3's rather than listed here",
         )
         assertEquals(
             Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH,
@@ -142,15 +151,17 @@ class SettlementCheckOneTest {
             PaymentCheck.INVOICE_IDENTITY in evidenced.checksNotPerformedHere,
             "a check cannot be on both sides of the same statement",
         )
-        // Exact, not containment: this path subtracts checks 1, 4 and 5 and must subtract nothing
-        // else, and only an exact set can say so. PAYMENT_HASH_PROVENANCE is what is left — check
-        // 3's operand is still the caller's parameter however well check 1 went, and parsing the
-        // stored invoice for its *amount* does not make it otherwise.
+        // Exact, not containment, and the exact answer is now **empty** — a provider receipt
+        // through this door performed every §9.2 check that applies to it. An emptiness assertion
+        // is weaker than the old one-element assertion on its own, which is why the containment
+        // assertion above and the exact performed-set assertion at the top of this test stand
+        // beside it: a path that recorded nothing at all would pass this line and fail those two.
         assertEquals(
-            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
+            emptySet<PaymentCheck>(),
             evidenced.checksNotPerformedHere,
-            "what is left is check 3's provenance alone: this path parses the stored invoice for " +
-                "checks 4 and 5 and still takes the payment hash as a parameter",
+            "nothing is left: check 3's provenance closed when `verify` stopped taking a payment " +
+                "hash, and it was the last check on this path that a caller could still have " +
+                "supplied the operand for",
         )
     }
 
@@ -165,7 +176,6 @@ class SettlementCheckOneTest {
         val providerResult = assertIs<Settlement.Evidenced>(
             Settlement.verify(
                 SettlementFixtures.receipt(provider.fixture.receiptTags),
-                provider.fixture.paymentHash,
                 provider.store,
                 SPLIT,
             ),
@@ -173,7 +183,6 @@ class SettlementCheckOneTest {
         val feeResult = assertIs<Settlement.Evidenced>(
             Settlement.verify(
                 SettlementFixtures.receipt(fee.fixture.receiptTags),
-                fee.fixture.paymentHash,
                 fee.store,
                 SPLIT,
             ),
@@ -193,14 +202,23 @@ class SettlementCheckOneTest {
         // nothing else. A containment assertion alone cannot see a check dropped from the record,
         // which is what this file's own §17 rule is about.
         assertEquals(
-            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
+            emptySet<PaymentCheck>(),
             providerResult.checksNotPerformedHere,
+            "this door performs every check that applies to a provider receipt",
         )
         assertEquals(
             providerResult.checksNotPerformedHere + CHECK_SIX,
             feeResult.checksNotPerformedHere,
-            "the same provenance, plus check 6's three — composed from the provider's record " +
-                "rather than listed again",
+            "and a fee receipt through the **general** entry point is the provider's record plus " +
+                "check 6's three — composed from the provider's rather than listed again. That is " +
+                "the whole difference between the two doors, and it is why `verifyFeeReceipt` " +
+                "exists",
+        )
+        assertEquals(
+            CHECK_SIX,
+            feeResult.checksNotPerformedHere,
+            "spelled out as well as composed: with the provider's record empty the composition " +
+                "above would hold of any set at all if check 6 had quietly been subtracted here",
         )
     }
 
@@ -208,38 +226,57 @@ class SettlementCheckOneTest {
      * The §17 honesty rule this task must not break, asserted from both ends.
      *
      * The mutation the queue names is to widen `VerifiedPayment.CHECKS_PERFORMED_HERE` to include
-     * `INVOICE_IDENTITY`. A bare `VerifiedPayment.verify` performs no check 1, so that would be a
-     * global claim about work only this package's store path does — and it would silently empty
-     * §17 item 6's not-performed set, because the conformance surface derives it by subtraction.
+     * `INVOICE_IDENTITY` or `PAYMENT_HASH_PROVENANCE`. A bare `VerifiedPayment.verify` performs
+     * neither — it holds no store and takes check 3's payment hash as a parameter — so either
+     * would be a global claim about work only this package's store path does, and it would
+     * silently empty `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED`, which the conformance surface
+     * derives from that constant by subtraction.
+     *
+     * §17 item 6 moved to `PERFORMED_HERE` because every one of §9.2's checks is now performed on
+     * the path `OrderMachine` consumes. That is a claim about **this package's** two entry points
+     * and not about T3's, and the two halves of this test are what keep those apart.
      */
-    @JsName("t3s_global_claim_is_unchanged_and_s17_item_6_still_names_invoice_identity")
+    @JsName("t3s_global_claim_is_unchanged_and_s17_item_6_is_performed_here")
     @Test
-    fun `T3's global claim is unchanged, and §17 item 6 still names invoice identity`() {
-        assertFalse(
-            PaymentCheck.INVOICE_IDENTITY in VerifiedPayment.CHECKS_PERFORMED_HERE,
-            "a bare VerifiedPayment.verify performs neither check 1 nor anything else this package " +
-                "adds; widening its constant would be the §17 over-claim",
-        )
-        assertTrue(
-            PaymentCheck.INVOICE_IDENTITY in Capabilities.PAYMENT_CHECKS_NOT_PERFORMED,
-            "the conformance surface derives its set from that constant by subtraction",
-        )
+    fun `T3's global claim is unchanged, and §17 item 6 is performed here`() {
+        for (check in setOf(PaymentCheck.INVOICE_IDENTITY, PaymentCheck.PAYMENT_HASH_PROVENANCE)) {
+            assertFalse(
+                check in VerifiedPayment.CHECKS_PERFORMED_HERE,
+                "a bare VerifiedPayment.verify performs neither check 1 nor check 3's provenance " +
+                    "nor anything else this package adds; widening its constant would be the §17 " +
+                    "over-claim",
+            )
+            assertTrue(
+                check in Capabilities.PAYMENT_CHECKS_NOT_PERFORMED,
+                "$check is a claim about a bare VerifiedPayment.verify, and the conformance " +
+                    "surface derives that set from T3's constant by subtraction",
+            )
+            assertTrue(
+                check in Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH,
+                "and the store path performs it, which is the distinction the two records exist " +
+                    "to draw",
+            )
+        }
 
         val item = Capabilities.item(6) ?: fail("§17 item 6 is not published")
-        assertEquals(ConformanceStatus.PARTIAL, item.status)
-        assertTrue(
-            PaymentCheck.INVOICE_IDENTITY in item.notPerformed,
-            "the item is a claim about a bare VerifiedPayment.verify, which holds no store and " +
-                "compares no invoice string, so check 1 stays where it is",
+        assertEquals(
+            ConformanceStatus.PERFORMED_HERE,
+            item.status,
+            "§9.2's six checks are all performed on the path OrderMachine consumes: the store " +
+                "path's four, T3's two inside them, and check 6's three through verifyFeeReceipt",
+        )
+        assertEquals(
+            emptySet<Enum<*>>(),
+            item.notPerformed,
+            "a PERFORMED_HERE item has no constant to point at, and there is none left that " +
+                "bears on §9.2. The remaining narrowing — durable persistence of the store is the " +
+                "embedding client's — has no enum constant, which is the structural limit " +
+                "ConformanceStatus.PARTIAL records and why it is written into the note instead",
         )
         assertTrue(
-            PaymentCheck.PAYMENT_HASH_PROVENANCE in item.notPerformed,
-            "and check 3's provenance stays for a stronger reason — no path in this library " +
-                "subtracts it, because nothing here parses the invoice's `p` field",
-        )
-        assertTrue(
-            PaymentCheck.PAYMENT_HASH_PROVENANCE in Capabilities.PAYMENT_CHECKS_NOT_PERFORMED,
-            "the derived union picks the new constant up by subtraction, and must",
+            item.note.contains("PaymentRequestStore.inMemory"),
+            "and the note must say plainly which implementation survives no restart, or " +
+                "PERFORMED_HERE is a claim about persistence this library has not earned",
         )
     }
 
@@ -260,7 +297,7 @@ class SettlementCheckOneTest {
         )
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT)
+            Settlement.verify(receipt, settled.store, SPLIT)
         }
 
         assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, refused.reason)
@@ -281,7 +318,7 @@ class SettlementCheckOneTest {
         )
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT)
+            Settlement.verify(receipt, settled.store, SPLIT)
         }
 
         assertEquals(
@@ -314,7 +351,7 @@ class SettlementCheckOneTest {
         )
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, fixture.paymentHash, store, SPLIT)
+            Settlement.verify(receipt, store, SPLIT)
         }
 
         assertTrue(
@@ -331,12 +368,27 @@ class SettlementCheckOneTest {
         // §4.3's exception list is exhaustive and the payment hash is not on it, so the rule one
         // line away from the control above points the other way. Without this pair, "uppercase is
         // rejected" reads as a rule about hex rather than about these two values.
+        //
+        // The behavioural half runs through `VerifiedPayment.verify` and not through
+        // `Settlement.verify`, and that is not a weakening but the consequence of the change this
+        // test's own file is about: the settlement door takes no payment hash any more, so there is
+        // no longer any way to hand it an uppercase one. T3's door still takes one, is still where
+        // §4.3's reading lives, and is the one a caller with a hash from elsewhere reaches for.
         val settled = settled()
         val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
         val uppercase = PaymentHash.ofHex(settled.fixture.paymentHash.toHex().uppercase())
 
         assertEquals(settled.fixture.paymentHash, uppercase)
-        assertIs<Settlement.Evidenced>(Settlement.verify(receipt, uppercase, settled.store, SPLIT))
+        VerifiedPayment.verify(
+            settled.fixture.payee,
+            uppercase,
+            assertNotNull(receipt.preimage, "the fixture receipt carries §9.2's `<proof>`"),
+        )
+
+        // And the settlement path evidences the same receipt without being told any hash at all,
+        // which is what makes the normalisation above a statement about §4.3 rather than the only
+        // way this receipt could ever have settled.
+        assertIs<Settlement.Evidenced>(Settlement.verify(receipt, settled.store, SPLIT))
     }
 
     @JsName("a_receipt_with_no_stored_request_is_refused_as_no_stored_request")
@@ -346,7 +398,7 @@ class SettlementCheckOneTest {
         val receipt = SettlementFixtures.receipt(fixture.receiptTags)
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, fixture.paymentHash, PaymentRequestStore.inMemory(), SPLIT)
+            Settlement.verify(receipt, PaymentRequestStore.inMemory(), SPLIT)
         }
 
         assertEquals(
@@ -395,10 +447,9 @@ class SettlementCheckOneTest {
                 payeeTag = SettlementFixtures.payeeTag(Payee.PROVIDER),
             ),
         )
-        val hash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimageHex))
 
         val missing = assertFailsWith<SettlementException> {
-            Settlement.verify(providerReceipt, hash, store, SPLIT)
+            Settlement.verify(providerReceipt, store, SPLIT)
         }
         assertEquals(SettlementRejection.NO_STORED_REQUEST, missing.reason)
 
@@ -425,7 +476,7 @@ class SettlementCheckOneTest {
             ),
         )
         val mismatch =
-            assertFailsWith<SettlementException> { Settlement.verify(crossed, hash, store, SPLIT) }
+            assertFailsWith<SettlementException> { Settlement.verify(crossed, store, SPLIT) }
         assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, mismatch.reason)
     }
 
@@ -433,22 +484,54 @@ class SettlementCheckOneTest {
     // §9.2 checks 2 and 3, composed through T3.
     // ---------------------------------------------------------------------------------------
 
-    @JsName("a_preimage_that_does_not_hash_to_the_payment_hash_yields_t3s_own_refusal")
+    /**
+     * **Probe G1b, inverted.** The stored invoice, and a preimage for a *different* one.
+     *
+     * The shape this closes was real and was `Evidenced` until check 3's operand stopped being a
+     * parameter: a receipt carrying the **stored** provider invoice, a preimage for the buyer's own
+     * invoice, and that preimage's hash. Check 1 compared the reference against the store and
+     * passed; check 3 compared a hash the caller supplied against a preimage the caller supplied
+     * and passed; and the two checks were about two different invoices.
+     *
+     * There is no argument left through which they can be separated, so the same intent has to be
+     * expressed the only way still open — a receipt whose `<reference>` is the stored invoice and
+     * whose `<proof>` is another derived invoice's preimage — and it is refused. What refuses it is
+     * §9.2 check 3, reaching the caller as T3 threw it: re-badging it here would put two names on
+     * the failure §9 calls the load-bearing rule.
+     *
+     * The positive control is `a receipt matching its stored request evidences the payment`, which
+     * asserts on the same corpus that the operand equals `SHA-256(this fixture's own preimage)`.
+     * Without it this test would pass over a path that compared the hash against nothing at all.
+     */
+    @JsName("a_preimage_for_another_invoice_against_the_stored_one_yields_t3s_own_refusal")
     @Test
-    fun `a preimage that does not hash to the payment hash yields T3's own refusal`() {
+    fun `a preimage for another invoice, against the stored one, yields T3's own refusal`() {
         val settled = settled()
         val other = SettlementFixtures.pairs(2)[1]
-        val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
+        assertFalse(
+            settled.fixture.preimageHex == other.preimageHex,
+            "the two fixtures must carry genuinely different preimages, or this proves nothing",
+        )
+
+        // The stored invoice verbatim — so check 1 passes and check 3 is reached — beside a
+        // preimage the store's invoice was never built from.
+        val receipt = SettlementFixtures.receipt(
+            SettlementFixtures.replacing(
+                settled.fixture.receiptTags,
+                SettlementFixtures.paymentTag(settled.fixture.invoice, other.preimageHex),
+            ),
+        )
 
         val refused = assertFailsWith<PaymentException> {
-            Settlement.verify(receipt, other.paymentHash, settled.store, SPLIT)
+            Settlement.verify(receipt, settled.store, SPLIT)
         }
 
         assertEquals(
             PaymentRejection.PREIMAGE_MISMATCH,
             refused.reason,
-            "§9.2 check 3 is T3's rule and its refusal reaches the caller as T3 threw it; re-badging " +
-                "it here would put two names on the failure §9 calls the load-bearing rule",
+            "§9.2 check 3 is T3's rule and its refusal reaches the caller as T3 threw it. The hash " +
+                "it compared against came out of the stored invoice's `p` field: there is no " +
+                "parameter on this entry point through which the matching one could be supplied",
         )
     }
 
@@ -489,8 +572,7 @@ class SettlementCheckOneTest {
             assertEquals(medium, receipt.medium)
             assertNull(receipt.preimage, "§9.4 defines no rule, so the proof is not read as a preimage")
 
-            val settlement: Settlement =
-                Settlement.verify(receipt, fixture.paymentHash, store, SPLIT)
+            val settlement: Settlement = Settlement.verify(receipt, store, SPLIT)
 
             val unverified = assertIs<Settlement.Unverified>(
                 settlement,

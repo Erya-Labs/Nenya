@@ -259,14 +259,25 @@ class SettlementPropertyTest {
     @Test
     fun `every receipt settles against its own stored request`() {
         for (fixture in corpus) {
-            val settlement = Settlement.verify(receipts[fixture.index], fixture.paymentHash, store, SPLIT)
+            val settlement = Settlement.verify(receipts[fixture.index], store, SPLIT)
 
             val evidenced = assertIs<Settlement.Evidenced>(settlement, "fixture ${fixture.index}")
             assertEquals(fixture.payee, evidenced.payee)
             assertEquals(
                 Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH,
                 evidenced.checksPerformed,
-                "checks 1, 4 and 5 plus T3's two, on every fixture",
+                "checks 1, 3, 4 and 5 plus T3's two, on every fixture",
+            )
+            // Check 3's operand, over the whole corpus: each receipt was verified against the `p`
+            // of its **own** invoice and no other. That is the half this corpus adds — ten
+            // thousand fixtures rather than one — and it is not what makes the operand's
+            // provenance falsifiable: `verify` only returns `Evidenced` when the operand hashes
+            // from the proof, so this equality follows on any result it hands back. The control
+            // that keeps the two apart is `SettlementCheckOneTest`'s G1b-inverted one.
+            assertEquals(
+                fixture.paymentHash,
+                evidenced.payment.paymentHash,
+                "fixture ${fixture.index}: check 3's operand must be its own invoice's `p`",
             )
         }
     }
@@ -313,7 +324,7 @@ class SettlementPropertyTest {
 
         for (fixture in corpus) {
             val refused = assertFailsWith<SettlementException>("fixture ${fixture.index}") {
-                Settlement.verify(receipts[fixture.index], fixture.paymentHash, rotated, SPLIT)
+                Settlement.verify(receipts[fixture.index], rotated, SPLIT)
             }
             assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, refused.reason)
         }
@@ -357,12 +368,12 @@ class SettlementPropertyTest {
                 )
                 if (receiptIndex == requestIndex) {
                     assertIs<Settlement.Evidenced>(
-                        Settlement.verify(receipts[receiptIndex], fixture.paymentHash, paired, SPLIT),
+                        Settlement.verify(receipts[receiptIndex], paired, SPLIT),
                     )
                     matched++
                 } else {
                     val answer = assertFailsWith<SettlementException>("$receiptIndex vs $requestIndex") {
-                        Settlement.verify(receipts[receiptIndex], fixture.paymentHash, paired, SPLIT)
+                        Settlement.verify(receipts[receiptIndex], paired, SPLIT)
                     }
                     assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, answer.reason)
                     refused++
@@ -382,7 +393,7 @@ class SettlementPropertyTest {
 
         for (fixture in corpus) {
             val refused = assertFailsWith<SettlementException>("fixture ${fixture.index}") {
-                Settlement.verify(receipts[fixture.index], fixture.paymentHash, empty, SPLIT)
+                Settlement.verify(receipts[fixture.index], empty, SPLIT)
             }
             assertEquals(SettlementRejection.NO_STORED_REQUEST, refused.reason)
             count++
@@ -494,7 +505,7 @@ class SettlementPropertyTest {
 
         for (fixture in corpus) {
             val evidenced = assertIs<Settlement.Evidenced>(
-                Settlement.verify(receipts[fixture.index], fixture.paymentHash, store, SPLIT),
+                Settlement.verify(receipts[fixture.index], store, SPLIT),
                 "fixture ${fixture.index}",
             )
             assertEquals(fixture.payee, evidenced.payee)
@@ -526,26 +537,34 @@ class SettlementPropertyTest {
     @JsName("the_partition_invariant_fails_on_a_record_that_omits_a_check_from_both_sides")
     @Test
     fun `the partition invariant fails on a record that omits a check from both sides`() {
-        // The negative control. This is the record the library would produce if the store path
-        // subtracted PAYMENT_HASH_PROVENANCE as well as checks 1, 4 and 5 — the exact mutation T18
-        // exists to make visible, and the one T23 brings back within reach by making this path
-        // parse the invoice for a *different* field. Both of its sides are individually plausible —
-        // a performed set naming exactly what the path does, and a not-performed set naming nothing
-        // left over — and only the union against what **applies** catches it.
-        val performed = Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH
+        // The negative control, and it has had to move: the store path now performs every check
+        // that applies to a provider receipt, so `CHECKS_PERFORMED_ON_THE_STORE_PATH` paired with
+        // an empty not-performed set is the honest record rather than the mutated one. The shape
+        // the invariant exists to catch is unchanged — a check named on **neither** side — so it is
+        // built here by dropping one from the performed set without moving it to the other. Both
+        // sides stay individually plausible: a performed set naming what a path that had quietly
+        // stopped checking the amount would do, and a not-performed set naming nothing left over.
+        // Only the union against what **applies** sees it.
+        val omitted = PaymentCheck.INVOICE_AMOUNT
+        val performed = Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH - omitted
         val dropped = emptySet<PaymentCheck>()
 
+        assertTrue(
+            omitted in applicable(Payee.PROVIDER),
+            "the omitted check must be one that applies, or the union below is satisfied without it",
+        )
         assertFails("an invariant nothing can fail proves nothing about what passes it") {
             assertPartitions(Payee.PROVIDER, performed, dropped, "negative control")
         }
 
-        // And with the constant put back it passes, so what failed above is the omission and not
-        // some other disagreement in the hand-built record.
+        // And with the constant put back on either side it passes, so what failed above is the
+        // omission and not some other disagreement in the hand-built record.
+        assertPartitions(Payee.PROVIDER, performed, dropped + omitted, "negative control, restored")
         assertPartitions(
             Payee.PROVIDER,
-            performed,
-            dropped + PaymentCheck.PAYMENT_HASH_PROVENANCE,
-            "negative control, restored",
+            performed + omitted,
+            dropped,
+            "negative control, restored on the performed side — which is the library's own record",
         )
     }
 }

@@ -11,7 +11,6 @@ import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.PaymentException
-import dev.eryalabs.nenya.payment.PaymentHash
 import dev.eryalabs.nenya.payment.Preimage
 import dev.eryalabs.nenya.payment.VerifiedPayment
 import dev.eryalabs.nenya.seam.OrderId
@@ -80,8 +79,11 @@ public class PaymentReceipt internal constructor(
     /**
      * §9.2's `<proof>` read as check 2's preimage, or `null` on a rail v1 defines no rule for.
      *
-     * Published because T3's `VerifiedPayment.verify` takes one and a caller may want to hand it a
-     * payment hash it obtained elsewhere. It redacts itself in every string representation (§12
+     * Published because T3's `VerifiedPayment.verify` takes one, and that entry point still takes a
+     * payment hash beside it. Neither [Settlement.verify] nor [Settlement.verifyFeeReceipt] does:
+     * on those paths check 3's hash is the stored invoice's `p` field and a caller has no way to
+     * substitute one, which is the difference between the two doors and the reason a caller that
+     * wants §9.2 uses this package's. It redacts itself in every string representation (§12
      * item 11).
      */
     public val preimage: Preimage?,
@@ -174,29 +176,34 @@ public class PaymentReceipt internal constructor(
  *
  * ### Compose and record; do not redefine
  *
- * §9.2 checks 1, 4 and 5 are performed **on this path**: the BOLT-11 string in the receipt was
- * compared byte-identically against the one stored for the same `order` and `payee`, and the
- * *stored* invoice was then parsed and held to the amount its payee is owed and to the expiry it
- * carried when it was accepted. So is check 6, on [Settlement.verifyFeeReceipt]'s path — §8.4's
- * byte-identical fee term, §8.7's sealing key and §8.5's state precondition. All of it is recorded
- * in this value's own [checksPerformed], and `VerifiedPayment.CHECKS_PERFORMED_HERE` is **not**
- * widened to say so — a bare `VerifiedPayment.verify` still performs none of them, and a global
- * claim would be the §17 over-claim one layer below where the conformance surface is watching for
- * it. `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED` is derived from that constant and is unchanged,
- * so `PaymentCheck.INVOICE_IDENTITY`, `PaymentCheck.INVOICE_AMOUNT` and
- * `PaymentCheck.INVOICE_EXPIRY` all stay in §17 item 6's not-performed set.
+ * §9.2 checks 1, 3, 4 and 5 are performed **on this path**: the BOLT-11 string in the receipt was
+ * compared byte-identically against the one stored for the same `order` and `payee`, the *stored*
+ * invoice was then parsed and held to the amount its payee is owed and to the expiry it carried
+ * when it was accepted, and check 3's payment hash is the 256-bit `p` field read out of **that**
+ * parse rather than a value the caller chose. So is check 6, on [Settlement.verifyFeeReceipt]'s
+ * path — §8.4's byte-identical fee term, §8.7's sealing key and §8.5's state precondition. All of
+ * it is recorded in this value's own [checksPerformed], and `VerifiedPayment.CHECKS_PERFORMED_HERE`
+ * is **not** widened to say so — a bare `VerifiedPayment.verify` still performs none of them, and a
+ * global claim would be the §17 over-claim one layer below where the conformance surface is
+ * watching for it. `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED` is derived from that constant and is
+ * unchanged, so `PaymentCheck.INVOICE_IDENTITY`, `PaymentCheck.PAYMENT_HASH_PROVENANCE`,
+ * `PaymentCheck.INVOICE_AMOUNT` and `PaymentCheck.INVOICE_EXPIRY` all stay in the set that names
+ * what a *bare* `VerifiedPayment.verify` leaves open.
  *
- * What this path closes is those three and **nothing more**. The provenance of the payment hash
- * check 3 compares against — the 256-bit `p` field parsed out of the invoice — is
- * `PaymentCheck.PAYMENT_HASH_PROVENANCE`, a constant of its own, and no path here subtracts it:
- * [Settlement.verify] still takes that hash as a parameter, and the fact that check 4 now parses
- * the stored invoice does **not** close it. Parsing an invoice to read its amount says nothing
- * about where the hash the caller handed in came from, and a path that subtracted the provenance
- * on the strength of having opened the invoice for a different field would be the same over-claim
- * in a new place. It closes when a priced order's payment hash is taken from the stored invoice's
- * `p` field, and not before. While check 1 and the provenance shared one constant this path
- * subtracted both, so a result reported the provenance closed on the strength of a byte comparison
- * that says nothing about where the hash came from.
+ * `PaymentCheck.PAYMENT_HASH_PROVENANCE` is the one that moved, and it moved because
+ * [Settlement.verify] stopped taking a payment hash at all. There is no longer a parameter through
+ * which a caller could supply one: the hash is `Bolt11Invoice.parse(stored.invoice).paymentHash`,
+ * off the same single parse checks 4 and 5 are made against. Until that happened the constant
+ * stayed open on every path here even while check 4 opened the invoice, because having read an
+ * invoice's *amount* says nothing about where a hash the caller handed in came from — and
+ * subtracting the provenance on the strength of a different field would have been the same
+ * over-claim reached by a new route. What closes it is taking the operand, and only that.
+ *
+ * A consequence worth stating rather than leaving to be discovered: an [Evidenced] from [verify]
+ * for a **provider** receipt, and one from [verifyFeeReceipt] for a fee receipt, now have an
+ * **empty** [checksNotPerformedHere]. Every §9.2 check that applies to that receipt was performed
+ * here. A fee receipt put through plain [verify] still names check 6's three, because that path
+ * performs none of them.
  *
  * The three check-6 constants are a different case and are treated differently, which is the point
  * of publishing per-result sets at all: they are not global claims about `VerifiedPayment.verify`
@@ -242,17 +249,29 @@ public sealed interface Settlement {
 
     /**
      * The §9.2 checks this library did **not** perform, which the caller must perform or account
-     * for before treating the payment as fully verified (§17). Never empty in v1.
+     * for before treating the payment as fully verified (§17).
+     *
+     * **Empty is now a reachable answer, and it is the point of the whole settlement path.** A
+     * provider [Evidenced] from [verify], and a fee [Evidenced] from [verifyFeeReceipt], performed
+     * every §9.2 check that applies to that receipt, so there is nothing left for this set to name.
+     * It used to be documented as never empty in v1, which stopped being true the moment check 3's
+     * payment hash came out of the stored invoice rather than out of a parameter. What is still
+     * never empty is the set on a bare `VerifiedPayment` — that value holds no store and parses no
+     * invoice — and a caller reading emptiness here as a warrant that a payment settled has still
+     * read it backwards (§9.1): the evidence is [Evidenced.payment], not this record of it.
+     *
+     * An [Unverified] names everything applicable, because §9.4 says a rail v1 defines no rule for
+     * evidences nothing at all.
      */
     public val checksNotPerformedHere: Set<PaymentCheck>
 
     /**
-     * §9.2's evidence: checks 1, 4 and 5 against the stored request, and checks 2 and 3's
-     * comparison through T3.
+     * §9.2's evidence: checks 1, 4 and 5 against the stored request, check 3's payment hash read
+     * out of that same stored invoice, and check 2 with check 3's comparison through T3.
      *
-     * Still not the whole of §9.2 — check 3's provenance is open on every path here, and check 6
-     * belongs to a fee receipt alone — and [checksNotPerformedHere] names what is missing rather
-     * than leaving a caller to infer it from the existence of this value.
+     * For a fee receipt through [verify] that is still not the whole of §9.2 — check 6 belongs to
+     * [verifyFeeReceipt] alone — and [checksNotPerformedHere] names what is missing rather than
+     * leaving a caller to infer it from the existence of this value.
      */
     public sealed interface Evidenced : Settlement {
 
@@ -273,21 +292,29 @@ public sealed interface Settlement {
     public companion object {
 
         /**
-         * §9.2's checks this path performs — checks 1, 4 and 5, plus T3's two — as a set a caller
-         * can branch on.
+         * §9.2's checks this path performs — checks 1, 3, 4 and 5, plus T3's two — as a set a
+         * caller can branch on.
          *
          * Derived from `VerifiedPayment.CHECKS_PERFORMED_HERE` rather than transcribed, so a check
          * T3 adds later lands here the moment it is declared. It is deliberately **not** the same
          * value as that constant and deliberately does not replace it: see this interface's note.
          *
-         * Checks 4 and 5 are here because [verify] now performs them — it parses the **stored**
-         * invoice and holds it to the amount its payee is owed and to the expiry it carried at
-         * acceptance — and for no other reason. The rule this obeys is the one §17 states: a check
-         * that is performed is reported as performed, and a check that is not is not.
+         * Checks 4 and 5 are here because [verify] performs them — it parses the **stored** invoice
+         * and holds it to the amount its payee is owed and to the expiry it carried at acceptance.
+         * `PaymentCheck.PAYMENT_HASH_PROVENANCE` is here because check 3's operand is the `p` field
+         * of that same parse and there is no parameter left through which a caller could supply
+         * one. For no other reason in either case: the rule this obeys is the one §17 states, that
+         * a check that is performed is reported as performed and a check that is not is not.
+         *
+         * With the provenance in it, this set plus check 6's three is the **whole** of §9.2 for a
+         * fee receipt, and this set alone is the whole of it for a provider receipt — which is what
+         * makes an empty `checksNotPerformedHere` reachable and what lets decision B's gate in
+         * `OrderMachine` pass a priced order.
          */
         public val CHECKS_PERFORMED_ON_THE_STORE_PATH: Set<PaymentCheck> = readOnlySetOf(
             VerifiedPayment.CHECKS_PERFORMED_HERE + linkedSetOf(
                 PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.PAYMENT_HASH_PROVENANCE,
                 PaymentCheck.INVOICE_AMOUNT,
                 PaymentCheck.INVOICE_EXPIRY,
             ),
@@ -328,7 +355,7 @@ public sealed interface Settlement {
         )
 
         /**
-         * What [verifyFeeReceipt] performs: the store path's three, plus check 6's three.
+         * What [verifyFeeReceipt] performs: the store path's four, plus check 6's three.
          *
          * Composed from [CHECKS_PERFORMED_ON_THE_STORE_PATH] and [CHECK_SIX], and — like that
          * constant — deliberately **not** `VerifiedPayment.CHECKS_PERFORMED_HERE`, which stays
@@ -365,16 +392,23 @@ public sealed interface Settlement {
          * be relying on check 1 having run — which is true here and is exactly the kind of implicit
          * ordering a later edit breaks silently.
          *
-         * @param paymentHash §9.2 check 3's operand. **Still a caller-supplied parameter**, and the
-         *   narrowing T3 stated is unchanged: check 3 defines it as the 256-bit `p` tagged field
-         *   parsed out of the BOLT-11 invoice, and nothing here reads that field. This function now
-         *   parses the stored invoice for checks 4 and 5, and that deliberately does **not** close
-         *   check 3's provenance: having opened the invoice for its amount says nothing about where
-         *   the hash the caller handed in came from. Every result therefore still names
-         *   `PaymentCheck.PAYMENT_HASH_PROVENANCE` as not performed. Unused for an [Unverified]
-         *   result — a caller that wants to avoid computing one reads [PaymentReceipt.medium]
-         *   first, and putting the branch here rather than in the caller is what keeps §9.4's
-         *   decision out of the caller's hands.
+         * ### So is check 3's payment hash, and it comes off the same parse
+         *
+         * §9.2 check 3 does not merely say "compare `SHA-256(preimage)` against a payment hash": it
+         * says **which** payment hash — the 256-bit `p` tagged field of the BOLT-11 invoice. So this
+         * function takes none. It reads `p` off the invoice it has already parsed for checks 4 and
+         * 5 — one lookup, one parse, one invoice, so the field check 3 compares against and the
+         * amount check 4 compares against can never be read from two different strings — and hands
+         * that to `VerifiedPayment.verify`.
+         *
+         * Removing the parameter is the whole of the fix, and nothing weaker would have been one. A
+         * receipt carrying the **stored** provider invoice, a preimage for the buyer's *own*
+         * invoice, and that preimage's hash, used to be [Evidenced]: check 1 compared the reference
+         * the receipt carried against the store and passed, check 3 compared a hash the caller
+         * supplied against a preimage the caller supplied and passed, and the two checks were about
+         * two different invoices. There is no argument left through which they can be separated,
+         * which is why `PaymentCheck.PAYMENT_HASH_PROVENANCE` is now reported as performed.
+         *
          * @param store the client's persistence, holding the `type=2` requests it accepted.
          * @param split §8.3's arithmetic for the **accepted** terms of this order, which is where
          *   check 4's expected amount comes from: `split.price` for a provider receipt and
@@ -407,7 +441,6 @@ public sealed interface Settlement {
          */
         public fun verify(
             receipt: PaymentReceipt,
-            paymentHash: PaymentHash,
             store: PaymentRequestStore,
             split: FeeSplit,
         ): Settlement {
@@ -419,8 +452,9 @@ public sealed interface Settlement {
                 return NoRule(receipt.order, receipt.payee, receipt.medium, applicable(receipt.payee))
             }
             val stored = checkInvoiceIdentity(receipt, store)
-            checkAmountAndExpiry(stored, expectedAmount(receipt.payee, split))
-            val payment = VerifiedPayment.verify(receipt.payee, paymentHash, preimage)
+            // One parse, and check 3's operand comes out of it. See this function's note.
+            val invoice = checkedInvoice(stored, expectedAmount(receipt.payee, split))
+            val payment = VerifiedPayment.verify(receipt.payee, invoice.paymentHash, preimage)
             return PreimageAndInvoice(
                 receipt.order,
                 receipt.payee,
@@ -484,8 +518,25 @@ public sealed interface Settlement {
          * receipt be held to one order's amounts and another order's state — two answers about two
          * orders reported as one result.
          *
-         * @param paymentHash §9.2 check 3's operand, with the narrowing [verify] states unchanged.
-         *   Parsing the stored invoice for checks 4 and 5 does not close its provenance.
+         * ### Check 3's payment hash comes off the stored invoice here too
+         *
+         * Exactly as in [verify], and for the reason stated there: this function takes no payment
+         * hash, and check 3's operand is the `p` field of the same parse checks 4 and 5 are made
+         * against. So a fee [Evidenced] from this door has performed every §9.2 check there is —
+         * the store path's four, T3's two and check 6's three — and its
+         * [Settlement.checksNotPerformedHere] is empty.
+         *
+         * **Empty is a statement about this receipt and never about the set it belongs to.** Every
+         * check §9.2 states is stated per receipt, and one of them is not: two invoices that differ
+         * only in their amount share a `p`, [PaymentRequestStore] keys and compares BOLT-11
+         * *strings*, and so a provider invoice and a fee invoice committing to one payment are both
+         * storable and both settle here — each passing check 1 against its own stored string and
+         * check 3 against its own `p`. What refuses that pair is §8.6's rule that one payment is not
+         * evidence of two, which lives one layer up in `OrderMachine`
+         * (`TransitionRejection.RECEIPT_PAYMENT_DUPLICATED`) because it is the only layer that sees
+         * both receipts. A caller reading these results without that layer reads them one at a time,
+         * which is what they answer.
+         *
          * @param store the client's persistence, holding the `type=2` requests it accepted. It is
          *   read twice here — for check 1's invoice comparison and for §8.7's sealing key — and
          *   neither read makes it trustworthy: a store is the embedding client's own persistence
@@ -524,7 +575,6 @@ public sealed interface Settlement {
          */
         public fun verifyFeeReceipt(
             receipt: PaymentReceipt,
-            paymentHash: PaymentHash,
             store: PaymentRequestStore,
             order: Order,
             earlierPoints: List<FeeTermSighting>,
@@ -599,8 +649,8 @@ public sealed interface Settlement {
             // read one from, and a fee receipt judged against a split the caller passed beside an
             // unrelated `Order` would compare check 4 against one order's terms and check 6
             // against another's.
-            checkAmountAndExpiry(identified, expectedAmount(receipt.payee, order.terms.split))
-            val payment = VerifiedPayment.verify(receipt.payee, paymentHash, preimage)
+            val invoice = checkedInvoice(identified, expectedAmount(receipt.payee, order.terms.split))
+            val payment = VerifiedPayment.verify(receipt.payee, invoice.paymentHash, preimage)
             return PreimageAndInvoice(
                 receipt.order,
                 receipt.payee,
@@ -864,14 +914,23 @@ public sealed interface Settlement {
         }
 
         /**
-         * §9.2 checks 4 and 5 over the **stored** invoice, parsed here for the first time.
+         * §9.2 checks 4 and 5 over the **stored** invoice, parsed here — and the parse itself, so
+         * check 3 can read its `p` field.
          *
-         * A two-line dispatcher onto [checkParsedAmountAndExpiry], which holds the rules and the
-         * reasoning. The pair of operands it supplies is the whole content of this overload: check
-         * 5's reading is [AcceptedPaymentRequest.acceptedAt] and never a clock read here.
+         * The pair of operands it supplies to [checkParsedAmountAndExpiry] is half its content:
+         * check 5's reading is [AcceptedPaymentRequest.acceptedAt] and never a clock read here. The
+         * other half is the return value, and it is why this is a function with a result rather
+         * than the two-line `Unit` dispatcher it used to be. Both callers need §9.2 check 3's
+         * operand out of **the invoice these checks were made against**, and the way to guarantee
+         * that is to hand back the one [Bolt11Invoice] this function parsed. A second
+         * `Bolt11Invoice.parse(stored.invoice)` at the call site would compile, would agree today,
+         * and would be two readings of one string where §9.2 needs one.
          */
-        private fun checkAmountAndExpiry(stored: AcceptedPaymentRequest, expected: Msat) =
-            checkParsedAmountAndExpiry(Bolt11Invoice.parse(stored.invoice), stored.acceptedAt, expected)
+        private fun checkedInvoice(stored: AcceptedPaymentRequest, expected: Msat): Bolt11Invoice {
+            val invoice = Bolt11Invoice.parse(stored.invoice)
+            checkParsedAmountAndExpiry(invoice, stored.acceptedAt, expected)
+            return invoice
+        }
 
         /**
          * The same two checks over a reference and an acceptance reading that are not yet a
@@ -1001,7 +1060,7 @@ public sealed interface Settlement {
             override val payment: VerifiedPayment,
 
             /**
-             * What this path closed **beyond** the store path's three: empty from [verify], and
+             * What this path closed **beyond** the store path's four: empty from [verify], and
              * check 6's three from [verifyFeeReceipt].
              *
              * A parameter rather than a second class, so the two paths cannot come to compose the
@@ -1012,8 +1071,8 @@ public sealed interface Settlement {
         ) : Evidenced {
 
             /**
-             * T3's performed set, composed with checks 1, 4 and 5 — never redefined. See the note
-             * above.
+             * T3's performed set, composed with checks 1, 3, 4 and 5 — never redefined. See the
+             * note above.
              */
             override val checksPerformed: Set<PaymentCheck> = readOnlySetOf(
                 payment.checksPerformed + STORE_PATH_ONLY + alsoPerformed,
@@ -1024,11 +1083,13 @@ public sealed interface Settlement {
              * subtracting **the same** set [checksPerformed] adds, which is what makes T18's
              * partition invariant hold by construction rather than by coincidence.
              *
-             * `PaymentCheck.PAYMENT_HASH_PROVENANCE` survives every subtraction here on purpose.
-             * Check 4 parses the stored invoice, so it is now true that this path opens an invoice
-             * — and it is still not true that the payment hash check 3 compared against came out of
-             * one. Subtracting the provenance because a *different* field was read would be the
-             * under-report T18 split the constant to remove, arrived at by a new route.
+             * `PaymentCheck.PAYMENT_HASH_PROVENANCE` is now in [STORE_PATH_ONLY] and is therefore
+             * subtracted, which is what empties this set for a provider [verify] result and for a
+             * fee [verifyFeeReceipt] one. It survived every subtraction here until check 3's
+             * operand stopped being a parameter, and the reason it did is worth keeping: check 4
+             * parsing the stored invoice made it true that this path *opens* an invoice and left it
+             * untrue that the hash check 3 compared against came out of one. What changed is not
+             * the reasoning but the code — [verify] and [verifyFeeReceipt] take no payment hash.
              */
             override val checksNotPerformedHere: Set<PaymentCheck> = readOnlySetOf(
                 payment.checksNotPerformedHere - STORE_PATH_ONLY - alsoPerformed,

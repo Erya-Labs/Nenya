@@ -40,26 +40,24 @@ class OrderControlsTest {
     // ---------------------------------------------------------------- the two deadlock probes
 
     /**
-     * §18's §8.5 probe — a **fee-bearing** order reaches `awaiting_payment`, and is then refused
-     * `paid` for the checks nobody performed and for no other reason.
+     * §18's §8.5 probe — a **fee-bearing** order reaches `awaiting_payment`, and then `paid`.
      *
      * §8.5 is explicit that a rule rejecting the fee `type=2` while the order is still `committed`
      * would make `awaiting_payment` unreachable for every fee-bearing order, and would make the
      * specification's own worked order (Appendix A, step 6) illegal. Revision `1.1` was worded
      * that way; this is the test that says `1.2` is not.
      *
-     * The probe survives decision B intact, and the assertion that carries it is the **negative**
-     * one. `awaiting_payment` is still reached with both payment requests, both receipts still
-     * verify, and the refusal that follows is `PAYMENT_CHECKS_NOT_PERFORMED` — emphatically not
-     * `RECEIPTS_INCOMPLETE`, which is what a fee payee deadlocked out of the required set would
-     * produce. So this still distinguishes "§9.2 is not yet fully implemented", which is true of
-     * every implementation until the parser lands, from "this order can never be paid", which is
-     * the bug §8.5 is about. The positive half moved to the only order that can reach `paid` at
-     * all: a free one.
+     * The probe is **positive again on the priced chain**. T20 could only assert the negative half
+     * — refused `PAYMENT_CHECKS_NOT_PERFORMED` and emphatically not `RECEIPTS_INCOMPLETE` — because
+     * decision B held every priced order at `awaiting_payment` while check 3's provenance was
+     * performed by nobody. It is performed now, so the order that §8.5 says must be payable is paid
+     * here, which is a strictly stronger statement than "it was not told its receipts were
+     * incomplete": an implementation that deadlocked the fee payee out of the required set fails
+     * this by never reaching `paid` at all.
      */
-    @JsName("a_fee_bearing_order_reaches_awaiting_payment_and_is_refused_paid_for_checks_alone")
+    @JsName("a_fee_bearing_order_reaches_awaiting_payment_and_then_paid")
     @Test
-    fun `a fee-bearing order reaches awaiting_payment and is refused paid for checks alone`() {
+    fun `a fee-bearing order reaches awaiting_payment and then paid`() {
         val terms = OrderFixtures.TERMS
         assertTrue(terms.split.feePayeeRequired, "this probe needs an order that owes a fee")
         assertEquals(setOf(Payee.PROVIDER, Payee.FEE), Payee.requiredPayees(terms.split))
@@ -72,25 +70,23 @@ class OrderControlsTest {
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
-        val refused = OrderFixtures.refusedForChecks(
+        val paid = OrderFixtures.advanced(
             machine,
             awaiting,
             OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         )
-        assertNotEquals(
-            TransitionRejection.RECEIPTS_INCOMPLETE,
-            refused.reason,
-            "§8.5's probe: a fee-bearing order whose fee receipt has verified must never be told " +
-                "its receipt set is incomplete. That refusal is what an implementation which " +
-                "cannot admit the fee payee produces, and it is the deadlock this test exists for",
-        )
-
-        val free = OrderFixtures.orders(OrderFixtures.freeTerms())
         assertEquals(
             OrderState.PAID,
-            free.getValue(OrderState.PAID).state,
-            "the positive half: `awaiting_payment → paid` is reachable, on the one order that " +
-                "owes no receipt and therefore has no unperformed check",
+            paid.state,
+            "§8.5's probe: a fee-bearing order whose two receipts have verified per §9.2 must " +
+                "reach `paid`. An implementation that cannot admit the fee payee deadlocks it " +
+                "into `expired` instead, which is the bug this test exists for",
+        )
+        assertEquals(
+            setOf(Payee.PROVIDER, Payee.FEE),
+            Payee.requiredPayees(paid.terms.split),
+            "and it is still the fee-bearing order it started as: a `paid` order on substituted " +
+                "free terms would satisfy the line above while proving nothing about §8.5",
         )
     }
 
@@ -103,14 +99,15 @@ class OrderControlsTest {
      * invoice per **named** payee passes a naive cross-product test — every event it knows about
      * still works — and deadlocks every such order into `expired`.
      *
-     * Decision B moved where the probe lands and not what it proves: a provider-only receipt set is
-     * accepted as **complete** (no fee receipt is waited for, which is the whole point) and is then
-     * refused for the three checks no path performs. `RECEIPTS_INCOMPLETE` here would mean the fee
-     * payee had been required after all.
+     * Positive again, for the same reason as the probe above: a provider-only receipt set is
+     * accepted as **complete** — no fee receipt is waited for, which is the whole point — and it
+     * now carries every §9.2 check that applies, so the order reaches `paid` with no fee invoice
+     * and no fee receipt anywhere in the chain. `RECEIPTS_INCOMPLETE` would mean the fee payee had
+     * been required after all, and never reaching `paid` is that bug's outcome.
      */
-    @JsName("a_zero_fee_order_needs_no_fee_receipt_and_is_refused_paid_for_checks_alone")
+    @JsName("a_zero_fee_order_needs_no_fee_receipt_and_reaches_paid")
     @Test
-    fun `a zero-fee order needs no fee receipt and is refused paid for checks alone`() {
+    fun `a zero-fee order needs no fee receipt and reaches paid`() {
         val terms = OrderFixtures.zeroFeeTerms
         assertTrue(terms.split.term.namesRecipient, "the terms must *name* a fee payee")
         assertEquals(Msat.ZERO, terms.split.fee, "and the computed fee must still be zero (§8.3)")
@@ -124,23 +121,21 @@ class OrderControlsTest {
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
-        val refused = OrderFixtures.refusedForChecks(
+        val paid = OrderFixtures.advanced(
             machine,
             awaiting,
             OrderEvent.ReceiptsVerified(setOf(OrderFixtures.receipt(Payee.PROVIDER))),
         )
-        assertNotEquals(
-            TransitionRejection.RECEIPTS_INCOMPLETE,
-            refused.reason,
-            "§8.3's probe: a provider-only receipt set is COMPLETE for a zero-fee order. Being " +
-                "told otherwise is the implementation waiting for an invoice that may not exist",
-        )
-
-        val free = OrderFixtures.orders(OrderFixtures.freeTerms(terms))
         assertEquals(
             OrderState.PAID,
-            free.getValue(OrderState.PAID).state,
-            "the positive half, on the one order §9.2 leaves owing no receipt at all",
+            paid.state,
+            "§8.3's probe: a provider-only receipt set is COMPLETE for a zero-fee order. An " +
+                "implementation waiting for an invoice that may not legally exist never gets here",
+        )
+        assertTrue(
+            paid.terms.split.term.namesRecipient,
+            "and the order that reached `paid` is the one that *names* a fee payee — the shape " +
+                "§8.3's failure mode is about, not free terms substituted for it",
         )
     }
 
@@ -214,12 +209,19 @@ class OrderControlsTest {
      * payment being counted twice — the split-a-combined-invoice shape §8.6 says NENYA-1 has no
      * version of.
      *
-     * §9.2 check 1 does not subsume it and is not a reason to drop it. Both receipts here pass
-     * check 1: each names its **own** stored `type=2`, and the two invoice strings genuinely
-     * differ — check 1 compares a receipt against its own stored invoice and asks nothing about
-     * the other receipt in the set. What would catch it is check 3's provenance, the payment hash
-     * parsed out of each invoice, which nothing in this library does yet. This check needs only
-     * the arithmetic already done here.
+     * ### Neither check 1 nor check 3 subsumes it, and both now run
+     *
+     * Both receipts pass check 1: each names its **own** stored `type=2`, and the two invoice
+     * strings genuinely differ — check 1 compares a receipt against its own stored invoice and asks
+     * nothing about the other receipt in the set.
+     *
+     * Both pass check 3 too, and that is the half worth stating since the operand stopped being a
+     * parameter. The fixture's two invoices at one stream carry the **same** `p` — two real
+     * invoices for two different amounts, derived from one preimage by the composer decision D
+     * requires, so nothing here is typed — and each receipt proves that one preimage against its
+     * own invoice's own field. Check 3 asks whether the proof hashes to the hash this invoice
+     * names, and for each receipt separately it does. The sentence §8.6 needs is about the *pair*,
+     * and this rule is the only thing in the library that says it.
      */
     @JsName("one_payment_offered_as_evidence_for_both_payees_is_refused")
     @Test

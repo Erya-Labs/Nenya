@@ -18,8 +18,10 @@ import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.order.OrderTerms
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
+import dev.eryalabs.nenya.payment.PaymentException
 import dev.eryalabs.nenya.payment.PaymentFixtures
 import dev.eryalabs.nenya.payment.PaymentHash
+import dev.eryalabs.nenya.payment.PaymentRejection
 import dev.eryalabs.nenya.payment.Preimage
 import dev.eryalabs.nenya.payment.VerifiedPayment
 import dev.eryalabs.nenya.seam.FakeClock
@@ -320,7 +322,6 @@ class FeeTermCheckTest {
 
         val settlement = Settlement.verifyFeeReceipt(
             messages.feeReceipt,
-            messages.feePaymentHash,
             messages.store(),
             messages.order(OrderState.AWAITING_PAYMENT),
             messages.earlierPoints(),
@@ -339,12 +340,21 @@ class FeeTermCheckTest {
                 "on this path: ${evidenced.checksPerformed}",
         )
         assertEquals(
-            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
+            emptySet<PaymentCheck>(),
             evidenced.checksNotPerformedHere,
-            "what is left is check 3's provenance alone — and a check may never be on both sides " +
-                "of the same statement. Checks 4 and 5 left this expectation when this path began " +
-                "parsing the stored invoice; the provenance stays, because the fullest path in " +
-                "the library still takes the payment hash as a parameter",
+            "nothing is left. This is the fullest path in the library and it now performs every " +
+                "§9.2 check that applies to a fee receipt: checks 4 and 5 left this expectation " +
+                "when it began parsing the stored invoice, and check 3's provenance left it when " +
+                "the function stopped taking a payment hash at all",
+        )
+        assertEquals(
+            messages.feePaymentHash,
+            evidenced.payment.paymentHash,
+            "the hash check 3 ran against is the fee invoice's `p` field. Nothing here handed one " +
+                "in — this door takes none. On its own this equality discriminates nothing, " +
+                "because `VerifiedPayment.verify` throws unless the operand hashes from the proof " +
+                "and the proof is this preimage; what makes it a statement about *provenance* is " +
+                "the refusing control below, which keeps the operand and the proof apart",
         )
         assertEquals(
             Msat.ofMsat(SettlementFixtures.PRICE_MSAT * BASIS_POINTS / BPS_DIVISOR),
@@ -353,6 +363,128 @@ class FeeTermCheckTest {
                 "control over an amount computed here rather than read off the split it is " +
                 "checking, so a split that had gone wrong could not make itself agree",
         )
+    }
+
+    /**
+     * **Probe G1b inverted, on the fee door.** The stored fee invoice, and the *provider's*
+     * preimage.
+     *
+     * `Settlement.verify`'s copy of this is `SettlementCheckOneTest`'s, and it does not reach here:
+     * [Settlement.verifyFeeReceipt] reads check 3's operand at its own call site, out of its own
+     * parse, so the two are independently deletable. Without this control, replacing this door's
+     * operand with `SHA-256(receipt.preimage)` — the caller-supplied shape probe G1b exploited —
+     * leaves every test in this repository green while the result goes on reporting
+     * `PaymentCheck.PAYMENT_HASH_PROVENANCE` performed and its `checksNotPerformedHere` empty. That
+     * result is the one `OrderMachine` consumes for a fee payee, and half of why §17 item 6 is
+     * `PERFORMED_HERE`, so it is the door that most needs the refusal proved rather than assumed.
+     *
+     * The receipt names the **stored** fee invoice, so check 1 matches and checks 4 and 5 pass on
+     * it; only its `<proof>` is another derived invoice's preimage. What refuses is check 3,
+     * reaching the caller as T3 threw it.
+     */
+    @JsName("a_fee_receipt_proving_another_invoices_preimage_is_refused_by_check_3")
+    @Test
+    fun `a fee receipt proving another invoice's preimage is refused by check 3`() {
+        val messages = FeeOrderMessages()
+        assertNotEquals(
+            messages.preimages[0],
+            messages.preimages[1],
+            "the two fixtures must carry genuinely different preimages, or this proves nothing",
+        )
+
+        val crossed = SettlementFixtures.receiptSealedBy(
+            SettlementFixtures.buyer(messages.index),
+            SettlementFixtures.receiptTags(
+                index = messages.index,
+                // The fee invoice, verbatim — check 1 must pass — and the provider's preimage.
+                payment = SettlementFixtures.paymentTag(messages.invoices[0], messages.preimages[1]),
+                payeeTag = SettlementFixtures.payeeTag(Payee.FEE, messages.index),
+                fee = messages.feeOnFeeReceipt,
+            ),
+        )
+
+        val refused = assertFailsWith<PaymentException> {
+            Settlement.verifyFeeReceipt(
+                crossed,
+                messages.store(),
+                messages.order(OrderState.AWAITING_PAYMENT),
+                messages.earlierPoints(),
+            )
+        }
+
+        assertEquals(
+            PaymentRejection.PREIMAGE_MISMATCH,
+            refused.reason,
+            "check 3's operand on this door is the stored invoice's `p`, and there is no parameter " +
+                "through which the matching hash could be supplied instead",
+        )
+
+        // And the pairing: the same door, the same store, the same order — with the fee invoice's
+        // own preimage it evidences. So what refused above is the preimage and not the door.
+        assertIs<Settlement.Evidenced>(
+            Settlement.verifyFeeReceipt(
+                messages.feeReceipt,
+                messages.store(),
+                messages.order(OrderState.AWAITING_PAYMENT),
+                messages.earlierPoints(),
+            ),
+        )
+    }
+
+    /**
+     * The deployed shape: **one** store holding both of an order's invoices, and both receipts
+     * settled against it.
+     *
+     * The two doors are exercised apart everywhere else in this repository, and `OrderFixtures`
+     * builds its two receipts against two separate stores because each is drawn at its own preimage
+     * stream. Neither is the shape a client runs: §8.6's two `type=2`s for one order land in one
+     * `PaymentRequestStore`, keyed by `(order, payee)`, and the two receipts are looked up in it one
+     * after the other.
+     *
+     * What that arrangement can get wrong is the lookup key, and only a single store can show it. A
+     * `verify` that keyed on the order alone, or that read whichever record it found first, would
+     * hold the fee receipt to `price_msat` (refusing check 4) or compare the provider's preimage
+     * against the fee invoice's `p` (refusing check 3) — and every two-store test in this suite
+     * would stay green, because with one record present there is nothing to confuse it with.
+     *
+     * The two payment hashes are asserted distinct, which is what separates this from the
+     * duplicated-payment control: there the two invoices deliberately share a `p`.
+     */
+    @JsName("both_receipts_of_one_order_settle_against_one_store_each_against_its_own_invoice")
+    @Test
+    fun `both receipts of one order settle against one store, each against its own invoice`() {
+        val messages = FeeOrderMessages()
+        val store = messages.store()
+        val order = messages.order(OrderState.AWAITING_PAYMENT)
+
+        val provider = assertIs<Settlement.Evidenced>(
+            Settlement.verify(messages.providerReceipt, store, messages.split),
+        )
+        val fee = assertIs<Settlement.Evidenced>(
+            Settlement.verifyFeeReceipt(messages.feeReceipt, store, order, messages.earlierPoints()),
+        )
+
+        assertEquals(Payee.PROVIDER, provider.payee)
+        assertEquals(Payee.FEE, fee.payee)
+        assertNotEquals(
+            provider.payment.paymentHash,
+            fee.payment.paymentHash,
+            "§8.6 is two payments to two invoices. Equal hashes here would mean the two lookups " +
+                "found one record, which is the failure this single store exists to expose",
+        )
+        assertEquals(
+            PaymentFixtures.paymentHashOf(Preimage.ofHex(messages.preimages[1])),
+            provider.payment.paymentHash,
+            "the provider's operand is the provider invoice's `p`",
+        )
+        assertEquals(
+            messages.feePaymentHash,
+            fee.payment.paymentHash,
+            "and the fee recipient's is the fee invoice's — the store was asked for each payee's " +
+                "own record and answered with it",
+        )
+        assertEquals(emptySet<PaymentCheck>(), provider.checksNotPerformedHere)
+        assertEquals(emptySet<PaymentCheck>(), fee.checksNotPerformedHere)
     }
 
     /**
@@ -407,7 +539,6 @@ class FeeTermCheckTest {
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(OrderState.AWAITING_PAYMENT, otherTerms),
                 messages.earlierPoints(),
@@ -450,7 +581,6 @@ class FeeTermCheckTest {
             FeeOrderMessages(acceptedAt = deadline).let {
                 Settlement.verifyFeeReceipt(
                     it.feeReceipt,
-                    it.feePaymentHash,
                     it.store(),
                     it.order(OrderState.AWAITING_PAYMENT),
                     it.earlierPoints(),
@@ -487,7 +617,6 @@ class FeeTermCheckTest {
         val evidenced = assertIs<Settlement.Evidenced>(
             Settlement.verify(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.split,
             ),
@@ -527,18 +656,18 @@ class FeeTermCheckTest {
                 "reachability check needs a relay query — so it must still name what is missing",
         )
         assertEquals(
-            ConformanceStatus.PARTIAL,
+            ConformanceStatus.PERFORMED_HERE,
             item6.status,
-            "item 6 governs reaching `paid` and is otherwise unchanged by this task",
+            "item 6 governs reaching `paid`, and every §9.2 check is now performed on the path " +
+                "`OrderMachine` consumes — the store path's four, T3's two inside them, and check " +
+                "6's three through `verifyFeeReceipt`",
         )
         assertEquals(
-            setOf(
-                PaymentCheck.INVOICE_IDENTITY,
-                PaymentCheck.PAYMENT_HASH_PROVENANCE,
-                PaymentCheck.INVOICE_AMOUNT,
-                PaymentCheck.INVOICE_EXPIRY,
-            ),
+            emptySet<Enum<*>>(),
             item6.notPerformed,
+            "so it has no constant left to point at. What item 5 still names is a different " +
+                "shortfall — a signed fee term needs BIP-340 verification — and the two items " +
+                "moving apart is the distinction this test exists to keep",
         )
     }
 
@@ -569,7 +698,6 @@ class FeeTermCheckTest {
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(),
                 listOf(
@@ -732,7 +860,6 @@ class FeeTermCheckTest {
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.providerReceipt,
-                PaymentFixtures.paymentHashOf(Preimage.ofHex(messages.preimages[1])),
                 messages.store(),
                 messages.order(),
                 messages.earlierPoints(),
@@ -882,7 +1009,6 @@ class FeeTermCheckTest {
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 own.feeReceipt,
-                own.feePaymentHash,
                 own.store(),
                 own.order(),
                 other.earlierPoints(),
@@ -903,7 +1029,6 @@ class FeeTermCheckTest {
         assertIs<Settlement.Evidenced>(
             Settlement.verifyFeeReceipt(
                 consistent.feeReceipt,
-                consistent.feePaymentHash,
                 consistent.store(),
                 consistent.order(),
                 consistent.earlierPoints(),
@@ -930,7 +1055,6 @@ class FeeTermCheckTest {
         assertIs<Settlement.Evidenced>(
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(),
                 messages.earlierPoints(),
@@ -983,7 +1107,6 @@ class FeeTermCheckTest {
             val refused = assertFailsWith<SettlementException>("dropping ${all[dropped].point}") {
                 Settlement.verifyFeeReceipt(
                     messages.feeReceipt,
-                    messages.feePaymentHash,
                     messages.store(),
                     messages.order(),
                     short,
@@ -997,7 +1120,6 @@ class FeeTermCheckTest {
         val alone = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(),
                 emptyList(),
@@ -1030,7 +1152,6 @@ class FeeTermCheckTest {
 
         val settlement = Settlement.verifyFeeReceipt(
             onAnotherRail,
-            messages.feePaymentHash,
             messages.store(),
             messages.order(),
             messages.earlierPoints(),
@@ -1050,7 +1171,6 @@ class FeeTermCheckTest {
         val throughVerify = assertIs<Settlement.Unverified>(
             Settlement.verify(
                 onAnotherRail,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.split,
             ),
@@ -1066,7 +1186,6 @@ class FeeTermCheckTest {
         assertIs<Settlement.Unverified>(
             Settlement.verifyFeeReceipt(
                 onAnotherRail,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(OrderState.COMMITTED),
                 emptyList(),
@@ -1075,7 +1194,6 @@ class FeeTermCheckTest {
         assertIs<Settlement.Unverified>(
             Settlement.verifyFeeReceipt(
                 onAnotherRail,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(OrderState.AWAITING_PAYMENT, OrderFixtures.zeroFeeTerms),
                 messages.earlierPoints(),
@@ -1095,7 +1213,6 @@ class FeeTermCheckTest {
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(OrderState.COMMITTED),
                 messages.earlierPoints(),
@@ -1107,53 +1224,56 @@ class FeeTermCheckTest {
     }
 
     /**
-     * **A coverage gap, stated openly rather than papered over.**
+     * **The coverage T20 had to suspend, restored.**
      *
-     * This test used to offer a fee receipt to a **fee-bearing** order in `paid`, `released` and
-     * `settled`, and assert `FEE_RECEIPT_STATE_NOT_AWAITING_PAYMENT`. Decision B means no such
-     * order exists: a fee-bearing order cannot pass `awaiting_payment` while §9.2's checks 4 and 5
-     * and check 3's provenance are performed by nobody. The only order that reaches those states is
-     * a free one, which owes no fee at all — so `verifyFeeReceipt` answers `PAYEE_NOT_REQUIRED`
-     * first and check 6's state precondition is never consulted.
+     * §9.2 check 6 says "the state MUST already be `awaiting_payment`", which is an equality and
+     * not §8.5's "before". Past that state a fee receipt is a duplicate or a replay, it evidences
+     * nothing the order does not already carry, and refusing it is the fail-closed direction. The
+     * constant is named for the equality rather than for "before", so the refusal does not state
+     * the opposite of what happened.
      *
-     * Rewriting it to assert `PAYEE_NOT_REQUIRED` would be the silent weakening STOP RULE 1
-     * forbids: it would read as "the state rule is covered" while covering something else entirely.
-     * So this asserts the fact that actually holds — a fee-bearing order does not reach those
-     * states — and the `!= awaiting_payment` branch keeps its coverage from the `committed` control
-     * immediately above, which is unaffected and still fee-bearing.
+     * T20 could not test it: decision B held every fee-bearing order at `awaiting_payment`, and the
+     * only orders reaching `paid`, `released` and `settled` were free ones, which owe no fee at all
+     * — so `verifyFeeReceipt` answered `PAYEE_NOT_REQUIRED` first and the state rule was never
+     * consulted. Rewriting it to assert that answer would have read as "the state rule is covered"
+     * while covering something else, so T20 asserted the fact that did hold and said so in its
+     * commit. Now that check 3's operand comes out of the stored invoice a priced order reaches
+     * those three states, and the original assertion is the one that runs.
      *
-     * T25 restores the original: once the payment hash comes from the stored invoice's `p` field, a
-     * priced order can be `paid` again and the three states above become reachable with a fee owed.
+     * The order the state is read off is this library's own [Order] (§8.5), not a status token a
+     * counterparty sent — which is the whole of check 6's third obligation and the reason the
+     * fixture drives a real machine to each state rather than naming one.
      */
-    @JsName("a_fee_bearing_order_cannot_reach_the_states_past_awaiting_payment_at_all")
+    @JsName("a_fee_receipt_arriving_once_the_order_is_already_past_awaiting_payment_is_refused_too")
     @Test
-    fun `a fee-bearing order cannot reach the states past awaiting_payment at all`() {
+    fun `a fee receipt arriving once the order is already past awaiting_payment is refused too`() {
         val messages = FeeOrderMessages()
         val terms = messages.terms()
         assertTrue(
             Payee.FEE in Payee.requiredPayees(terms.split),
-            "this test is about a fee-bearing order, or it is about nothing",
+            "this test is about a fee-bearing order, or `PAYEE_NOT_REQUIRED` answers first and " +
+                "check 6's state precondition is never reached",
         )
 
-        val machine = OrderFixtures.machineBeforeDeadlines()
-        val awaiting = messages.order(OrderState.AWAITING_PAYMENT, terms)
-        assertEquals(
-            OrderState.AWAITING_PAYMENT,
-            awaiting.state,
-            "the fee-bearing chain must still reach `awaiting_payment` — §8.5's deadlock probe",
-        )
+        for (state in listOf(OrderState.PAID, OrderState.RELEASED, OrderState.SETTLED)) {
+            val order = messages.order(state, terms)
+            assertEquals(
+                setOf(Payee.PROVIDER, Payee.FEE),
+                Payee.requiredPayees(order.terms.split),
+                "the order in $state must still owe a fee, or this is the wrong refusal",
+            )
 
-        val refused = OrderFixtures.refusedForChecks(
-            machine,
-            awaiting,
-            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
-        )
-        assertEquals(
-            OrderState.AWAITING_PAYMENT,
-            refused.order.state,
-            "decision B: the order is held at `awaiting_payment`, so `paid`, `released` and " +
-                "`settled` carry no fee-bearing order for check 6's state rule to be tested on",
-        )
+            val refused = assertFailsWith<SettlementException>("at $state") {
+                Settlement.verifyFeeReceipt(
+                    messages.feeReceipt,
+                    messages.store(),
+                    order,
+                    messages.earlierPoints(),
+                )
+            }
+
+            assertEquals(SettlementRejection.FEE_RECEIPT_STATE_NOT_AWAITING_PAYMENT, refused.reason)
+        }
     }
 
     @JsName("the_paired_positive_control_the_fee_payment_request_is_accepted_at_committed")
@@ -1193,7 +1313,6 @@ class FeeTermCheckTest {
         assertIs<Settlement.Evidenced>(
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 awaiting,
                 messages.earlierPoints(),
@@ -1215,7 +1334,6 @@ class FeeTermCheckTest {
         val refused = assertFailsWith<SettlementException> {
             Settlement.verifyFeeReceipt(
                 messages.feeReceipt,
-                messages.feePaymentHash,
                 messages.store(),
                 messages.order(OrderState.AWAITING_PAYMENT, zeroFee),
                 messages.earlierPoints(),

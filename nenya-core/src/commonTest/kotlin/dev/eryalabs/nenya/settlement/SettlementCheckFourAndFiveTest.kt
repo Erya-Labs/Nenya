@@ -218,6 +218,22 @@ class SettlementCheckFourAndFiveTest {
      * The preimage and the payment hash agree, always. Checks 4 and 5 run **before** check 3, so a
      * control about the amount must not be able to pass by accident on a preimage error; the one
      * test that wants both wrong at once says so and asserts which spoke first.
+     *
+     * ### The vendored example's `p` field is rewritten, and it has to be
+     *
+     * §9.2 check 3's operand is the `p` field of the **stored** invoice and no longer a parameter,
+     * so [invoice] is put through `SettlementFixtures.invoiceProving` before anything else: it keeps
+     * the example's amount, timestamp and `x` — everything these two checks are about — and gains
+     * the payment hash of [preimageHex], which is the preimage the receipt will carry. Without that
+     * every control here would die on a preimage mismatch against a hash whose preimage the
+     * vendored document does not publish. [derivePaymentHash] turns it off for the one control whose
+     * subject is the invoice *string*, where recomposing would recompute the very checksum under
+     * test.
+     *
+     * @param preimageHex the preimage the stored invoice's `p` is written from.
+     * @param proofHex the preimage the **receipt** carries, which defaults to the same one. The two
+     *   differ only where a control wants check 3 to fail, which is the shape that replaced the
+     *   wrong-payment-hash parameter this function used to take.
      */
     private fun settle(
         invoice: String,
@@ -225,9 +241,15 @@ class SettlementCheckFourAndFiveTest {
         split: FeeSplit,
         payee: Payee = Payee.PROVIDER,
         preimageHex: String = PaymentFixtures.preimageHex(1).single(),
-        paymentHash: PaymentHash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimageHex)),
+        proofHex: String = preimageHex,
         acceptUnder: FeeSplit = split,
+        derivePaymentHash: Boolean = true,
     ): Settlement {
+        val proving = if (derivePaymentHash) {
+            SettlementFixtures.invoiceProving(invoice, preimageHex)
+        } else {
+            invoice
+        }
         val order = SettlementFixtures.orderHex(0)
         val accepted = SettlementFixtures.acceptedFor(acceptUnder)
         val store = PaymentRequestStore.inMemory()
@@ -236,7 +258,7 @@ class SettlementCheckFourAndFiveTest {
                 payee,
                 SettlementFixtures.requestTags(
                     order = order,
-                    payment = SettlementFixtures.requestPaymentTag(invoice),
+                    payment = SettlementFixtures.requestPaymentTag(proving),
                     payeeTag = SettlementFixtures.payeeTag(payee),
                     // §8.4 marks the tag REQUIRED on a fee `type=2`, and revision `1.5` makes the
                     // §8.4/§8.7 check unskippable there. Byte-identical to the proposal's, which
@@ -257,11 +279,11 @@ class SettlementCheckFourAndFiveTest {
         val receipt = SettlementFixtures.receipt(
             SettlementFixtures.receiptTags(
                 order = order,
-                payment = SettlementFixtures.paymentTag(invoice, preimageHex),
+                payment = SettlementFixtures.paymentTag(proving, proofHex),
                 payeeTag = SettlementFixtures.payeeTag(payee),
             ),
         )
-        return Settlement.verify(receipt, paymentHash, store, split)
+        return Settlement.verify(receipt, store, split)
     }
 
     /** The reason [settle] refused with, failing loudly if it evidenced instead. */
@@ -270,8 +292,9 @@ class SettlementCheckFourAndFiveTest {
         acceptedAt: Long,
         split: FeeSplit,
         payee: Payee = Payee.PROVIDER,
+        derivePaymentHash: Boolean = true,
     ): SettlementRejection = assertFailsWith<SettlementException> {
-        settle(invoice, acceptedAt, split, payee)
+        settle(invoice, acceptedAt, split, payee, derivePaymentHash = derivePaymentHash)
     }.reason
 
     /** A split whose **provider** is owed exactly [amount]. Its fee is zero, so no fee payee exists. */
@@ -585,23 +608,26 @@ class SettlementCheckFourAndFiveTest {
         val acceptedAt = example.timestamp!! + ONE_MINUTE
         val stored = priceOf(statedMsat(example))
         val preimages = PaymentFixtures.preimageHex(2)
-        val wrongHash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimages[1]))
 
         // The control for the control: with the amount right, this receipt fails on the preimage.
+        // The stored invoice's `p` is written from `preimages[0]` and the receipt proves
+        // `preimages[1]`, which is the only way left to make check 3 fail — there is no payment
+        // hash parameter to hand a wrong value to.
         val onPreimage = assertFailsWith<PaymentException> {
             settle(
                 example.invoice,
                 acceptedAt,
                 stored,
                 preimageHex = preimages[0],
-                paymentHash = wrongHash,
+                proofHex = preimages[1],
             )
         }
         assertEquals(
             PaymentRejection.PREIMAGE_MISMATCH,
             onPreimage.reason,
-            "the preimage really does not hash to this payment hash, or the precedence assertion " +
-                "below would hold of a receipt with nothing wrong with its preimage at all",
+            "the receipt's preimage really does not hash to the stored invoice's `p`, or the " +
+                "precedence assertion below would hold of a receipt with nothing wrong with its " +
+                "preimage at all",
         )
 
         val refused = assertFailsWith<SettlementException> {
@@ -610,7 +636,7 @@ class SettlementCheckFourAndFiveTest {
                 acceptedAt,
                 priceOf(Msat.ofMsat(statedMsat(example).millisatoshis + 1L)),
                 preimageHex = preimages[0],
-                paymentHash = wrongHash,
+                proofHex = preimages[1],
                 acceptUnder = stored,
             )
         }
@@ -652,7 +678,7 @@ class SettlementCheckFourAndFiveTest {
                 example.timestamp!! + ONE_MINUTE + 1L,
                 priceOf(statedMsat(example)),
                 preimageHex = preimages[0],
-                paymentHash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimages[1])),
+                proofHex = preimages[1],
             )
         }
         assertEquals(SettlementRejection.INVOICE_EXPIRED, refused.reason)
@@ -758,7 +784,14 @@ class SettlementCheckFourAndFiveTest {
         assertEquals(sound.length, corrupt.length, "only one character may differ")
         assertEquals(
             SettlementRejection.CHECKSUM_INVALID,
-            refusalOf(corrupt, SettlementFixtures.ACCEPTED_AT, priceOf(expected)),
+            // The one control that must not have its `p` rewritten: recomposing recomputes the
+            // bech32 checksum, which is the very thing under test here.
+            refusalOf(
+                corrupt,
+                SettlementFixtures.ACCEPTED_AT,
+                priceOf(expected),
+                derivePaymentHash = false,
+            ),
         )
     }
 
@@ -794,7 +827,7 @@ class SettlementCheckFourAndFiveTest {
             val receipt = SettlementFixtures.receipt(fixture.receiptTags)
 
             assertIs<Settlement.Evidenced>(
-                Settlement.verify(receipt, fixture.paymentHash, store, split),
+                Settlement.verify(receipt, store, split),
                 "fixture ${fixture.index}: its invoice was built for this split",
             )
             evidenced[fixture.payee] = (evidenced[fixture.payee] ?: 0) + 1
@@ -805,7 +838,7 @@ class SettlementCheckFourAndFiveTest {
             assertEquals(
                 SettlementRejection.INVOICE_AMOUNT_MISMATCH,
                 assertFailsWith<SettlementException>("fixture ${fixture.index}") {
-                    Settlement.verify(receipt, fixture.paymentHash, store, shifted)
+                    Settlement.verify(receipt, store, shifted)
                 }.reason,
             )
             refused[fixture.payee] = (refused[fixture.payee] ?: 0) + 1

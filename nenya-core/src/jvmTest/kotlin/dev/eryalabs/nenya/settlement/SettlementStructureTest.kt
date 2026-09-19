@@ -218,6 +218,16 @@ class SettlementStructureTest {
          */
         fun payeeCollectionIn(executable: Executable): String? =
             mentions(executable).firstOrNull { it != PAYEE_TYPE && PAYEE_TYPE in it }
+
+        /** `PaymentHash` as it appears inside a `typeName`, bare or parameterised. */
+        val PAYMENT_HASH_TYPE: String = PaymentHash::class.java.name
+
+        /**
+         * The first mention of §9.2 check 3's operand in [executable]'s generic signature, or
+         * `null` — bare or wrapped, because `List<PaymentHash>` erases to `List`.
+         */
+        fun paymentHashIn(executable: Executable): String? =
+            mentions(executable).firstOrNull { PAYMENT_HASH_TYPE in it }
     }
 
     @Test
@@ -550,9 +560,14 @@ class SettlementStructureTest {
     }
 
     /**
-     * §9.2's operands, pinned: the verifier takes a receipt, the hash it is checked against, the
-     * store it is compared with and the order's own §8.3 split — and nothing a counterparty could
-     * say.
+     * §9.2's operands, pinned: the verifier takes a receipt, the store it is compared with and the
+     * order's own §8.3 split — and nothing a counterparty could say.
+     *
+     * **The payment hash is not on this list and its absence is the rule.** §9.2 check 3 does not
+     * merely say "compare `SHA-256(preimage)` against a payment hash", it says *which* one — the
+     * 256-bit `p` tagged field of the BOLT-11 invoice — so a parameter here is a route by which a
+     * caller supplies the operand and gets a true comparison about an invoice nobody issued. There
+     * is no such route now: the hash is read off the same parse checks 4 and 5 are made against.
      *
      * The `FeeSplit` is check 4's expected amount and is on this list for the same reason the store
      * is: it is something **this implementation** computed from terms it accepted, not a figure a
@@ -560,14 +575,13 @@ class SettlementStructureTest {
      * counterparty's number reaches one without passing through §8.3's arithmetic first.
      */
     @Test
-    fun `the verifier takes a receipt, a payment hash, the store and the split, and nothing that can assert`() {
+    fun `the verifier takes a receipt, the store and the split, and nothing that can assert`() {
         val companion = mainClasses().single { it.name == "$PACKAGE.Settlement\$Companion" }
         val verify = companion.methods.single { it.name == "verify" && '$' !in it.name }
 
         assertEquals(
             listOf(
                 PaymentReceipt::class.java,
-                PaymentHash::class.java,
                 PaymentRequestStore::class.java,
                 FeeSplit::class.java,
             ),
@@ -575,6 +589,68 @@ class SettlementStructureTest {
             "anything else on this parameter list is something a counterparty could say",
         )
         assertEquals("$PACKAGE.Settlement", verify.genericReturnType.typeName)
+    }
+
+    /**
+     * The same rule stated once over the **whole** companion rather than twice over two signatures:
+     * no published member of `Settlement`'s companion takes a [PaymentHash] at all.
+     *
+     * The two tests around this one pin two parameter lists exactly, which is stronger about those
+     * two members and says nothing about a third. A later task adding an entry point that took the
+     * operand back as an argument would leave both of them green — and would reopen
+     * `PaymentCheck.PAYMENT_HASH_PROVENANCE` on a path whose result claims it performed. This walks
+     * the generic signature, so a hash wrapped in a collection or an `Optional` is caught too,
+     * which is the same erasure trap §8.6's payee sweep exists for.
+     *
+     * The probe below is what proves the walk can fail; without it this is a predicate that never
+     * matches anything.
+     */
+    @Test
+    fun `no published member of Settlement's companion takes a payment hash`() {
+        val companion = publishedClasses().single { it.name == "$PACKAGE.Settlement\$Companion" }
+        val members = publishedExecutables(companion)
+        assertTrue(
+            members.size >= 4,
+            "the sweep found ${members.size} published members of Settlement's companion, which " +
+                "is not the companion this rule is about",
+        )
+        assertTrue(
+            members.any { it.name == "verify" } && members.any { it.name == "verifyFeeReceipt" },
+            "and it must be looking at §9.2's two doors: ${members.map { it.name }}",
+        )
+
+        for (member in members) {
+            assertNull(
+                paymentHashIn(member),
+                "${label(companion, member)} mentions ${paymentHashIn(member)}. §9.2 check 3's " +
+                    "operand is the stored invoice's `p` field, and a parameter is a route by " +
+                    "which a caller supplies its own and gets a true comparison about an invoice " +
+                    "nobody issued (probe G1b)",
+            )
+        }
+
+        for (name in listOf("bare", "listed", "keyed", "returned")) {
+            val method = PaymentHashProbe::class.java.methods.single { it.name == name }
+            assertNotNull(
+                paymentHashIn(method),
+                "PaymentHashProbe.$name names a PaymentHash and the sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        assertNull(
+            paymentHashIn(PaymentHashProbe::class.java.methods.single { it.name == "none" }),
+            "and a member that names no payment hash must not be reported as one",
+        )
+    }
+
+    /** A probe, not a fixture: four shapes the rule above forbids, and one it permits. */
+    @Suppress("unused")
+    private class PaymentHashProbe {
+        fun bare(hash: PaymentHash): Int = hash.hashCode()
+        fun listed(hashes: List<PaymentHash>): Int = hashes.size
+        fun keyed(): Map<String, PaymentHash> = emptyMap()
+        fun returned(): PaymentHash? = null
+        fun none(): Int = 0
     }
 
     /**
@@ -594,7 +670,6 @@ class SettlementStructureTest {
         assertEquals(
             listOf(
                 PaymentReceipt::class.java,
-                PaymentHash::class.java,
                 PaymentRequestStore::class.java,
                 Order::class.java,
                 List::class.java,

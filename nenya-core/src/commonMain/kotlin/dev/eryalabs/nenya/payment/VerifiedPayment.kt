@@ -122,17 +122,24 @@ public enum class PaymentCheck {
      * §9.2 check 3's **operand**: the payment hash compared against was the 256-bit `p` tagged
      * field parsed out of the BOLT-11 invoice (Appendix C), and not a value the caller chose.
      *
-     * Nothing in this library performs it. `Bolt11Reference` recognises the *shape* of an
-     * invoice and slices no tagged field, so [PaymentHash] arrives at every entry point here as
-     * a parameter — which means a caller that hands in `SHA-256(its own preimage)` gets a
+     * A bare [VerifiedPayment.verify] does not perform it and cannot: [PaymentHash] arrives
+     * there as a parameter, so a caller that hands in `SHA-256(its own preimage)` gets a
      * `VerifiedPayment` whose comparison is true and whose subject is an invoice nobody issued.
-     * That is the whole content of this constant, and it is worth one of its own: a record that
-     * folded it into [INVOICE_IDENTITY] reported it performed the moment check 1's byte
-     * comparison succeeded, which is the over-claim §17 forbids and the one a refusal that
-     * reads this record must not inherit.
+     * That is why the constant is in both not-performed sets below, and why it is worth one of
+     * its own: a record that folded it into [INVOICE_IDENTITY] reported it performed the moment
+     * check 1's byte comparison succeeded, which is the over-claim §17 forbids and the one a
+     * refusal that reads this record must not inherit.
+     *
+     * `Settlement.verify` and `Settlement.verifyFeeReceipt` **do** perform it, and record it in
+     * their own results' `checksPerformed`. They take no payment hash at all: check 3's operand
+     * is `Bolt11Invoice.parse(stored.invoice).paymentHash`, read off the same parse checks 4 and
+     * 5 are made against, and there is no parameter through which a caller could supply another.
+     * Removing the argument is what closes this constant — parsing the stored invoice for its
+     * *amount*, which that path already did, said nothing about where a caller's hash came from.
      *
      * In both [VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_PROVIDER] and
-     * [VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_FEE], because check 3 applies to every receipt.
+     * [VerifiedPayment.CHECKS_NOT_PERFORMED_FOR_FEE], because check 3 applies to every receipt
+     * and those two sets are claims about a bare [VerifiedPayment.verify].
      */
     PAYMENT_HASH_PROVENANCE,
 
@@ -234,7 +241,13 @@ public sealed interface VerifiedPayment {
 
     /**
      * The §9.2 checks this library did **not** perform, which the caller must perform or
-     * account for before treating the payment as fully verified (§17). Never empty in v1.
+     * account for before treating the payment as fully verified (§17).
+     *
+     * **Never empty on this type**, and that is a property of this entry point rather than of
+     * the library: [verify] holds no store, parses no invoice and takes check 3's payment hash
+     * as a parameter, so checks 1, 3's provenance, 4 and 5 are open on every value it produces.
+     * A `Settlement.Evidenced` composed from one of these **can** be empty — `Settlement.verify`
+     * performs those four itself — and the two records are deliberately not the same statement.
      */
     public val checksNotPerformedHere: Set<PaymentCheck>
 
@@ -255,9 +268,12 @@ public sealed interface VerifiedPayment {
          * does not apply to a provider receipt at all — recording an inapplicable obligation as
          * "not performed" would be a different false statement.
          *
-         * [PaymentCheck.PAYMENT_HASH_PROVENANCE] is here, and is the one constant no path in
-         * this library subtracts: check 1's comparison closes on the store path, and check 3's
-         * operand does not close until something parses the invoice's `p` field.
+         * [PaymentCheck.PAYMENT_HASH_PROVENANCE] is here for the same reason as the other three
+         * and no longer for a stronger one. This set is what a **bare** [verify] leaves open, and
+         * a bare [verify] takes check 3's payment hash as a parameter. `Settlement.verify` reads
+         * that operand out of the stored invoice's `p` field instead and subtracts the constant
+         * from its own result, so a provider `Settlement.Evidenced` has an empty
+         * `checksNotPerformedHere`.
          */
         public val CHECKS_NOT_PERFORMED_FOR_PROVIDER: Set<PaymentCheck> =
             readOnlySetOf(

@@ -67,6 +67,13 @@ import kotlin.test.fail
  * live at [SettlementFixtures.ACCEPTED_AT]. The BOLT-11-*shaped* strings this file used to draw
  * could not have satisfied either, which is what makes these fixtures a check on the library
  * rather than on themselves.
+ *
+ * Check 3 now reads that same invoice's `p` field, which tightens the rule a step further: a
+ * receipt's `<proof>` and its own invoice's payment hash are **one fact** here, chosen together by
+ * `(order index, stream)`. A fixture that set them apart would build a receipt the library refuses
+ * `PREIMAGE_MISMATCH` before the rule under test was reached — so where a control wants two
+ * receipts to prove one payment it draws both at one stream, and where it wants two payments it
+ * draws two streams. See [invoice].
  */
 internal object OrderFixtures {
 
@@ -116,42 +123,46 @@ internal object OrderFixtures {
     /**
      * [terms] with **both** expected amounts taken to zero, and the same two deadlines.
      *
-     * The only order that can reach `paid` while decision B stands. §9.2 requires a receipt only
-     * from a payee owed a non-zero amount, so `Payee.requiredPayees` is empty here, `paid` is
-     * reached on an empty receipt set, and there is no check for the gate to find unperformed.
-     * Every other order in this repository's fixtures is refused
-     * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED] until a BOLT-11 parser closes §9.2 checks
-     * 4 and 5 and check 3's provenance.
+     * §9.2 requires a receipt only from a payee owed a non-zero amount, so `Payee.requiredPayees`
+     * is empty here and `paid` is reached on an **empty receipt set**. That is the third answer
+     * §17's record has to be able to express and the reason this shape is kept now that a priced
+     * order reaches `paid` too: an order whose `paymentChecksPerformed` is empty because nothing
+     * applied, beside one whose set is full because everything was performed, is what stops a
+     * client reading empty as "verified".
      *
      * Zero price **and** [FeeTerm.Absent], not merely a zero fee: §8.3's `zeroFeeTerms` still owes
-     * the provider `price_msat`, which is a receipt, which is unperformed checks. The deadlines are
-     * kept so that every clock and deadline row of §11.2 behaves on the free chain exactly as it
-     * did on the priced one — the deadline tests rewritten onto it are testing the clock, and terms
-     * with no `expiration` would quietly make them test nothing.
+     * the provider `price_msat`, which is a receipt. The deadlines are kept so that every clock and
+     * deadline row of §11.2 behaves here exactly as it does on the priced chain — the deadline
+     * tests written onto it are testing the clock, and terms with no `expiration` would quietly
+     * make them test nothing.
      */
     fun freeTerms(terms: OrderTerms = TERMS): OrderTerms =
         OrderTerms.of(Msat.ZERO, FeeTerm.Absent, terms.expiration, terms.deliverBy)
 
     /**
-     * The one §9.2 check **no** path in this library performs, for either payee.
+     * The only §9.2 gap this library can still produce: check 6's three, on a fee receipt that went
+     * through plain `Settlement.verify`.
      *
-     * Check 3's *provenance*: the payment hash the comparison runs against is a parameter every
-     * entry point takes, so a caller that hands in the SHA-256 of a preimage it chose gets a true
-     * comparison about an invoice nobody issued. Checks 4 and 5 used to be here beside it and are
-     * not any more — `Settlement.verify` parses the stored invoice and performs both — and this
-     * set is therefore exactly the `missing` set decision B's gate reports for every priced order,
-     * whichever payee and whichever settlement path: `verify` closes checks 1, 4 and 5, and
-     * `verifyFeeReceipt` closes check 6's three besides.
+     * Nothing else is left. `Settlement.verify` performs checks 1, 4 and 5 and — since check 3's
+     * operand became the stored invoice's `p` field rather than a parameter — the provenance too,
+     * so a provider receipt from that door has an empty not-performed set and a fee receipt from
+     * `verifyFeeReceipt` has one as well. The general entry point performs no part of check 6,
+     * which is what `receiptThroughVerify` builds and what decision B's gate must go on demanding:
+     * the refusal is computed from what *applies* to the payee, not from what the record admits.
      *
-     * **A narrower set because more was verified, and still a refusal.** Parsing the invoice for
-     * its amount does not say where the caller's payment hash came from, so the gate still refuses
-     * — which is decision B working as the human decided rather than a gap left open.
+     * **This used to be `PAYMENT_HASH_PROVENANCE`, the check no path performed.** Its closing is
+     * what lets a priced order reach `paid` again, and the fixtures below assert both halves in one
+     * place — complete evidence advances, incomplete evidence is refused naming exactly this set.
      *
      * Written out rather than derived from the library's own constants on purpose: a set computed
      * the way the gate computes it would agree with a broken gate. Enum constants are names, not
      * encoded values, so the Definition of done's rule against typed fixtures does not reach them.
      */
-    val CHECKS_NO_PATH_PERFORMS: Set<PaymentCheck> = setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE)
+    val CHECK_SIX_UNPERFORMED: Set<PaymentCheck> = setOf(
+        PaymentCheck.FEE_TERM_MATCH,
+        PaymentCheck.FEE_SEALING_KEY,
+        PaymentCheck.FEE_STATE_PRECONDITION,
+    )
 
     /**
      * The refusal [event] produced, asserted to be decision B's and to name exactly [missing].
@@ -164,7 +175,7 @@ internal object OrderFixtures {
         machine: OrderMachine,
         order: Order,
         event: OrderEvent,
-        missing: Set<PaymentCheck> = CHECKS_NO_PATH_PERFORMS,
+        missing: Set<PaymentCheck> = CHECK_SIX_UNPERFORMED,
     ): OrderOutcome.Refused.ChecksNotPerformed {
         val refused = refusal(machine, order, event)
         assertEquals(
@@ -222,8 +233,15 @@ internal object OrderFixtures {
      * carries check 6's three obligations as performed and a provider receipt does not, which is
      * the difference an order's own record must end up reflecting.
      *
-     * @param stream picks which generated preimage the receipt proves, so no two receipts in one
-     *   order share evidence — and so a control can deliberately make two that do.
+     * @param stream picks which generated preimage this order's invoices are derived from, and so
+     *   which payment the receipt proves. Two receipts drawn at different streams prove different
+     *   payments; two drawn at the **same** stream prove one payment offered twice, which is the
+     *   shape §8.6's non-custodial rule is about and which a control builds deliberately.
+     *
+     *   It selects the preimage rather than merely the proof, and it has to. §9.2 check 3's operand
+     *   is the `p` field of the **stored** invoice, so a receipt's proof and its own invoice's `p`
+     *   are one fact: a fixture that varied the proof alone would build a receipt this library
+     *   refuses `PREIMAGE_MISMATCH` before any rule under test was reached.
      */
     fun receipt(payee: Payee, stream: Int = 0, index: Int = ORDER_INDEX): Settlement.Evidenced =
         evidenced(payee, stream, index, throughFeePath = payee == Payee.FEE)
@@ -238,10 +256,20 @@ internal object OrderFixtures {
         Settlement.Evidenced = evidenced(payee, stream, index, throughFeePath = false)
 
     /** One generated preimage from the payment package's pinned run. Never typed. */
-    fun preimage(stream: Int = 0): Preimage = PaymentFixtures.preimages(stream + 1)[stream]
+    fun preimage(index: Int = ORDER_INDEX, stream: Int = 0): Preimage =
+        Preimage.ofHex(preimageHex(index, stream))
 
-    /** `SHA-256(preimage)`, computed by the platform oracle in the payment package's own fixture. */
-    fun paymentHashOf(preimage: Preimage): PaymentHash = PaymentFixtures.paymentHashOf(preimage)
+    /**
+     * `SHA-256` of the preimage `(index, stream)`'s invoices carry in their `p` field, by the other
+     * route: the platform oracle in the payment package's own fixture.
+     *
+     * The value a test compares `Settlement.Evidenced.payment.paymentHash` against to say check 3's
+     * operand came out of the stored invoice. Two independent routes to one number — the composer
+     * wrote `p` from this preimage, this hashes it — which is what makes that equality evidence
+     * rather than a tautology.
+     */
+    fun paymentHashFor(index: Int = ORDER_INDEX, stream: Int = 0): PaymentHash =
+        PaymentFixtures.paymentHashOf(preimage(index, stream))
 
     /** One verified receipt per payee in [payees], each with its own preimage. */
     fun receipts(payees: Set<Payee>, index: Int = ORDER_INDEX): Set<Settlement.Evidenced> =
@@ -279,27 +307,30 @@ internal object OrderFixtures {
      * being built. Tests that need a deadline to fire re-run the events against
      * [machineAfterDeadlines].
      *
-     * ### `paid`, `released` and `settled` carry **free** terms, and why
+     * ### `paid`, `released` and `settled` are on the caller's own [terms] again
      *
-     * The chain up to `awaiting_payment` is built on [terms] as it always was. Past that point it
-     * is not, and cannot be: the human's decision B refuses `paid` while any §9.2 check that
-     * applies is unperformed, and until a BOLT-11 parser exists checks 4 and 5 and check 3's
-     * provenance are unperformed for every receipt this library can produce. So a priced order
-     * cannot be `paid` at all, and the last three states are reached on [freeTerms] — price
-     * [Msat.ZERO], [FeeTerm.Absent], the same two deadlines, no payment requests and no receipts —
-     * which owes no receipt and therefore has no check to be missing.
+     * One chain, one machine, one set of terms, from `proposed` all the way to `settled`. T20 had
+     * to reach the last three states on [freeTerms] instead, because decision B refuses `paid`
+     * while any §9.2 check that applies was performed by nobody and check 3's *provenance* was
+     * performed by nobody: `Settlement.verify` took the payment hash as a parameter. It takes none
+     * now — the operand is the `p` field of the stored invoice — so a priced order's receipts leave
+     * no applicable check unperformed and the gate lets them through. A caller that asks for
+     * `orders(TERMS)[OrderState.PAID]` gets a **fee-bearing** order in `paid` again.
      *
-     * **A caller that reads `orders(TERMS)[OrderState.PAID]` gets an order whose terms are free,
-     * whatever it passed in.** That is deliberate and is the only honest fixture available: the
-     * alternative is a `paid` order the library cannot produce. Tests that need a *fee-bearing*
-     * order past `awaiting_payment` have nothing to assert over and must assert the refusal
-     * instead — see `FeeTermCheckTest`, which says so where it does it.
+     * ### Decision B's gate is still asserted here, from both sides
      *
-     * The refusal is not assumed here, it is **asserted**: a priced [terms] has its real receipt
-     * set offered to the real machine and must come back
-     * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED]. Every suite in this package therefore
-     * re-proves decision B on every run, and a gate deleted or moved turns this fixture red before
-     * it turns any single test red — which is the opposite of a silent fallback to free terms.
+     * The gate is what every fixture past `awaiting_payment` now depends on, so this function
+     * exercises both of its answers rather than only the one it needs:
+     *
+     * - **refused** — the same order offered the same provider receipt beside a fee receipt put
+     *   through plain `Settlement.verify`, which performs no part of check 6, must come back
+     *   [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED] naming exactly [CHECK_SIX_UNPERFORMED].
+     *   Only a fee-bearing [terms] can offer that shape, so the probe is skipped where no fee is
+     *   owed and the `advanced` below carries the whole statement;
+     * - **advanced** — the real receipt set, the fee one through `verifyFeeReceipt`, moves it.
+     *
+     * A gate deleted turns the first red; a gate that refuses everything turns the second red. The
+     * pairing is why neither is written as a comment about the other.
      */
     fun orders(terms: OrderTerms = TERMS, index: Int = ORDER_INDEX): Map<OrderState, Order> {
         val machine = machineBeforeDeadlines()
@@ -319,43 +350,36 @@ internal object OrderFixtures {
         val awaitingPayment =
             advanced(machine, committed, OrderEvent.PaymentRequestsReceived(required))
 
-        // Decision B, re-proved here rather than taken on trust, because everything below depends
-        // on it: if this order *could* reach `paid`, the switch to free terms would be an
-        // unnecessary weakening of every fixture built on this map.
-        val freeChain = if (required.isEmpty()) {
-            // Already free. The chain continues on its own terms and nothing is substituted.
-            FreeChain(machine, awaitingPayment)
-        } else {
-            val refused = refusal(
+        // The refusing half of decision B's gate, on the one incomplete shape this library can
+        // still build. The streams match `receipts` below — provider 0, fee 1 — so the two offers
+        // differ in the fee receipt's *door* and in nothing else.
+        if (Payee.FEE in required) {
+            refusedForChecks(
                 machine,
                 awaitingPayment,
-                OrderEvent.ReceiptsVerified(receipts(required, index)),
+                OrderEvent.ReceiptsVerified(
+                    setOf(
+                        receipt(Payee.PROVIDER, stream = 0, index = index),
+                        receiptThroughVerify(Payee.FEE, stream = 1, index = index),
+                    ),
+                ),
             )
-            assertEquals(
-                TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED,
-                refused.reason,
-                "a priced order whose every required receipt has verified must still be refused " +
-                    "`paid` while a §9.2 check that applies to it was performed by nobody " +
-                    "(decision B). This fixture reaches `paid` on free terms *because* of that " +
-                    "refusal, so a run where the refusal is gone must fail here rather than " +
-                    "quietly keep substituting",
-            )
-            freeChainTo(index, terms)
         }
 
         val paid = advanced(
-            freeChain.machine,
-            freeChain.awaitingPayment,
-            OrderEvent.ReceiptsVerified(emptySet()),
+            machine,
+            awaitingPayment,
+            OrderEvent.ReceiptsVerified(receipts(required, index)),
         )
-        // Only the two amounts were zeroed. A free chain that also substituted the deadlines would
-        // hand a caller asking for `deliverBy = null` an order carrying one, and every test probing
-        // §11.2's own-release timeout would quietly exercise the `deliver_by` branch instead — and
-        // stay green with that timeout deleted. Asserted here so it is re-proved on every run.
+        // Both hold by construction now that nothing is substituted, and both are kept: they are
+        // what would turn red if a later task reintroduced a chain that zeroed the amounts and
+        // carried its own deadlines. A test probing §11.2's own-release timeout on terms with
+        // `deliverBy = null` would otherwise quietly exercise the `deliver_by` branch instead, and
+        // would stay green with that timeout deleted.
         assertEquals(
             terms.deliverBy,
             paid.terms.deliverBy,
-            "the free chain must keep the caller's `deliver_by`, including its absence",
+            "the chain must carry the caller's `deliver_by`, including its absence",
         )
         assertEquals(
             terms.expiration,
@@ -363,12 +387,12 @@ internal object OrderFixtures {
             "and the caller's `expiration`, for the same reason",
         )
         val released = advanced(
-            freeChain.machine,
+            machine,
             paid,
             OrderEvent.DeliverableReleased(matchingRelease(), Party.PROVIDER),
         )
         val settled =
-            advanced(freeChain.machine, released, OrderEvent.DeliveryVerified(evidence()))
+            advanced(machine, released, OrderEvent.DeliveryVerified(evidence()))
 
         val cancelled = advanced(
             machine,
@@ -390,50 +414,6 @@ internal object OrderFixtures {
                 "below is not over eleven states at all",
         )
         return byState
-    }
-
-    /**
-     * A free order sitting at `awaiting_payment`, and the machine that drove it there.
-     *
-     * The machine travels with the order because §11.2's clock-dependent rows are evaluated
-     * against the one injected into it: continuing a chain on a different machine would silently
-     * change which deadlines fire.
-     */
-    private class FreeChain(val machine: OrderMachine, val awaitingPayment: Order)
-
-    /**
-     * `proposed → accepted → committed → awaiting_payment` on `freeTerms(terms)`, at [index]'s
-     * order id.
-     *
-     * **[terms] is threaded through rather than defaulted, and that is load-bearing.** Only the two
-     * *amounts* may be zeroed; the deadlines must stay the caller's. A chain built on
-     * `freeTerms()`'s default would hand every caller an order carrying [DELIVER_BY] — so a test
-     * that asked for terms with `deliverBy = null`, in order to probe §11.2's own-release timeout,
-     * would get a `paid` order with a `deliver_by` after all and would silently exercise the
-     * *other* deadline branch. It would stay green with the release timeout deleted entirely.
-     *
-     * No payment requests, because [Payee.requiredPayees] is empty for free terms and §8.6 refuses
-     * a request from a payee owed nothing — `PaymentRequestsReceived(emptySet())` is the whole of
-     * §11.2's `committed → awaiting_payment` row here.
-     */
-    private fun freeChainTo(index: Int, terms: OrderTerms): FreeChain {
-        val machine = machineBeforeDeadlines()
-        val free = freeTerms(terms)
-        val proposed = machine.open(OrderEvent.Proposal(orderId(index), free))
-        val accepted = advanced(
-            machine,
-            proposed,
-            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, assertedTerms = free),
-        )
-        val committed = advanced(
-            machine,
-            accepted,
-            OrderEvent.DeliveryCommitted(blob.commitment, Party.PROVIDER),
-        )
-        return FreeChain(
-            machine,
-            advanced(machine, committed, OrderEvent.PaymentRequestsReceived(emptySet())),
-        )
     }
 
     /**
@@ -481,13 +461,16 @@ internal object OrderFixtures {
         index: Int,
         throughFeePath: Boolean,
     ): Settlement.Evidenced = evidence.getOrPut("$index/${payee.token}/$stream/$throughFeePath") {
-        val messages = messages(index)
-        val receipt = messages.receipt(payee, stream)
-        val hash = PaymentFixtures.paymentHashOf(preimage(stream))
+        val messages = messages(index, stream)
+        val receipt = messages.receipt(payee)
+        // No payment hash is handed to either door: check 3's operand is the `p` field of the
+        // invoice the store holds under (order, payee). [preimage] and [paymentHashFor] are what a
+        // test uses to reach that same value by the other route — the seeded preimage the composer
+        // wrote `p` from, hashed by the platform oracle — and comparing the two is what says the
+        // operand came out of the invoice rather than out of anybody's hand.
         val settlement = if (throughFeePath) {
             Settlement.verifyFeeReceipt(
                 receipt,
-                hash,
                 messages.store,
                 feeJudgementOrder(index),
                 messages.earlierPoints,
@@ -496,7 +479,7 @@ internal object OrderFixtures {
             // §9.2 check 4's expected amounts, from the same terms the fee-judgement order carries
             // — so a receipt verified through the general entry point is held to exactly what one
             // verified through the fee path is.
-            Settlement.verify(receipt, hash, messages.store, TERMS.split)
+            Settlement.verify(receipt, messages.store, TERMS.split)
         }
         settlement as? Settlement.Evidenced
             ?: fail("a lightning receipt whose preimage hashes must evidence, not yield $settlement")
@@ -532,41 +515,61 @@ internal object OrderFixtures {
 
     private val feeJudgementOrders: MutableMap<Int, Order> = mutableMapOf()
 
-    private val messagesByIndex: MutableMap<Int, Messages> = mutableMapOf()
+    private val messagesByKey: MutableMap<String, Messages> = mutableMapOf()
 
-    private fun messages(index: Int): Messages = messagesByIndex.getOrPut(index) { Messages(index) }
+    private fun messages(index: Int, stream: Int): Messages =
+        messagesByKey.getOrPut("$index/$stream") { Messages(index, stream) }
 
     /**
-     * One real invoice per `(order index, payee)`, derived from a vendored example.
+     * How many preimage streams each order's fixtures are drawn at.
      *
-     * Each carries the amount §9.2 check 4 will demand of it — [PRICE] for the provider and §8.3's
-     * fee on it for the fee recipient — and, in its `p` field, the SHA-256 of a preimage drawn per
-     * position, which is what keeps them distinct. That distinctness is load-bearing twice over:
-     * the provider's invoice and the fee recipient's are §8.6's **two separate invoices**, and no
-     * two orders reuse one. Two receipts deliberately sharing a *payment hash* still name two
-     * different invoices, which is the shape §8.6's non-custodial rule is about — one payment
-     * offered as evidence of two — and that control would prove nothing if check 1 could catch the
-     * set on its own.
-     *
-     * Drawn once and sliced by `(index, payee)`, because deriving an invoice recomputes a bech32
-     * checksum and a SHA-256 and the cross-product asks for the same few thousands of times.
+     * Two, which is what the controls need: one receipt per payee proving a different payment, and
+     * a second draw for the sets that want two receipts for one payee or a fee receipt whose
+     * evidence is not the provider's. Raising it widens [PREIMAGES] and nothing else.
      */
-    private val INVOICES: List<String> by lazy {
-        val positions = (OTHER_ORDER_INDEX + 1) * Payee.entries.size
-        val preimages = PaymentFixtures.preimageHex(positions)
-        List(positions) { position ->
-            SettlementFixtures.invoice(
-                preimages[position],
-                SettlementFixtures.amountFor(Payee.entries[position % Payee.entries.size], TERMS.split),
-            )
-        }
+    const val STREAMS: Int = 2
+
+    /**
+     * One real preimage per `(order index, stream)`, from the payment package's pinned run.
+     *
+     * Keyed by the pair rather than by `(index, payee)`, and that is the whole shape of these
+     * fixtures since §9.2 check 3's operand became the stored invoice's `p` field. **Both** of an
+     * order's invoices at one stream are derived from this one preimage — they differ by their
+     * amount, which is what makes them §8.6's two separate invoices — so a receipt drawn for the
+     * provider at stream *s* and one drawn for the fee recipient at the same *s* prove one payment
+     * twice, and the `RECEIPT_PAYMENT_DUPLICATED` control has a shape to be built from without any
+     * value being typed. Two receipts at different streams prove two payments, which is what an
+     * order that reaches `paid` needs.
+     */
+    private val PREIMAGES: List<String> by lazy {
+        PaymentFixtures.preimageHex((OTHER_ORDER_INDEX + 1) * STREAMS)
     }
 
     /**
-     * One order's §8.4 points and §8.6 messages, at [index] — every one of them decoded by the
-     * codec the library ships, and the two `type=2`s accepted into a store against a fixed clock.
+     * The preimage `(index, stream)`'s invoices carry the SHA-256 of, failing loudly off the end.
+     *
+     * [PREIMAGES] is drawn once and sized for the two order indices and [STREAMS] streams this file
+     * declares; a fixture that ran off it would report a stack trace about an array where the fix
+     * is one constant.
      */
-    private class Messages(val index: Int) {
+    private fun preimageHex(index: Int, stream: Int): String {
+        val position = index * STREAMS + stream
+        if (position !in PREIMAGES.indices) {
+            fail(
+                "no preimage for order index $index at stream $stream: this fixture draws " +
+                    "${PREIMAGES.size} of them, enough for order indices 0..$OTHER_ORDER_INDEX at " +
+                    "streams 0..${STREAMS - 1}. Raise OTHER_ORDER_INDEX or STREAMS",
+            )
+        }
+        return PREIMAGES[position]
+    }
+
+    /**
+     * One order's §8.4 points and §8.6 messages, at [index] and drawn at [stream] — every one of
+     * them decoded by the codec the library ships, and the two `type=2`s accepted into a store
+     * against a fixed clock.
+     */
+    private class Messages(val index: Int, val stream: Int) {
 
         /** §8.1's three-element fee term, carried byte-identically at every point §8.4 names. */
         val feeTag: List<String> = ProposalFixtures.feeTag(index, FEE_BASIS_POINTS)
@@ -598,7 +601,7 @@ internal object OrderFixtures {
                 },
                 SettlementFixtures.requestTags(
                     index = index,
-                    payment = SettlementFixtures.requestPaymentTag(invoice(index, payee)),
+                    payment = SettlementFixtures.requestPaymentTag(invoice(index, payee, stream)),
                     payeeTag = SettlementFixtures.payeeTag(payee, index),
                     // §8.4 marks the tag REQUIRED on the fee request and OPTIONAL on the
                     // provider's, and forbids requiring one there — so the provider's carries none.
@@ -644,16 +647,20 @@ internal object OrderFixtures {
         )
 
         /**
-         * §9.2's `kind:17` for [payee], proving [stream]'s preimage against **this order's own**
-         * invoice for that payee — sealed by the buyer, which §9.2's worked example is.
+         * §9.2's `kind:17` for [payee] — sealed by the buyer, which §9.2's worked example is.
+         *
+         * Its `<proof>` is [stream]'s preimage and its `<reference>` is the invoice that preimage's
+         * hash was written into, so check 1 finds the stored string and check 3 finds a `p` the
+         * proof satisfies. The two are one fact here and cannot be varied apart, which is the shape
+         * the library now enforces.
          */
-        fun receipt(payee: Payee, stream: Int): PaymentReceipt = SettlementFixtures.receiptSealedBy(
+        fun receipt(payee: Payee): PaymentReceipt = SettlementFixtures.receiptSealedBy(
             SettlementFixtures.buyer(index),
             SettlementFixtures.receiptTags(
                 index = index,
                 payment = SettlementFixtures.paymentTag(
-                    invoice(index, payee),
-                    PaymentFixtures.preimageHex(stream + 1)[stream],
+                    invoice(index, payee, stream),
+                    preimageHex(index, stream),
                 ),
                 payeeTag = SettlementFixtures.payeeTag(payee, index),
                 fee = if (payee == Payee.FEE) feeTag else null,
@@ -662,21 +669,28 @@ internal object OrderFixtures {
     }
 
     /**
-     * The BOLT-11 invoice this fixture uses for [payee] on the order at [index].
+     * The BOLT-11 invoice this fixture uses for [payee] on the order at [index], at [stream].
      *
-     * Fails by name rather than by `IndexOutOfBoundsException` when a third order index is asked
-     * for: [INVOICES] is drawn once and sized for the two this file declares, and a fixture that
-     * ran off the end would report a stack trace about an array where the fix is one constant.
+     * A real invoice derived from a vendored example (decision D), carrying the amount §9.2 check 4
+     * will demand of it — [PRICE] for the provider and §8.3's fee on it for the fee recipient — and,
+     * in its `p` field, the SHA-256 of `(index, stream)`'s preimage.
+     *
+     * **The two payees' invoices at one stream share that `p` and differ in their amount.** That is
+     * §8.6's two separate invoices, and it is what makes one payment offered as evidence of two a
+     * constructible shape: a set of those two receipts passes check 1 twice, because each names its
+     * own stored string, and is refused for the payment they have in common. A receipt at a
+     * different stream, or for a different order, proves a different payment.
+     *
+     * Cached, because deriving an invoice recomputes a bech32 checksum and a SHA-256 and the
+     * cross-product asks for the same few thousands of times.
      */
-    fun invoice(index: Int, payee: Payee): String {
-        val position = index * Payee.entries.size + payee.ordinal
-        if (position !in INVOICES.indices) {
-            fail(
-                "no derived invoice for order index $index: this fixture builds ${INVOICES.size} " +
-                    "of them, enough for order indices 0..$OTHER_ORDER_INDEX. Raise " +
-                    "OTHER_ORDER_INDEX or widen the draw",
+    fun invoice(index: Int, payee: Payee, stream: Int = 0): String =
+        invoices.getOrPut("$index/${payee.token}/$stream") {
+            SettlementFixtures.invoice(
+                preimageHex(index, stream),
+                SettlementFixtures.amountFor(payee, TERMS.split),
             )
         }
-        return INVOICES[position]
-    }
+
+    private val invoices: MutableMap<String, String> = mutableMapOf()
 }

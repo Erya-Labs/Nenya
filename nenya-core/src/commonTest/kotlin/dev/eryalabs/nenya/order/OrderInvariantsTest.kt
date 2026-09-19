@@ -49,27 +49,29 @@ class OrderInvariantsTest {
         assertEquals(TransitionRejection.WRONG_STATE_FOR_EVENT, refusal.reason)
         assertEquals(OrderState.PROPOSED, refusal.order.state)
 
-        // ...and that same event is not merely unimplemented: it is **legal** where §11.2 lists it.
-        // Decision B refuses it there for a different reason — the §9.2 checks nobody performs —
-        // and that difference is the assertion. WRONG_STATE_FOR_EVENT at `awaiting_payment` would
-        // mean the edge does not exist, which is what would make the first half vacuous.
-        val reached = OrderFixtures.refusedForChecks(
+        // ...and that same event is not merely unimplemented: it is **legal** where §11.2 lists it,
+        // and traversable there. The same receipts, offered from `awaiting_payment`, move the
+        // order. WRONG_STATE_FOR_EVENT there would mean the edge does not exist, which is what
+        // would make the first half vacuous.
+        val paid = OrderFixtures.advanced(
             machine,
             orders.getValue(OrderState.AWAITING_PAYMENT),
             receipts,
         )
-        assertNotEquals(
-            TransitionRejection.WRONG_STATE_FOR_EVENT,
-            reached.reason,
-            "the receipts event must be legal from `awaiting_payment`: a machine with no " +
-                "`→ paid` edge at all would satisfy the first half of this invariant trivially",
-        )
-
-        // And the edge is not merely legal, it is traversable — on the one order §9.2 leaves
-        // owing no receipt, which is the only one that can reach `paid` until the parser lands.
         assertEquals(
             OrderState.PAID,
-            OrderFixtures.orders(OrderFixtures.freeTerms()).getValue(OrderState.PAID).state,
+            paid.state,
+            "the receipts event must be legal from `awaiting_payment` and must get there: a " +
+                "machine with no `→ paid` edge at all would satisfy the first half of this " +
+                "invariant trivially",
+        )
+
+        // And the order that traversed it owed a receipt. §9.2's non-zero clause leaves a free
+        // order owing none, so `paid` on one of those says nothing about "no path to `paid` that
+        // does not pass through verified evidence" — it is the priced order that says it.
+        assertEquals(
+            setOf(Payee.PROVIDER, Payee.FEE),
+            Payee.requiredPayees(paid.terms.split),
         )
     }
 
@@ -307,45 +309,46 @@ class OrderInvariantsTest {
     // ---------------------------------------------------------------- §17 across the layer
 
     /**
-     * §17's honesty rule, enforced by a **refusal** rather than carried forward on a record.
+     * §17's honesty rule, enforced by a **refusal** rather than carried forward on a record — and
+     * the transition it guards, asserted beside it.
      *
      * Decision B is that §9.2's "MUST perform **all**" means what it says, so an order whose
      * evidence leaves any applicable check unperformed does not move. What is left unperformed has
-     * **shrunk** and the refusal has not: `Settlement.verify` now parses the stored invoice and
-     * performs checks 4 and 5, so the only thing left is check 3's *provenance* — the payment hash
-     * the comparison ran against is still whatever the caller handed in, and a caller that hands in
-     * the SHA-256 of a preimage it chose gets a true comparison about an invoice nobody issued.
+     * shrunk to nothing on the ordinary path: `Settlement.verify` parses the stored invoice for
+     * checks 4 and 5 and takes check 3's payment hash out of that same parse, so the complete
+     * receipt set below **advances**. The gate is therefore asserted on the one incomplete shape
+     * this library can still build — a fee receipt through plain `Settlement.verify`, which
+     * performs no part of check 6 — and the positive half is what says the refusal is a gate rather
+     * than a wall.
      *
-     * **A narrower `missing` set because more was verified, and still a refusal.** That is decision
-     * B working as the human decided rather than a gap: a priced order reaching `paid` on a payment
-     * hash nobody took out of an invoice is exactly what the fail-closed direction is for, and it
-     * is T25 that closes it.
-     *
-     * `INVOICE_IDENTITY`, `INVOICE_AMOUNT` and `INVOICE_EXPIRY` are all absent from the set now:
-     * each is performed on every path into `ReceiptsVerified`, and demanding one again would
-     * deadlock an order over a check that was done.
+     * Both halves are needed and neither is redundant. A gate deleted lets the incomplete set
+     * through; a gate that refuses unconditionally stops the complete one. Only the pair sees both.
      */
-    @JsName("an_order_is_refused_paid_on_evidence_naming_only_the_payment_hash_provenance")
+    @JsName("an_order_is_refused_paid_on_incomplete_evidence_and_advances_on_complete")
     @Test
-    fun `an order is refused paid on evidence that closed every check but the hash's provenance`() {
+    fun `an order is refused paid on incomplete evidence, and advances on complete`() {
+        val awaiting = orders.getValue(OrderState.AWAITING_PAYMENT)
+
         val refused = OrderFixtures.refusedForChecks(
             machine,
-            orders.getValue(OrderState.AWAITING_PAYMENT),
-            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+            awaiting,
+            OrderEvent.ReceiptsVerified(
+                setOf(
+                    OrderFixtures.receipt(Payee.PROVIDER, stream = 0),
+                    OrderFixtures.receiptThroughVerify(Payee.FEE, stream = 1),
+                ),
+            ),
         )
 
-        assertTrue(
-            PaymentCheck.PAYMENT_HASH_PROVENANCE in refused.missing,
-            "check 3's operand is still a parameter every entry point takes, and it must be named " +
-                "as the reason this order did not move: ${refused.missing}",
-        )
         assertEquals(
-            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
+            OrderFixtures.CHECK_SIX_UNPERFORMED,
             refused.missing,
-            "and that one exactly — the only §9.2 obligation no path in this library closes",
+            "exactly check 6's three: the fee receipt took the door that performs none of them, " +
+                "and everything else §9.2 asks of either receipt was performed",
         )
         for (performed in listOf(
             PaymentCheck.INVOICE_IDENTITY,
+            PaymentCheck.PAYMENT_HASH_PROVENANCE,
             PaymentCheck.INVOICE_AMOUNT,
             PaymentCheck.INVOICE_EXPIRY,
         )) {
@@ -358,23 +361,46 @@ class OrderInvariantsTest {
         }
 
         // The order did not move, and recorded nothing: a refusal is not a half-transition.
-        val awaiting = orders.getValue(OrderState.AWAITING_PAYMENT)
         assertEquals(OrderState.AWAITING_PAYMENT, refused.order.state)
         assertEquals(null, refused.order.paidAt)
         assertEquals(emptySet(), refused.order.paymentChecksPerformed)
         assertEquals(emptySet(), refused.order.paymentChecksNotPerformedHere)
         assertSame(awaiting, refused.order, "§11.2: a refusal carries the order **unchanged**")
+
+        // The positive half, on the same order and the same provider receipt: the fee receipt
+        // through `verifyFeeReceipt` closes check 6 and the order moves.
+        val paid = OrderFixtures.advanced(
+            machine,
+            awaiting,
+            OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
+        )
+        assertEquals(OrderState.PAID, paid.state)
+        assertEquals(
+            emptySet(),
+            paid.paymentChecksNotPerformedHere,
+            "and nothing is left over: every §9.2 check that applied to either receipt was " +
+                "performed, which is what makes this order's emptiness different from a free " +
+                "order's — there it means nothing applied",
+        )
+        assertEquals(
+            PaymentCheck.entries.toSet(),
+            paid.paymentChecksPerformed,
+            "the full applicable set for both payees, which over a fee-bearing order is every " +
+                "constant §9.2 is modelled by: checks 1 to 5 for the provider and check 6's three " +
+                "besides for the fee recipient. Written as the enum's own constants rather than " +
+                "as `applicableChecks`, which is the function the gate itself subtracts from",
+        )
     }
 
     /**
-     * The fee side of the same statement, read off the refusal's `missing` set rather than off a
-     * `paid` order's record — the order no longer reaches `paid` to carry one.
+     * The fee side of the same statement: `missing` is computed from **the receipts offered** and
+     * not from a constant.
      *
      * §9.2 check 6 is three obligations. They apply to a fee receipt and to nothing else, and what
      * proves the gate knows that is the **difference between two fee receipts**: one put through
      * `Settlement.verifyFeeReceipt`, which performs all three, and one put through plain
-     * `Settlement.verify`, which performs none. The first is missing only check 3's provenance;
-     * the second is missing that and check 6's three besides.
+     * `Settlement.verify`, which performs none. The first leaves nothing missing at all; the second
+     * leaves exactly those three.
      *
      * ### Why the comparison is what discriminates
      *
@@ -382,28 +408,30 @@ class OrderInvariantsTest {
      * from "hardcoded to a constant", because for that order the two coincide. Three orders
      * separate them, and each pins a different half:
      *
-     * - the `verifyFeeReceipt` order shows check 6 subtracted when it was performed;
+     * - the `verifyFeeReceipt` order shows check 6 subtracted when it was performed — and with
+     *   nothing else outstanding, subtracted all the way to a transition;
      * - the plain-`verify` order shows check 6 **demanded** when it was not — a gate reading the
      *   receipt's own `checksNotPerformedHere` would agree here, which is why the mutation the
      *   queue names pairs this with a record that lies;
      * - the provider-only order shows check 6 absent from `missing` altogether. It was not
      *   performed and it was not skipped either: it does not apply to a provider receipt, and
      *   demanding an inapplicable obligation would deadlock every provider-only order for ever.
+     *   With nothing else outstanding that order reaches `paid`, which is the strongest form of
+     *   "check 6 was not demanded" available.
      */
     @JsName("the_missing_set_is_the_receipts_own_on_a_fee_bearing_and_a_provider_only_order")
     @Test
     fun `the missing set is the receipts' own, asserted exactly on a fee-bearing and a provider-only order`() {
-        val feeBearing = OrderFixtures.refusedForChecks(
+        val feeBearing = OrderFixtures.advanced(
             machine,
             orders.getValue(OrderState.AWAITING_PAYMENT),
             OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         )
         assertEquals(
-            OrderFixtures.CHECKS_NO_PATH_PERFORMS,
-            feeBearing.missing,
-            "both receipts went through the path that performs checks 1, 4 and 5, and the fee " +
-                "receipt through the one that performs check 6's three, so only check 3's " +
-                "provenance remains",
+            OrderState.PAID,
+            feeBearing.state,
+            "both receipts went through the path that performs checks 1, 3, 4 and 5, and the fee " +
+                "receipt through the one that performs check 6's three, so nothing remains",
         )
 
         val throughBareVerify = OrderFixtures.refusedForChecks(
@@ -415,7 +443,7 @@ class OrderInvariantsTest {
                     OrderFixtures.receiptThroughVerify(Payee.FEE, 1),
                 ),
             ),
-            missing = OrderFixtures.CHECKS_NO_PATH_PERFORMS + Settlement.CHECK_SIX,
+            missing = Settlement.CHECK_SIX,
         )
         assertTrue(
             Settlement.CHECK_SIX.all { it in throughBareVerify.missing },
@@ -423,22 +451,25 @@ class OrderInvariantsTest {
                 "gate must demand it rather than merely record it: ${throughBareVerify.missing}",
         )
 
-        val providerOnly = OrderFixtures.refusedForChecks(
+        val providerOnly = OrderFixtures.advanced(
             OrderFixtures.machineBeforeDeadlines(),
             OrderFixtures.orders(OrderFixtures.zeroFeeTerms)
                 .getValue(OrderState.AWAITING_PAYMENT),
             OrderEvent.ReceiptsVerified(setOf(OrderFixtures.receipt(Payee.PROVIDER))),
         )
         assertEquals(
-            OrderFixtures.CHECKS_NO_PATH_PERFORMS,
-            providerOnly.missing,
-            "and a provider-only order is missing the same one and no more",
+            OrderState.PAID,
+            providerOnly.state,
+            "and a provider-only order is missing nothing: check 6 does not apply to it. Demanding " +
+                "an inapplicable obligation would deadlock every such order, which is §8.3's " +
+                "failure mode with a different cause",
         )
         for (check in Settlement.CHECK_SIX) {
             assertFalse(
-                check in providerOnly.missing,
-                "$check does not apply to a provider receipt. Demanding it would deadlock every " +
-                    "provider-only order, which is §8.3's failure mode with a different cause",
+                check in providerOnly.paymentChecksPerformed,
+                "$check does not apply to a provider receipt, so it must not be *claimed* either " +
+                    "— an order that reached `paid` by recording work nobody did is §17's " +
+                    "over-claim arriving one layer up",
             )
         }
     }
@@ -489,14 +520,17 @@ class OrderInvariantsTest {
     }
 
     /**
-     * The delivery record travels through `released` and into `settled`: §17 does not lapse on
-     * success.
+     * Both records travel through `released` and into `settled`: §17 does not lapse on success.
      *
-     * The payment half of this test is gone, and its absence is the point. It used to assert that
-     * `INVOICE_AMOUNT` was still named on a `settled` order, which was true because a priced order
-     * reached `paid` without it. Decision B means no such order exists, so the statement has become
-     * the invariant below instead. §10's obligations are untouched by that decision and are still
-     * carried forward exactly as before.
+     * The payment half is back and says the opposite of what it used to. It once asserted that
+     * `INVOICE_AMOUNT` was still *named as unperformed* on a `settled` order, because a priced
+     * order reached `paid` without it; T20 removed it when no priced order could reach `paid` at
+     * all. What holds now is the stronger statement — a `settled` priced order carries the whole of
+     * §9.2 as **performed**, and carries it two transitions past the gate that demanded it.
+     *
+     * The delivery half is deliberately the other shape, and the pairing is why they are one test:
+     * §10's obligations are genuinely *not* all performed here, so a record that had quietly become
+     * "everything is fine everywhere" fails on the line below rather than passing both.
      */
     @JsName("the_delivery_record_survives_into_settled")
     @Test
@@ -509,6 +543,13 @@ class OrderInvariantsTest {
                 "library performs no encryption at all",
         )
         assertTrue(settled.deliveryChecksPerformed.isNotEmpty())
+
+        assertEquals(
+            PaymentCheck.entries.toSet(),
+            settled.paymentChecksPerformed,
+            "and the payment record survives two transitions past the gate intact, for both payees",
+        )
+        assertEquals(emptySet(), settled.paymentChecksNotPerformedHere)
     }
 
     /**
@@ -520,21 +561,26 @@ class OrderInvariantsTest {
      * its receipts did and did not perform, so an order past that gate has nothing to put in this
      * set. `released` and `settled` are downstream of `paid` and inherit it.
      *
-     * **Empty here does not mean six checks ran.** The orders that reach `paid` today are the ones
-     * that owed no receipt at all, so no check applied to them — `paymentChecksPerformed` is empty
-     * too, and that is the flag telling the two apart. What the invariant forbids is the third
-     * shape: an order claiming `paid` while naming a check nobody performed.
+     * **Empty here still does not mean six checks ran, and the sweep covers both reasons.** A free
+     * order reaches `paid` owing no receipt, so no check applied to it and `paymentChecksPerformed`
+     * is empty too; a priced one reaches `paid` because every check that applied was performed, and
+     * that set is full. The performed set is the flag telling the two apart, and both shapes are
+     * walked below. What the invariant forbids is the third: an order claiming `paid` while naming
+     * a check nobody performed.
      *
      * Non-vacuity is asserted rather than assumed: the sweep must have inspected each of the three
-     * states at least once, over more than one terms shape. A cross-product that stopped producing
-     * `paid` orders would otherwise pass this trivially — which is exactly the failure mode decision
-     * B introduces, since refusing `paid` everywhere would also satisfy it.
+     * states at least once, over more than one terms shape, **and** must have seen at least one
+     * order past the gate whose performed set is non-empty. A cross-product that stopped producing
+     * priced `paid` orders would otherwise pass this trivially — which is exactly the failure mode
+     * decision B introduces, since refusing `paid` for everything but a free order would also
+     * satisfy it.
      */
     @JsName("every_order_at_paid_or_later_carries_an_empty_not_performed_record")
     @Test
     fun `every order at paid or later carries an empty not-performed record`() {
         val pastTheGate = listOf(OrderState.PAID, OrderState.RELEASED, OrderState.SETTLED)
         val inspected = mutableMapOf<OrderState, Int>()
+        var withEvidence = 0
 
         for (terms in listOf(
             OrderFixtures.TERMS,
@@ -550,6 +596,7 @@ class OrderInvariantsTest {
                     "an order in $state names a §9.2 check nobody performed. Decision B says such " +
                         "an order cannot exist: the gate refuses it at `awaiting_payment → paid`",
                 )
+                if (order.paymentChecksPerformed.isNotEmpty()) withEvidence++
                 inspected[state] = (inspected[state] ?: 0) + 1
             }
         }
@@ -562,6 +609,11 @@ class OrderInvariantsTest {
             )
         }
         assertEquals(pastTheGate.size, inspected.size, "each of the three states, and no others")
+        assertTrue(
+            withEvidence > 0,
+            "every order past the gate owed no receipt, so this invariant saw only the empty-set " +
+                "case. Emptiness that nothing had to be subtracted to reach is not the invariant",
+        )
     }
 
     /** An order before `paid` claims nothing at all, rather than claiming an empty success. */

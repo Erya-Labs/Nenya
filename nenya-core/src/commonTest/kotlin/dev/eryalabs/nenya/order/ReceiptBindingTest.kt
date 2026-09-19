@@ -50,15 +50,22 @@ class ReceiptBindingTest {
         )
 
         /**
-         * The one §9.2 obligation no path here closes: check 3's provenance.
+         * §9.2 checks 1 to 5, which apply to **every** receipt whatever its payee.
          *
-         * Checks 4 and 5 stood beside it until `Settlement.verify` began parsing the stored
-         * invoice for its amount and its expiry. The provenance did not move with them, and the
-         * distinction is the whole point of it being a constant of its own: this path opens the
-         * invoice to read the human-readable part's amount, and the payment hash the comparison
-         * runs against is still whatever the caller handed in.
+         * All five are performed on both settlement doors now: check 1's byte comparison against
+         * the store, checks 4 and 5 against the stored invoice's amount and expiry, and — since
+         * `Settlement.verify` stopped taking a payment hash — check 3's operand out of that same
+         * invoice's `p` field, which is what closed `PAYMENT_HASH_PROVENANCE`. So this is the set
+         * a provider receipt must report performed, and `missing` must never name any of it.
          */
-        val NEEDS_THE_PARSER: Set<PaymentCheck> = setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE)
+        val CHECKS_ONE_TO_FIVE: Set<PaymentCheck> = setOf(
+            PaymentCheck.PREIMAGE_SHAPE,
+            PaymentCheck.PREIMAGE_HASH_COMPARISON,
+            PaymentCheck.INVOICE_IDENTITY,
+            PaymentCheck.PAYMENT_HASH_PROVENANCE,
+            PaymentCheck.INVOICE_AMOUNT,
+            PaymentCheck.INVOICE_EXPIRY,
+        )
     }
 
     private val machine = OrderFixtures.machineBeforeDeadlines()
@@ -66,17 +73,17 @@ class ReceiptBindingTest {
     // ---------------------------------------------------------------- what the order now claims
 
     /**
-     * The headline, read off decision B's refusal rather than off a `paid` order: a fee-bearing
-     * order fed the two receipts §9.2 requires is missing **neither** check 1 nor check 6, because
-     * on the path those receipts took both were performed.
+     * The headline, read off a `paid` order again: a fee-bearing order fed the two receipts §9.2
+     * requires reaches `paid`, and its record names every check both receipts' paths performed.
      *
-     * Asserted as an exact equality. A membership assertion would be satisfied by a gate that also
-     * demanded a check that had in fact been performed — the mirror of §17's over-claim, and the
-     * shape that deadlocks an order for ever over work somebody already did.
+     * Asserted as an exact equality on the record. A membership assertion would be satisfied by an
+     * order that also *claimed* a check nobody performed — §17's over-claim — and the transition
+     * itself is what says the gate did not demand one that was done, which is the mirror failure
+     * that deadlocks an order for ever over work somebody already did.
      */
-    @JsName("a_fee_bearing_order_is_missing_neither_check_1_nor_check_6")
+    @JsName("a_fee_bearing_order_reaches_paid_claiming_check_1_and_check_6")
     @Test
-    fun `a fee-bearing order is refused paid missing neither check 1 nor check 6`() {
+    fun `a fee-bearing order reaches paid claiming check 1 and check 6`() {
         val awaiting = OrderFixtures.orders().getValue(OrderState.AWAITING_PAYMENT)
         assertEquals(
             setOf(Payee.PROVIDER, Payee.FEE),
@@ -84,27 +91,28 @@ class ReceiptBindingTest {
             "this order must owe a fee, or check 6 never applies and the test is about nothing",
         )
 
-        val refused = OrderFixtures.refusedForChecks(
+        val paid = OrderFixtures.advanced(
             machine,
             awaiting,
             OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         )
 
-        assertFalse(
-            PaymentCheck.INVOICE_IDENTITY in refused.missing,
-            "§9.2 check 1 was performed against the stored `type=2` for both receipts, so the " +
-                "gate must not demand it: ${refused.missing}",
+        assertEquals(OrderState.PAID, paid.state)
+        assertTrue(
+            PaymentCheck.INVOICE_IDENTITY in paid.paymentChecksPerformed,
+            "§9.2 check 1 was performed against the stored `type=2` for both receipts",
         )
         assertTrue(
-            CHECK_SIX.none { it in refused.missing },
-            "and check 6's three were performed for the fee receipt: ${refused.missing}",
+            CHECK_SIX.all { it in paid.paymentChecksPerformed },
+            "and check 6's three were performed for the fee receipt: ${paid.paymentChecksPerformed}",
         )
         assertEquals(
-            NEEDS_THE_PARSER,
-            refused.missing,
-            "what is left is exactly check 3's provenance — checks 4 and 5 are performed on this " +
-                "path now, and a narrower `missing` because more was verified is still a refusal",
+            CHECKS_ONE_TO_FIVE + CHECK_SIX,
+            paid.paymentChecksPerformed,
+            "exactly §9.2's nine obligations over the two payees, and nothing invented: the " +
+                "provider's five and the fee recipient's five plus check 6's three",
         )
+        assertEquals(emptySet(), paid.paymentChecksNotPerformedHere)
     }
 
     /**
@@ -133,7 +141,7 @@ class ReceiptBindingTest {
             OrderEvent.ReceiptsVerified(
                 setOf(OrderFixtures.receipt(Payee.PROVIDER, stream = 0), throughVerify),
             ),
-            missing = NEEDS_THE_PARSER + CHECK_SIX,
+            missing = CHECK_SIX,
         )
 
         assertTrue(
@@ -141,10 +149,13 @@ class ReceiptBindingTest {
             "a caller that used the general entry point got no part of check 6, and the gate must " +
                 "refuse on it rather than record it: ${refused.missing}",
         )
-        assertFalse(
-            PaymentCheck.INVOICE_IDENTITY in refused.missing,
-            "check 1 is on both paths, so it is still performed here and still not demanded",
-        )
+        for (check in CHECKS_ONE_TO_FIVE) {
+            assertFalse(
+                check in refused.missing,
+                "$check is performed on both doors, so it is still performed here and still not " +
+                    "demanded — the difference between the two paths is check 6 and only check 6",
+            )
+        }
     }
 
     // ---------------------------------------------------------------- the binding to this order
@@ -178,19 +189,19 @@ class ReceiptBindingTest {
             "a refusal leaves the order exactly where it was",
         )
 
-        // ...and the same evidence is not merely unusable: its own order gets past this rule.
-        // Decision B then holds it for the checks nobody performed, which is a different refusal
-        // and the one that proves the id comparison was satisfied rather than merely reached.
-        val own = OrderFixtures.refusedForChecks(
+        // ...and the same evidence is not merely unusable: its own order accepts it and advances.
+        // A transition that refused everything would satisfy the first half of this test, and this
+        // is what separates the two.
+        val own = OrderFixtures.advanced(
             machine,
             theirs,
             OrderEvent.ReceiptsVerified(theirReceipts),
         )
-        assertNotEquals(
-            TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER,
-            own.reason,
-            "these receipts name *this* order. A transition that refused everything would " +
-                "satisfy the first half of this test, and this is what separates the two",
+        assertEquals(
+            OrderState.PAID,
+            own.state,
+            "these receipts name *this* order, so the id comparison is satisfied rather than " +
+                "merely reached — and nothing downstream of it holds them either",
         )
     }
 
