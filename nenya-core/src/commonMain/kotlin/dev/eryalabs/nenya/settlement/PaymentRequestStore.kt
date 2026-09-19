@@ -69,10 +69,17 @@ public sealed interface AcceptedPaymentRequest {
      * A `Long` and not a nullable one: the absence is refused at [accept] rather than represented
      * here, so a stored record always carries the value check 5 needs.
      *
-     * Nothing in this library reads it yet. Check 5 needs it **and** a BOLT-11 parser for the
-     * invoice's own `timestamp` and `x` fields, which this library does not have — so
-     * `PaymentCheck.INVOICE_EXPIRY` stays in the not-performed set, and this field is the half of
-     * it §17 item 6 could be held to today.
+     * This is §9.2 check 5's **only** operand, and [Settlement.verify] reads it: the check is
+     * `expiry >= acceptedAt − timestamp` over the invoice this record holds, parsed through
+     * `Bolt11Invoice.parse`. The clock is deliberately not re-read at verification — §9.2 says an
+     * invoice that was live when the buyer paid it does not become unpaid because it has since
+     * expired — so a record that kept the invoice and threw this value away could never make the
+     * comparison at all, which is why [accept] refuses rather than storing a `null`.
+     *
+     * `PaymentCheck.INVOICE_EXPIRY` stays in `Capabilities.PAYMENT_CHECKS_NOT_PERFORMED` all the
+     * same, for the reason `PaymentCheck.INVOICE_IDENTITY` does: that set is a claim about a bare
+     * `VerifiedPayment.verify`, which holds no store and parses no invoice. What the store path
+     * did is on its own result's `checksPerformed`.
      */
     public val acceptedAt: Long
 

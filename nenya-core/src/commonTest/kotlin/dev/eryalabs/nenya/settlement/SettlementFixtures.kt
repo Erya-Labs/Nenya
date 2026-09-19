@@ -19,19 +19,23 @@ import kotlin.test.fail
 /**
  * The generator behind every §8.6 and §9.2 fixture in this package.
  *
- * ### These strings are **not** invoices, and nothing here may ever treat them as ones
+ * ### Every invoice here is a **real** one, derived from a vendored example
  *
- * [invoices] produces strings that are BOLT-11-*shaped*: an `ln` + network human-readable part, an
- * optional Appendix C amount, the `1` separator, and a data part drawn from the bech32 alphabet and
- * long enough to hold Appendix C's timestamp and signature. **Their bech32 checksums are wrong,
- * their tagged fields are noise, and no payment hash, amount or expiry can be read out of any of
- * them.** That is deliberate and sufficient: §9.2 check 1 is a byte comparison over an opaque
- * string, which is the only thing this package does with one.
+ * [invoice] takes the vendored BOLT-11 example [BASE] — read through [Bolt11Examples], which is
+ * externally authored and whose SHA-256 `PROVENANCE.md` records — and changes exactly three things:
+ * the human-readable part's amount, the 35-bit timestamp, and the 256 bits of the `p` field. The
+ * bech32 checksum is then **recomputed** by [Bolt11Composer], which `Bolt11ComposerTest` proves
+ * rebuilds every vendored example character for character. So the result parses, its amount is the
+ * one the fixture asked for, its payment hash is the SHA-256 of the fixture's own preimage, and its
+ * expiry is measured against [ACCEPTED_AT].
  *
- * So: no test in this package may assert anything about the *contents* of a generated invoice, and
- * no later reader may take one of these as a parser fixture. A fixture that looks like an invoice is
- * exactly how somebody talks themselves into parsing one — and the BOLT-11 parser is a human
- * decision precisely because it needs externally-authored vectors this repository does not have.
+ * That is decision D, and it replaced something weaker. T15's generator produced strings that were
+ * BOLT-11-*shaped* and nothing more — wrong checksums, noise for tagged fields, no readable amount
+ * or expiry — which was sufficient while §9.2 check 1 was a byte comparison over an opaque string
+ * and became insufficient the moment checks 4 and 5 read the stored invoice. It is gone rather than
+ * kept for the tests that did not need more: an invoice-shaped string is exactly how somebody talks
+ * themselves into parsing one, and `InvoiceLiteralSweepTest` now fails the build if any string
+ * literal anywhere under either test source root looks like a BOLT-11 invoice.
  *
  * ### Nothing else here is typed either
  *
@@ -86,11 +90,17 @@ internal object SettlementFixtures {
     /** §7.5's example fee: `250` basis points, which is 2.5%. */
     const val BASIS_POINTS: Int = 250
 
-    /** Appendix C's network prefixes, in the order the appendix lists them. */
-    private val NETWORKS: List<String> = listOf("bc", "tb", "bcrt")
+    /**
+     * How long before [ACCEPTED_AT] a derived invoice is stamped.
+     *
+     * Fixed, non-round and small, so that §9.2 check 5 passes on every default fixture with room to
+     * spare: `timestamp + expiry` lands [INVOICE_EXPIRY_SECONDS] − this many seconds *after* the
+     * acceptance reading. A check-5 control that wants the boundary states its own clock.
+     */
+    const val INVOICE_AGE_SECONDS: Long = 137L
 
-    /** Appendix C's four amount multipliers, plus the no-multiplier whole-BTC form. */
-    private val MULTIPLIERS: List<String> = listOf("m", "u", "n", "p", "")
+    /** The `x` every derived invoice carries. Appendix C's own default, stated rather than omitted. */
+    const val INVOICE_EXPIRY_SECONDS: Long = 3_600L
 
     /** Keeps the generated provider, fee recipient and buyer distinct at every index. */
     private const val PROVIDER_OFFSET: Int = 1
@@ -99,8 +109,16 @@ internal object SettlementFixtures {
     /** Tag names §5.3 does not name and §8.6 does not read, so §4.3's unknown-tag rule applies. */
     private val UNKNOWN_NAMES: List<String> = listOf("client", "zap", "relays", "x-nenya-experiment")
 
-    /** How much longer than Appendix C's floor a generated data part may run. */
-    private const val EXTRA_DATA_CHARACTERS: Int = 60
+    /** Appendix C's `x` tagged field, whose absence means its default of 3600. */
+    private const val EXPIRY_FIELD: Char = 'x'
+
+    /** Appendix C's `p`, the field every derivation here replaces. */
+    private const val PAYMENT_HASH_FIELD: Char = 'p'
+
+    /** Appendix C's `s`, `d` and `h` — required to be there, and never touched. */
+    private const val PAYMENT_SECRET_FIELD: Char = 's'
+    private const val DESCRIPTION_FIELD: Char = 'd'
+    private const val DESCRIPTION_HASH_FIELD: Char = 'h'
 
     /** A real BIP-340 public key, in §4.3's canonical lowercase. */
     fun pubkey(index: Int): String {
@@ -118,28 +136,128 @@ internal object SettlementFixtures {
     fun orderHex(index: Int): String = ChannelFixtures.orderHexFor(index)
 
     /**
-     * [count] distinct BOLT-11-**shaped** strings from one seeded run.
+     * The vendored example every invoice in this package is derived from.
      *
-     * See this object's header: these are not invoices and carry no valid checksum.
+     * Chosen by **what it carries** rather than by position, and then held to it: the first
+     * all-lowercase valid example whose tagged fields are exactly one correct-length `p`, exactly
+     * one `s`, and exactly one of `d` and `h`. Those three conditions are what the derivations
+     * below need — [Bolt11Parts.withPaymentHash] replaces the *first* `p` whatever its length, so a
+     * base like the vendored "fields which must be ignored" example would have it write into a
+     * wrong-length field and leave the real payment hash alone. Picking by index would have made
+     * that a silent property of which example happened to come first.
+     *
+     * Failing loudly rather than falling back is deliberate: a base that stopped satisfying these
+     * conditions would produce invoices that still parse and no longer say what the fixture meant.
      */
-    fun invoices(count: Int): List<String> {
-        val random = JdkRandom(SEED)
-        return List(count) { invoice(random) }
+    private val BASE: Bolt11Parts by lazy {
+        Bolt11Examples.extract()
+            .filter { it.group == Bolt11Examples.Group.VALID && it.invoice == it.invoice.lowercase() }
+            .map { Bolt11Composer.decompose(it.invoice) }
+            .firstOrNull { parts ->
+                parts.fields(PAYMENT_HASH_FIELD).singleOrNull()?.dataLength == Bolt11Composer.HASH_GROUPS &&
+                    parts.fields(PAYMENT_SECRET_FIELD).size == 1 &&
+                    parts.fields(DESCRIPTION_FIELD).size + parts.fields(DESCRIPTION_HASH_FIELD).size == 1
+            }
+            ?: fail(
+                "no all-lowercase valid example in ${Bolt11Examples.PATH} carries exactly one " +
+                    "correct-length `$PAYMENT_HASH_FIELD`, one `$PAYMENT_SECRET_FIELD` and one of " +
+                    "`$DESCRIPTION_FIELD`/`$DESCRIPTION_HASH_FIELD`, so there is no base a " +
+                    "derivation here can safely replace a payment hash in",
+            )
     }
 
-    private fun invoice(random: JdkRandom): String {
-        val network = NETWORKS[random.nextInt(NETWORKS.size)]
-        val amount = if (random.nextBoolean()) {
-            ""
-        } else {
-            "${1 + random.nextInt(99_999)}${MULTIPLIERS[random.nextInt(MULTIPLIERS.size)]}"
+    /**
+     * §8.6's `<bolt11>` for one fixture: a real invoice, derived from [BASE] (decision D).
+     *
+     * @param preimageHex the preimage the matching receipt will carry. Its SHA-256 becomes the
+     *   invoice's `p` field, so the stored invoice and the receipt agree about which payment
+     *   settles it. Nothing in the library reads that field yet — §9.2 check 3's operand is still
+     *   a parameter — and setting it anyway is what keeps these fixtures honest ahead of the task
+     *   that closes the provenance.
+     * @param amount what this payee is owed, or `null` for BOLT-11's "any amount" form, which §9.2
+     *   check 4 refuses. There is no third case: an amount of zero is not expressible in BOLT-11.
+     * @param timestamp Appendix C's 35-bit timestamp. Defaults to [INVOICE_AGE_SECONDS] before
+     *   [ACCEPTED_AT], so check 5 passes with room to spare on every fixture that does not state
+     *   otherwise.
+     * @param expirySeconds the `x` field, or `null` to carry none at all — which is a real case
+     *   and not an omission: Appendix C then reads the expiry as its default of 3600.
+     */
+    fun invoice(
+        preimageHex: String,
+        amount: Msat?,
+        timestamp: Long = ACCEPTED_AT - INVOICE_AGE_SECONDS,
+        expirySeconds: Long? = INVOICE_EXPIRY_SECONDS,
+    ): String = invoiceWithExpiryGroups(
+        preimageHex,
+        amount,
+        timestamp,
+        expirySeconds?.let { expiryGroups(it) },
+    )
+
+    /**
+     * The same, with the `x` field's five-bit groups given directly — or `null` for no `x` at all.
+     *
+     * For the two controls that live above what [invoice] can write: an expiry of `2^63`, the first
+     * value a signed `Long` cannot hold, and one of `2^64 − 1`, the largest Appendix C admits. Both
+     * need a thirteen-group field, and both are about what T22's **saturation** does with one, so
+     * the fixture has to be able to say "these groups" rather than "this number".
+     */
+    fun invoiceWithExpiryGroups(
+        preimageHex: String,
+        amount: Msat?,
+        timestamp: Long = ACCEPTED_AT - INVOICE_AGE_SECONDS,
+        groups: List<Int>?,
+    ): String {
+        val written = if (amount == null) "" else Bolt11Composer.writtenAmount(amount.millisatoshis)
+        val hashed = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimageHex)).bytes()
+        val base = BASE
+            .withAmount(written)
+            .withTimestamp(timestamp)
+            .withPaymentHash(hashed)
+            .withoutField(EXPIRY_FIELD)
+        return Bolt11Composer.compose(
+            if (groups == null) base else base.plusField(EXPIRY_FIELD, groups),
+        )
+    }
+
+    /**
+     * [seconds] as the fewest five-bit groups that hold it.
+     *
+     * Appendix C fixes no width for an `x`, and the vendored examples write each one in the
+     * narrowest field that fits, so this does too — a fixture padded to a constant width would be a
+     * shape no real issuer emits and would quietly stop exercising the parser's leading-zero skip.
+     *
+     * Bounded at twelve groups, which is 60 bits: past that the value needs a thirteenth group and
+     * [Bolt11Composer.groupsOfNumber] is not the tool. The two controls that live up there — an `x`
+     * of 2^63 and one of 2^64 − 1 — are built group by group in the test that needs them, beside
+     * the assertion about what they mean.
+     */
+    private fun expiryGroups(seconds: Long): List<Int> {
+        var size = 1
+        while (size < MAX_EXPIRY_GROUPS && seconds >= (1L shl (BITS_PER_GROUP * size))) size++
+        if (seconds >= (1L shl (BITS_PER_GROUP * MAX_EXPIRY_GROUPS))) {
+            fail("an `$EXPIRY_FIELD` of $seconds needs more than $MAX_EXPIRY_GROUPS groups; build it directly")
         }
-        val length = Bolt11Reference.MIN_DATA_CHARACTERS + random.nextInt(EXTRA_DATA_CHARACTERS)
-        val data = StringBuilder(length)
-        repeat(length) {
-            data.append(Bolt11Reference.BECH32_ALPHABET[random.nextInt(Bolt11Reference.BECH32_ALPHABET.length)])
-        }
-        return "ln$network${amount}1$data"
+        return Bolt11Composer.groupsOfNumber(seconds, size)
+    }
+
+    /** A bech32 group is five bits. */
+    private const val BITS_PER_GROUP: Int = 5
+
+    /** The widest field [Bolt11Composer.groupsOfNumber] writes, which is 60 bits. */
+    private const val MAX_EXPIRY_GROUPS: Int = 12
+
+    /**
+     * §9.2 check 4's expected amount for [payee] under [split] — `price_msat` or §8.3's `fee_msat`.
+     *
+     * The fixtures' own copy of the rule `Settlement` applies, and it is a duplicate on purpose: a
+     * fixture that read the expected amount through the library's own helper would build an invoice
+     * for whatever that helper said, and check 4 would then compare a value against itself. Two
+     * independent readings of §9.2's one sentence is what makes the comparison mean anything.
+     */
+    fun amountFor(payee: Payee, split: FeeSplit): Msat = when (payee) {
+        Payee.PROVIDER -> split.price
+        Payee.FEE -> split.fee
     }
 
     /** §8.3's split for an order at [priceMsat] under [basisPoints], or an absent fee term. */
@@ -162,11 +280,7 @@ internal object SettlementFixtures {
     fun requestTags(
         index: Int = 0,
         order: String? = orderHex(index),
-        payment: List<String>? = listOf(
-            SettlementVocabulary.PAYMENT,
-            PaymentMedium.LIGHTNING.token!!,
-            invoices(1).single(),
-        ),
+        payment: List<String>? = requestPaymentTag(defaultInvoice()),
         payeeTag: List<String>? = SettlementFixtures.payeeTag(Payee.PROVIDER, index),
         version: String? = VERSION,
         type: String? = PAYMENT_REQUEST_TYPE,
@@ -211,6 +325,20 @@ internal object SettlementFixtures {
     /** §8.6's `["payment", "<medium>", "<reference>"]` — a request carries no proof. */
     fun requestPaymentTag(reference: String, medium: String = PaymentMedium.LIGHTNING.token!!):
         List<String> = listOf(SettlementVocabulary.PAYMENT, medium, reference)
+
+    /**
+     * The invoice [requestTags] and [receiptTags] use when a caller names none: a provider invoice
+     * for [split]'s price, against the first preimage [PaymentFixtures] draws.
+     *
+     * A single value rather than a fresh derivation per call, because a great many controls build
+     * two requests and compare them, and a default that differed between two calls would make
+     * "these name the same invoice" accidentally false.
+     */
+    fun defaultInvoice(): String = DEFAULT_INVOICE
+
+    private val DEFAULT_INVOICE: String by lazy {
+        invoice(PaymentFixtures.preimageHex(1).single(), amountFor(Payee.PROVIDER, split()))
+    }
 
     /** The buyer at [index] — the key `bound` attributes a rumor to unless told otherwise. */
     fun buyer(index: Int = 0): String = pubkey(index)
@@ -303,7 +431,10 @@ internal object SettlementFixtures {
     private fun pair(random: JdkRandom, index: Int, preimageHex: String): Fixture {
         // Both roles, alternating rather than drawn, so the corpus cannot end up with none of one.
         val payee = if (index % 2 == 0) Payee.PROVIDER else Payee.FEE
-        val invoice = invoice(random)
+        // §9.2 check 4 now reads this amount, so it is the one this payee is owed under the default
+        // split — and the invoices stay distinct across the corpus because each carries the
+        // SHA-256 of its own preimage in its `p` field.
+        val invoice = invoice(preimageHex, amountFor(payee, split()))
         val order = orderHex(index)
         val payeeTag = payeeTag(payee, index)
         val request = requestTags(

@@ -390,6 +390,7 @@ public object Capabilities {
                 "dev.eryalabs.nenya.order.OrderMachine",
                 "dev.eryalabs.nenya.settlement.PaymentRequestStore",
                 "dev.eryalabs.nenya.settlement.Settlement",
+                "dev.eryalabs.nenya.settlement.Bolt11Invoice",
             ),
             notPerformed = setOf(
                 PaymentCheck.INVOICE_IDENTITY,
@@ -424,7 +425,19 @@ public object Capabilities {
                 "comparison about an invoice nobody issued. While the two obligations shared one " +
                 "constant the store path subtracted both, and the record said the provenance was " +
                 "closed on the strength of the byte comparison; splitting them is what lets a " +
-                "refusal read this record without inheriting that over-claim. The settlement " +
+                "refusal read this record without inheriting that over-claim. INVOICE_AMOUNT and " +
+                "INVOICE_EXPIRY are in this set on the same footing as INVOICE_IDENTITY and no " +
+                "longer for want of a parser: Settlement.verify parses the STORED invoice through " +
+                "Bolt11Invoice.parse and performs both of §9.2's checks 4 and 5 — the amount " +
+                "against `price_msat` for a provider receipt and §8.3's `fee_msat` for a fee one, " +
+                "in either direction and with an any-amount invoice rejected outright; and " +
+                "`timestamp + expiry` against the clock reading persisted at acceptance, never " +
+                "against the clock at verification, because §9.2 says an invoice that was live " +
+                "when the buyer paid it does not become unpaid because it has since expired. What " +
+                "keeps all three in this set is the same thing that keeps INVOICE_IDENTITY here: " +
+                "these are claims about a bare VerifiedPayment.verify, which holds no store, " +
+                "parses no invoice and compares nothing, and the machine-readable record of what " +
+                "the store path did is that result's own checksPerformed. The settlement " +
                 "result is now what OrderMachine consumes: `awaiting_payment → paid` takes a " +
                 "Settlement.Evidenced per required payee and a bare VerifiedPayment is not " +
                 "expressible there, so no order reaches `paid` on evidence that performed no " +
@@ -434,11 +447,16 @@ public object Capabilities {
                 "verifyFeeReceipt, check 6's three — as performed, because on that path they were. " +
                 "This item is the one that governs reaching `paid`, and it stays PARTIAL for what " +
                 "is below: a caller that wants the machine-readable record of what the store path " +
-                "did reads Settlement.checksPerformed, which composes check 1 with " +
-                "T3's two rather than redefining VerifiedPayment's global claim. Checks 4 and 5 " +
-                "remain absent for want of a BOLT-11 parser, and so does check 3's provenance: a " +
-                "provider who sends a receipt for ten times `price_msat` is caught by check 4 and " +
-                "by nothing here. What the order does about that has changed. It used to carry the " +
+                "did reads Settlement.checksPerformed, which composes checks 1, 4 and 5 with " +
+                "T3's two rather than redefining VerifiedPayment's global claim. What remains " +
+                "genuinely unperformed by every path here is check 3's PROVENANCE, and it alone. " +
+                "A provider who sends a receipt for ten times `price_msat` IS now caught, by " +
+                "check 4; what is not established is that the payment hash check 3 compared " +
+                "against came out of the stored invoice's `p` field rather than out of the " +
+                "caller's hand. Parsing the invoice for its amount says nothing about that, and a " +
+                "path that subtracted the provenance because it had opened the invoice for a " +
+                "different field would be the same over-claim reached by a new route. What the " +
+                "order does about that has changed. It used to carry the " +
                 "fact forward and advance anyway; §9.2 requires ALL of its checks before a payment " +
                 "may be treated as made, so `awaiting_payment → paid` now REFUSES — " +
                 "TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED, naming the missing checks — " +
@@ -446,8 +464,9 @@ public object Capabilities {
                 "refusal is computed from what applies to each payee minus what that receipt " +
                 "recorded as performed, never from its checksNotPerformedHere, so a record that " +
                 "wrongly subtracted a check cannot hide its own omission from it. The consequence " +
-                "is deliberate and is the reason this item is not CONFORMING: until the parser " +
-                "exists, the only order that can reach `paid` at all is one owing no receipt — " +
+                "is deliberate and is the reason this item is not CONFORMING: until the payment " +
+                "hash is read out of the stored invoice, the only order that can reach `paid` at " +
+                "all is one owing no receipt — " +
                 "price 0 and no fee, the empty set §9.2's non-zero clause produces. Every order in " +
                 "`paid`, `released` or `settled` therefore carries an empty " +
                 "paymentChecksNotPerformedHere, and that emptiness is an invariant of the gate " +

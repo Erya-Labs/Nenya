@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.settlement
 
 import dev.eryalabs.nenya.TestText
+import kotlin.test.fail
 
 /**
  * A **test-side** BOLT-11 composer: it takes a vendored invoice apart, lets a test change one
@@ -313,6 +314,69 @@ internal object Bolt11Composer {
             "'$written' is not Appendix C's decimal amount and optional `m`/`u`/`n`/`p` multiplier"
         }
         return written
+    }
+
+    /**
+     * [msat] millisatoshis written the way Appendix C writes an amount: a figure and, where one is
+     * needed, a multiplier letter.
+     *
+     * ### Why this is here and not in a fixture file
+     *
+     * §9.2 check 4 compares an invoice's amount against what a payee is owed, so a fixture for it
+     * has to be an invoice **for a chosen amount** — and there is no vendored example for
+     * `price_msat`. This is the derivation that produces one: [Bolt11Parts.withAmount] takes the
+     * written form, and this turns a figure into it. It sits beside the rest of the composer
+     * because that is where the round-trip proof can reach it, which is the whole reason a derived
+     * invoice is allowed in this repository at all (decision D).
+     *
+     * ### It is held to the vendored document, like everything else here
+     *
+     * The multiplier rows are Appendix C's own, parsed out of `spec/NENYA-1.md` at test time by
+     * [AppendixC] — never a table written here — and `Bolt11ComposerTest` requires that for **every**
+     * amount the vendored document states in prose, converting that stated figure to millisatoshis
+     * and back through this function reproduces the document's own spelling character for
+     * character. A wrong factor, a wrong rounding or a wrong choice of letter fails there.
+     *
+     * ### The coarsest exact unit wins, which is what the document writes
+     *
+     * Appendix C's notation is ambiguous — 100 000 000 msat is `1m` and `1000u` and `1000000n` —
+     * so a writer has to choose. This one takes the largest unit that divides the figure exactly,
+     * which is the spelling all thirteen vendored amounts use: `2500u` rather than `25000000n`
+     * because 250 000 000 msat is not a whole number of milli-bitcoin, and `9678785340p` because
+     * 967 878 534 msat is not a whole number of nano-bitcoin either. The round-trip test is what
+     * says so rather than this paragraph.
+     *
+     * There is deliberately no notation for zero: BOLT-11's amount is "a positive decimal integer
+     * with no leading zeroes", and an invoice that asks for nothing is the **absent** amount — the
+     * "any amount" form, which is `withAmount("")` and which §9.2 check 4 rejects on sight.
+     */
+    fun writtenAmount(msat: Long): String {
+        require(msat > 0) {
+            "BOLT-11 writes no amount of $msat: a present amount is a positive decimal integer, " +
+                "and an invoice that names no figure is the absent `withAmount(\"\")` form"
+        }
+        for (row in coarsestFirst()) {
+            // The pico row multiplies before it divides, and the supply cap in pico-bitcoin is
+            // above `Long.MAX_VALUE` — so the figure that cannot be written is skipped rather than
+            // silently wrapped into one that can.
+            if (msat > Long.MAX_VALUE / row.denominator) continue
+            val scaled = msat * row.denominator
+            if (scaled % row.numerator != 0L) continue
+            return "${scaled / row.numerator}${row.letter ?: ""}"
+        }
+        fail("$msat msat is not a whole number of units under any row of Appendix C's table")
+    }
+
+    /**
+     * Appendix C's rows, largest unit first, so [writtenAmount] meets the coarsest exact one first.
+     *
+     * Compared as a cross-multiplication rather than as a quotient, because the `p` row's
+     * millisatoshis-per-unit is a tenth and integer division would flatten it to zero — putting the
+     * finest unit joint-first with nothing and making the choice of spelling depend on sort
+     * stability.
+     */
+    private fun coarsestFirst(): List<AppendixC.Multiplier> = AppendixC.multipliers.sortedWith { a, b ->
+        (b.numerator * a.denominator).compareTo(a.numerator * b.denominator)
     }
 }
 

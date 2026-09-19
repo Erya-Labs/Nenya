@@ -333,6 +333,51 @@ public enum class SettlementRejection {
     INVOICE_NOT_IDENTICAL,
 
     /**
+     * §9.2 check 4: the stored invoice names no amount at all — BOLT-11's "any amount" form.
+     *
+     * "A zero-amount ("any amount") invoice MUST be rejected", and it is rejected *as* an
+     * any-amount invoice rather than as a mismatch. The two are different facts about the issuer
+     * and send a reader to different places: a mismatch is an invoice for the wrong figure, and
+     * this is an invoice that names no figure and would let the payer choose one — which is the
+     * shape a payee cannot be held to and the buyer cannot be protected by.
+     *
+     * **Not** [AMOUNT_OUT_OF_RANGE] and not [HRP_INVALID]: both of those are Appendix C's parser
+     * refusing a human-readable part, and an any-amount invoice is perfectly well-formed BOLT-11.
+     * What refuses it is §9.2's comparison against an amount the parser has never been told.
+     */
+    INVOICE_AMOUNT_MISSING,
+
+    /**
+     * §9.2 check 4: the stored invoice's amount is not the expected amount for its payee —
+     * `price_msat` for `provider`, §8.3's `fee_msat` for `fee`.
+     *
+     * **In either direction**, and that is worth stating because only one of the two is the attack
+     * anyone pictures. An invoice for ten times `price_msat` is the provider overcharging; an
+     * invoice for less is an invoice that settles an order for a figure the terms never named, and
+     * a payee who accepted it has evidence of a payment that does not discharge the order. §9.2
+     * says the amount MUST *equal* the expected one, so there is no lenient side to be generous on.
+     *
+     * The comparison is against the amount read out of the **stored** invoice and never the
+     * receipt's copy: check 1 has just made the two byte-identical, and reading the receipt's would
+     * make this check depend on a string a counterparty sent rather than on the one this library
+     * accepted.
+     */
+    INVOICE_AMOUNT_MISMATCH,
+
+    /**
+     * §9.2 check 5: the stored invoice's `timestamp + expiry` was already in the past when the
+     * invoice was accepted.
+     *
+     * Measured against the clock reading persisted at acceptance
+     * ([AcceptedPaymentRequest.acceptedAt]) and deliberately **not** against the clock at
+     * verification: §9.2 says so in as many words — "an invoice that was live when the buyer paid
+     * it does not become unpaid because it has since expired." A check that re-read the clock here
+     * would expire every honest receipt that arrived late, which is the failure mode this
+     * constant's own tests pin with a receipt verified years after acceptance.
+     */
+    INVOICE_EXPIRED,
+
+    /**
      * A `fee` tag that is not §8.1's shape at all: another tag's name, an arity §8.1 does not give,
      * or a recipient element that is not §4.3's 64-character hex.
      *

@@ -58,14 +58,14 @@ import kotlin.test.fail
  * one the receipt's own `["payee", …]` tag carried, and the order id is the one its
  * `["order", …]` tag carried.
  *
- * **The invoice strings are an interim fixture, and are stated as one.** They come from
- * [SettlementFixtures.invoices], which produces BOLT-11-*shaped* strings: the checksums are wrong,
- * the tagged fields are noise, and no payment hash, amount or expiry can be read out of any of
- * them. That is sufficient for everything on this path — §9.2 check 1 is a byte comparison over an
- * opaque string and nothing here parses an invoice — and it is **not** what a receipt derived from
- * the vendored BOLT-11 examples would be. They are generated rather than typed, so the Definition
- * of done holds; the derivation from the vendored examples arrives with the parser, and replaces
- * these.
+ * **The invoice strings are real invoices**, derived by [SettlementFixtures.invoice] from a
+ * vendored BOLT-11 example with its amount, timestamp and payment hash changed and its bech32
+ * checksum recomputed (decision D). That matters here rather than only in the settlement package:
+ * §9.2 checks 4 and 5 parse the **stored** invoice, so a receipt on this path only evidences
+ * anything if its order's invoice really asks for [PRICE] or for §8.3's fee on it and really was
+ * live at [SettlementFixtures.ACCEPTED_AT]. The BOLT-11-*shaped* strings this file used to draw
+ * could not have satisfied either, which is what makes these fixtures a check on the library
+ * rather than on themselves.
  */
 internal object OrderFixtures {
 
@@ -132,23 +132,25 @@ internal object OrderFixtures {
         OrderTerms.of(Msat.ZERO, FeeTerm.Absent, terms.expiration, terms.deliverBy)
 
     /**
-     * The three §9.2 checks **no** path in this library performs, for either payee.
+     * The one §9.2 check **no** path in this library performs, for either payee.
      *
-     * Checks 4 and 5 need a BOLT-11 parser that does not exist yet, and check 3's *provenance*
-     * needs the same parser to slice the `p` field the comparison's operand must come from. So
-     * this is exactly the `missing` set decision B's gate reports for every priced order, whichever
-     * payee and whichever settlement path — `Settlement.verify` closes check 1 and
-     * `verifyFeeReceipt` closes check 6's three besides, and neither touches these.
+     * Check 3's *provenance*: the payment hash the comparison runs against is a parameter every
+     * entry point takes, so a caller that hands in the SHA-256 of a preimage it chose gets a true
+     * comparison about an invoice nobody issued. Checks 4 and 5 used to be here beside it and are
+     * not any more — `Settlement.verify` parses the stored invoice and performs both — and this
+     * set is therefore exactly the `missing` set decision B's gate reports for every priced order,
+     * whichever payee and whichever settlement path: `verify` closes checks 1, 4 and 5, and
+     * `verifyFeeReceipt` closes check 6's three besides.
+     *
+     * **A narrower set because more was verified, and still a refusal.** Parsing the invoice for
+     * its amount does not say where the caller's payment hash came from, so the gate still refuses
+     * — which is decision B working as the human decided rather than a gap left open.
      *
      * Written out rather than derived from the library's own constants on purpose: a set computed
      * the way the gate computes it would agree with a broken gate. Enum constants are names, not
      * encoded values, so the Definition of done's rule against typed fixtures does not reach them.
      */
-    val CHECKS_NO_PATH_PERFORMS: Set<PaymentCheck> = setOf(
-        PaymentCheck.PAYMENT_HASH_PROVENANCE,
-        PaymentCheck.INVOICE_AMOUNT,
-        PaymentCheck.INVOICE_EXPIRY,
-    )
+    val CHECKS_NO_PATH_PERFORMS: Set<PaymentCheck> = setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE)
 
     /**
      * The refusal [event] produced, asserted to be decision B's and to name exactly [missing].
@@ -490,7 +492,10 @@ internal object OrderFixtures {
                 messages.earlierPoints,
             )
         } else {
-            Settlement.verify(receipt, hash, messages.store)
+            // §9.2 check 4's expected amounts, from the same terms the fee-judgement order carries
+            // — so a receipt verified through the general entry point is held to exactly what one
+            // verified through the fee path is.
+            Settlement.verify(receipt, hash, messages.store, TERMS.split)
         }
         settlement as? Settlement.Evidenced
             ?: fail("a lightning receipt whose preimage hashes must evidence, not yield $settlement")
@@ -531,16 +536,30 @@ internal object OrderFixtures {
     private fun messages(index: Int): Messages = messagesByIndex.getOrPut(index) { Messages(index) }
 
     /**
-     * Enough BOLT-11-shaped strings for one invoice per payee at each fixture order index.
+     * One real invoice per `(order index, payee)`, derived from a vendored example.
      *
-     * Drawn once from [SettlementFixtures.invoices]' single seeded run and sliced by
-     * `(index, payee)`, so the provider's invoice and the fee recipient's are different strings —
-     * §8.6's two separate invoices — and so no two orders reuse one. Two receipts deliberately
-     * sharing a *payment hash* still name two different invoices, which is the shape §8.6's
-     * non-custodial rule is about: one payment offered as evidence of two.
+     * Each carries the amount §9.2 check 4 will demand of it — [PRICE] for the provider and §8.3's
+     * fee on it for the fee recipient — and, in its `p` field, the SHA-256 of a preimage drawn per
+     * position, which is what keeps them distinct. That distinctness is load-bearing twice over:
+     * the provider's invoice and the fee recipient's are §8.6's **two separate invoices**, and no
+     * two orders reuse one. Two receipts deliberately sharing a *payment hash* still name two
+     * different invoices, which is the shape §8.6's non-custodial rule is about — one payment
+     * offered as evidence of two — and that control would prove nothing if check 1 could catch the
+     * set on its own.
+     *
+     * Drawn once and sliced by `(index, payee)`, because deriving an invoice recomputes a bech32
+     * checksum and a SHA-256 and the cross-product asks for the same few thousands of times.
      */
-    private val INVOICES: List<String> =
-        SettlementFixtures.invoices((OTHER_ORDER_INDEX + 1) * Payee.entries.size)
+    private val INVOICES: List<String> by lazy {
+        val positions = (OTHER_ORDER_INDEX + 1) * Payee.entries.size
+        val preimages = PaymentFixtures.preimageHex(positions)
+        List(positions) { position ->
+            SettlementFixtures.invoice(
+                preimages[position],
+                SettlementFixtures.amountFor(Payee.entries[position % Payee.entries.size], TERMS.split),
+            )
+        }
+    }
 
     /**
      * One order's §8.4 points and §8.6 messages, at [index] — every one of them decoded by the
@@ -620,7 +639,7 @@ internal object OrderFixtures {
     }
 
     /**
-     * The BOLT-11-shaped string this fixture uses for [payee] on the order at [index].
+     * The BOLT-11 invoice this fixture uses for [payee] on the order at [index].
      *
      * Fails by name rather than by `IndexOutOfBoundsException` when a third order index is asked
      * for: [INVOICES] is drawn once and sized for the two this file declares, and a fixture that
@@ -630,7 +649,7 @@ internal object OrderFixtures {
         val position = index * Payee.entries.size + payee.ordinal
         if (position !in INVOICES.indices) {
             fail(
-                "no generated invoice for order index $index: this fixture draws ${INVOICES.size} " +
+                "no derived invoice for order index $index: this fixture builds ${INVOICES.size} " +
                     "of them, enough for order indices 0..$OTHER_ORDER_INDEX. Raise " +
                     "OTHER_ORDER_INDEX or widen the draw",
             )

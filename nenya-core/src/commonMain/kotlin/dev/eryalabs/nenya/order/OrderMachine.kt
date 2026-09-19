@@ -350,17 +350,18 @@ public sealed interface OrderOutcome {
  *
  * ### It carries §17's capability record forward, and that is not decoration
  *
- * Every settlement result says that §9.2 check 4 — the invoice's **amount** — was not checked
- * here, because that needs a BOLT-11 parser this library does not have, and says the same of
- * check 3's *provenance* and check 5's expiry. §17 says an implementation MUST NOT report
- * unverified things as verified, and honouring that one layer down while dropping it one layer up
- * is the same lie with an extra step — so [paymentChecksNotPerformedHere] carries it, and
- * [deliveryChecksNotPerformedHere] does the same for §10.
+ * Every settlement result says that §9.2 check 3's *provenance* was not checked here: the payment
+ * hash the preimage was compared against is a parameter every entry point takes, so a caller that
+ * hands in the SHA-256 of a preimage it chose gets a true comparison about an invoice nobody
+ * issued. §17 says an implementation MUST NOT report unverified things as verified, and honouring
+ * that one layer down while dropping it one layer up is the same lie with an extra step — so
+ * [paymentChecksNotPerformedHere] carries it, and [deliveryChecksNotPerformedHere] does the same
+ * for §10.
  *
  * **No order reaches `paid` on partial payment evidence any more.** It used to: a provider who
- * sent a `type=2` for ten times `price_msat` is caught by check 4 and by nothing this library yet
- * does, and the order advanced anyway with the omission written into its record. The human's
- * decision B closed that — `awaiting_payment → paid` now refuses
+ * sent a `type=2` for ten times `price_msat` is caught by §9.2 check 4, `Settlement.verify`
+ * performs check 4 now and did not then, and the order advanced anyway with the omission written
+ * into its record. The human's decision B closed that — `awaiting_payment → paid` now refuses
  * ([TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED]) while any applicable §9.2 check is
  * unperformed — so the record's job here is narrower than it was and its **emptiness** is now the
  * invariant rather than its contents. See [paymentChecksNotPerformedHere].

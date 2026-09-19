@@ -63,6 +63,9 @@ class FeeTermCheckTest {
         /** §8.3's own worked rate, and the one `OrderFixtures.TERMS` is built on. */
         const val BASIS_POINTS: Int = OrderFixtures.FEE_BASIS_POINTS
 
+        /** §8.3's divisor: `fee_msat = floor(price_msat × bps / 10000)`. */
+        const val BPS_DIVISOR: Long = 10_000L
+
         /** §9.2 check 6's three obligations, spelled here so the derived constant has an anchor. */
         val CHECK_SIX: Set<PaymentCheck> = setOf(
             PaymentCheck.FEE_TERM_MATCH,
@@ -89,6 +92,23 @@ class FeeTermCheckTest {
         val feeOnProviderRequest: List<String>? = null,
         val feeOnProviderReceipt: List<String>? = null,
         val feeRequestSealedBy: String = SettlementFixtures.feeRecipient(0),
+
+        /**
+         * Millisatoshis to add to the fee invoice's amount, for §9.2 check 4's control on this path.
+         *
+         * Zero on every other fixture, which is what makes the fee invoice one check 4 accepts.
+         * A non-zero value builds a fee `type=2` asking for something other than §8.3's `fee_msat`
+         * — the padded invoice a fee recipient sends and nothing but check 4 catches.
+         */
+        val feeAmountDelta: Long = 0L,
+
+        /**
+         * The reading the injected clock held when both `type=2`s were accepted (§9.2 check 1).
+         *
+         * §9.2 check 5's only operand. Defaulted to the value every derived invoice here is built
+         * to be live at, and moved past the deadline by the one control that is about check 5.
+         */
+        val acceptedAt: Long = SettlementFixtures.ACCEPTED_AT,
     ) {
 
         val feeTag: List<String>? = basisPoints?.let { ProposalFixtures.feeTag(index, it) }
@@ -108,9 +128,25 @@ class FeeTermCheckTest {
 
         val split = SettlementFixtures.split(priceMsat, basisPoints)
 
-        val invoices: List<String> = SettlementFixtures.invoices(2)
-
         val preimages: List<String> = PaymentFixtures.preimageHex(2)
+
+        /**
+         * The fee `type=2`'s invoice and the provider's, each for the amount §9.2 check 4 will
+         * demand of it — `fee_msat` and `price_msat` off [split].
+         *
+         * The fee side is the "any amount" form when the computed fee is zero, and that is the
+         * honest shape rather than a dodge: §8.3 says no fee invoice may exist at all for a
+         * zero-amount payee and BOLT-11 can express no amount of zero, so there is nothing else to
+         * build. Every such fixture is refused for [SettlementRejection.PAYEE_NOT_REQUIRED] before
+         * check 4 is reached, which is the refusal those tests are about.
+         */
+        val invoices: List<String> = listOf(
+            SettlementFixtures.invoice(
+                preimages[0],
+                split.fee.takeIf { it > Msat.ZERO }?.let { Msat.ofMsat(it.millisatoshis + feeAmountDelta) },
+            ),
+            SettlementFixtures.invoice(preimages[1], split.price),
+        )
 
         /**
          * Lazy, because §8.3 and §8.6 make a fee `type=2` **unbuildable** for a zero-fee order —
@@ -177,7 +213,7 @@ class FeeTermCheckTest {
         /** Both `type=2`s accepted and stored, at a pinned clock reading (§17 item 6). */
         fun store(): PaymentRequestStore {
             val store = PaymentRequestStore.inMemory()
-            val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
+            val clock = FakeClock(acceptedAt)
             AcceptedPaymentRequest.accept(feeRequest, store, clock)
             AcceptedPaymentRequest.accept(providerRequest, store, clock)
             return store
@@ -278,16 +314,98 @@ class FeeTermCheckTest {
                 "on this path: ${evidenced.checksPerformed}",
         )
         assertEquals(
-            setOf(
-                PaymentCheck.PAYMENT_HASH_PROVENANCE,
-                PaymentCheck.INVOICE_AMOUNT,
-                PaymentCheck.INVOICE_EXPIRY,
-            ),
+            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
             evidenced.checksNotPerformedHere,
-            "what is left is check 3's provenance and checks 4 and 5, all three of which need the " +
-                "BOLT-11 parser this library does not have — and a check may never be on both " +
-                "sides of the same statement. The provenance is what this expectation gained: the " +
-                "fullest path in the library still takes the payment hash as a parameter",
+            "what is left is check 3's provenance alone — and a check may never be on both sides " +
+                "of the same statement. Checks 4 and 5 left this expectation when this path began " +
+                "parsing the stored invoice; the provenance stays, because the fullest path in " +
+                "the library still takes the payment hash as a parameter",
+        )
+        assertEquals(
+            Msat.ofMsat(SettlementFixtures.PRICE_MSAT * BASIS_POINTS / BPS_DIVISOR),
+            messages.split.fee,
+            "and the invoice check 4 accepted really was for §8.3's `fee_msat` — a positive " +
+                "control over an amount computed here rather than read off the split it is " +
+                "checking, so a split that had gone wrong could not make itself agree",
+        )
+    }
+
+    /**
+     * §9.2 check 4 **on the fee path**, refusing — which is what makes the claim above a fact.
+     *
+     * The happy path asserts that a `verifyFeeReceipt` result names `INVOICE_AMOUNT` as performed.
+     * That set is composed from a constant, so a positive fixture alone cannot tell "checked and
+     * matched" from "not checked at all": deleting the check-4 call on this path would leave every
+     * assertion in this file green and the library over-claiming, which is exactly the §17 failure
+     * the record exists to prevent. This is the control that closes it.
+     *
+     * The fee recipient's invoice asks for §8.3's `fee_msat` **plus one millisatoshi** — the padded
+     * invoice a fee recipient sends, which passes §8.4's term comparison (the `fee` tag is
+     * byte-identical everywhere), passes §8.7's seal, passes §8.5's state precondition and carries
+     * a preimage that hashes. Check 4 is the only thing between it and an `Evidenced`.
+     */
+    @JsName("a_fee_invoice_padded_by_one_msat_is_refused_on_the_fee_receipt_path")
+    @Test
+    fun `a fee invoice padded by one msat is refused on the fee-receipt path`() {
+        val messages = FeeOrderMessages(feeAmountDelta = 1L)
+
+        val refused = assertFailsWith<SettlementException> {
+            Settlement.verifyFeeReceipt(
+                messages.feeReceipt,
+                messages.feePaymentHash,
+                messages.store(),
+                messages.order(OrderState.AWAITING_PAYMENT),
+                messages.earlierPoints(),
+            )
+        }
+
+        assertEquals(
+            SettlementRejection.INVOICE_AMOUNT_MISMATCH,
+            refused.reason,
+            "§9.2 check 4 applies to a fee receipt exactly as it does to a provider one, and the " +
+                "expected amount is §8.3's `fee_msat` read off this implementation's own order",
+        )
+    }
+
+    /**
+     * §9.2 check 5 on the fee path, for the reason the control above exists.
+     *
+     * Both `type=2`s are accepted one second past the fee invoice's own `timestamp + expiry`, so
+     * the stored fee invoice was already dead when this implementation took it — and check 5's
+     * operand is that acceptance reading and nothing later.
+     */
+    @JsName("a_fee_invoice_already_expired_at_acceptance_is_refused_on_the_fee_receipt_path")
+    @Test
+    fun `a fee invoice already expired at acceptance is refused on the fee-receipt path`() {
+        val deadline = SettlementFixtures.ACCEPTED_AT -
+            SettlementFixtures.INVOICE_AGE_SECONDS + SettlementFixtures.INVOICE_EXPIRY_SECONDS
+        val messages = FeeOrderMessages(acceptedAt = deadline + 1L)
+
+        val refused = assertFailsWith<SettlementException> {
+            Settlement.verifyFeeReceipt(
+                messages.feeReceipt,
+                messages.feePaymentHash,
+                messages.store(),
+                messages.order(OrderState.AWAITING_PAYMENT),
+                messages.earlierPoints(),
+            )
+        }
+        assertEquals(SettlementRejection.INVOICE_EXPIRED, refused.reason)
+
+        // The pair that makes it the boundary and not merely "some late reading": at the deadline
+        // itself the same fixture evidences, so what refused above is the one extra second.
+        assertIs<Settlement.Evidenced>(
+            FeeOrderMessages(acceptedAt = deadline).let {
+                Settlement.verifyFeeReceipt(
+                    it.feeReceipt,
+                    it.feePaymentHash,
+                    it.store(),
+                    it.order(OrderState.AWAITING_PAYMENT),
+                    it.earlierPoints(),
+                )
+            },
+            "an invoice accepted in its final second was live, and `>` at the boundary would " +
+                "refuse it",
         )
     }
 
@@ -315,7 +433,12 @@ class FeeTermCheckTest {
         val messages = FeeOrderMessages()
 
         val evidenced = assertIs<Settlement.Evidenced>(
-            Settlement.verify(messages.feeReceipt, messages.feePaymentHash, messages.store()),
+            Settlement.verify(
+                messages.feeReceipt,
+                messages.feePaymentHash,
+                messages.store(),
+                messages.split,
+            ),
         )
 
         assertTrue(
@@ -451,7 +574,7 @@ class FeeTermCheckTest {
                     SettlementFixtures.feeRecipient(0),
                     SettlementFixtures.requestTags(
                         payment = SettlementFixtures.requestPaymentTag(
-                            SettlementFixtures.invoices(1).single(),
+                            SettlementFixtures.defaultInvoice(),
                         ),
                         payeeTag = SettlementFixtures.payeeTag(Payee.FEE),
                         fee = basisPoints?.let { ProposalFixtures.feeTag(0, it) },
@@ -699,7 +822,7 @@ class FeeTermCheckTest {
         val forged = SettlementFixtures.requestSealedBy(
             stranger,
             SettlementFixtures.requestTags(
-                payment = SettlementFixtures.requestPaymentTag(SettlementFixtures.invoices(1).single()),
+                payment = SettlementFixtures.requestPaymentTag(SettlementFixtures.defaultInvoice()),
                 payeeTag = SettlementFixtures.payeeTag(Payee.FEE),
                 fee = ownTerm,
             ),
@@ -796,7 +919,12 @@ class FeeTermCheckTest {
         // asserted rather than said: the two entry points must agree on a §9.4 receipt in both
         // directions, and neither may claim any check.
         val throughVerify = assertIs<Settlement.Unverified>(
-            Settlement.verify(onAnotherRail, messages.feePaymentHash, messages.store()),
+            Settlement.verify(
+                onAnotherRail,
+                messages.feePaymentHash,
+                messages.store(),
+                messages.split,
+            ),
         )
         assertEquals(throughVerify.checksPerformed, unverified.checksPerformed)
         assertEquals(throughVerify.checksNotPerformedHere, unverified.checksNotPerformedHere)

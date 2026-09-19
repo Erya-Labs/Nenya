@@ -46,6 +46,21 @@ class Bolt11ComposerTest {
     private val statedExpiries = 3
     private val signatureBreakdowns = 11
 
+    /**
+     * Amounts stated in prose, across both groups — one more than the thirteen `Bolt11InvoiceTest`
+     * counts, because that file looks only at the all-lowercase valid examples and this one feeds
+     * the writer every example that states an amount at all.
+     */
+    private val statedAmounts = 14
+
+    /**
+     * How many of Appendix C's multipliers those amounts are spread across.
+     *
+     * The floor that stops the round trip below from being vacuous: fourteen amounts all written
+     * under one letter would be reproduced by a writer that only knew that letter.
+     */
+    private val distinctMultipliersStated = 3
+
     private fun lowercaseValid(): List<Bolt11Examples.Example> =
         examples.filter { it.group == Group.VALID && it.invoice == it.invoice.lowercase() }
 
@@ -318,4 +333,66 @@ class Bolt11ComposerTest {
         }
         assertEquals(emptyList(), failures, "examples whose checksum a substitution did not change")
     }
+
+    // ---- (6) the amount writer, held to the spellings the vendored document itself uses ----
+
+    /**
+     * [Bolt11Composer.writtenAmount] reproduces every amount the vendored document writes.
+     *
+     * The round trip is stated-figure → millisatoshis → written form, and both halves read
+     * Appendix C's multiplier table out of `spec/NENYA-1.md` rather than carrying one. So this
+     * catches a wrong factor, a wrong rounding and a wrong choice of unit at once: the document's
+     * own spelling is the answer, and there are three different multipliers among the thirteen
+     * amounts it states — `u`, `m` and `p` — so no single-unit writer can pass.
+     *
+     * The `p` example is the one that makes it bite. 967 878 534 msat is not a whole number of
+     * nano-bitcoin, so a writer that reached for the wrong unit, or that divided where it should
+     * multiply, would spell it as something the document does not.
+     */
+    @JsName("every_amount_the_document_states_round_trips_through_the_amount_writer")
+    @Test
+    fun `every amount the document states round-trips through the amount writer`() {
+        val stated = examples.mapNotNull { example -> example.amount?.let { example to it } }
+        assertEquals(statedAmounts, stated.size, "examples fed to the amount writer")
+
+        val failures = ArrayList<String>()
+        for ((example, amount) in stated) {
+            val row = AppendixC.multipliers.single { it.letter == amount.letter.firstOrNull() }
+            val figure = amount.number.toLong()
+            if (figure % row.denominator != 0L) {
+                failures += "$example: '${amount.written}' is not a whole number of msat under $row"
+                continue
+            }
+            val msat = figure / row.denominator * row.numerator
+            val written = Bolt11Composer.writtenAmount(msat)
+            if (written != amount.written) failures += "$example: $msat msat written '$written' != '${amount.written}'"
+        }
+        assertEquals(emptyList(), failures, "amounts the writer spells differently from the document")
+
+        // The non-vacuity floor: all fourteen agreeing would still prove nothing if they were all
+        // the same multiplier. Three distinct letters is what makes the choice of unit load-bearing.
+        assertEquals(
+            distinctMultipliersStated,
+            stated.map { (_, amount) -> amount.letter }.toSet().size,
+            "the document must state amounts under $distinctMultipliersStated different " +
+                "multipliers, or a writer that always picked one of them would pass this",
+        )
+    }
+
+    /**
+     * An amount of zero has no BOLT-11 spelling, and asking for one is a fixture's mistake.
+     *
+     * Appendix C's amount is "a positive decimal integer with no leading zeroes", so an invoice for
+     * nothing is the **absent** amount — `withAmount("")`, the any-amount form §9.2 check 4 rejects
+     * on sight. A writer that returned `"0"` here would produce a string
+     * `Bolt11Invoice.parse` refuses as `HRP_INVALID`, and the fixture that asked for it would read
+     * as a check-4 control while actually testing the parser.
+     */
+    @JsName("the_amount_writer_refuses_zero_because_bolt_11_has_no_spelling_for_it")
+    @Test
+    fun `the amount writer refuses zero, because BOLT-11 has no spelling for it`() {
+        assertFailsWith<IllegalArgumentException> { Bolt11Composer.writtenAmount(0L) }
+        assertFailsWith<IllegalArgumentException> { Bolt11Composer.writtenAmount(-1L) }
+    }
+
 }

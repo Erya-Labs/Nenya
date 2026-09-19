@@ -307,23 +307,27 @@ class OrderInvariantsTest {
     // ---------------------------------------------------------------- §17 across the layer
 
     /**
-     * §17's honesty rule, now enforced by a **refusal** rather than carried forward on a record.
+     * §17's honesty rule, enforced by a **refusal** rather than carried forward on a record.
      *
-     * Every settlement result says §9.2 check 4 — the invoice's **amount** — was not checked here,
-     * because that needs a BOLT-11 parser this library does not have. An order used to reach `paid`
-     * on that evidence anyway and report the omission; the human's decision B is that §9.2's "MUST
-     * perform **all**" means what it says, so the order is refused instead. A provider who sends a
-     * `type=2` for ten times `price_msat` is caught by check 4, check 4 is performed by nobody, and
-     * the order therefore does not move.
+     * Decision B is that §9.2's "MUST perform **all**" means what it says, so an order whose
+     * evidence leaves any applicable check unperformed does not move. What is left unperformed has
+     * **shrunk** and the refusal has not: `Settlement.verify` now parses the stored invoice and
+     * performs checks 4 and 5, so the only thing left is check 3's *provenance* — the payment hash
+     * the comparison ran against is still whatever the caller handed in, and a caller that hands in
+     * the SHA-256 of a preimage it chose gets a true comparison about an invoice nobody issued.
      *
-     * The three named are the three that need the parser — check 3's *provenance*, check 4's amount
-     * and check 5's expiry — and no more. `INVOICE_IDENTITY` is not among them: check 1 is a byte
-     * comparison against the stored `type=2`, it is performed on every path into `ReceiptsVerified`,
-     * and demanding it again would deadlock an order over a check that was done.
+     * **A narrower `missing` set because more was verified, and still a refusal.** That is decision
+     * B working as the human decided rather than a gap: a priced order reaching `paid` on a payment
+     * hash nobody took out of an invoice is exactly what the fail-closed direction is for, and it
+     * is T25 that closes it.
+     *
+     * `INVOICE_IDENTITY`, `INVOICE_AMOUNT` and `INVOICE_EXPIRY` are all absent from the set now:
+     * each is performed on every path into `ReceiptsVerified`, and demanding one again would
+     * deadlock an order over a check that was done.
      */
-    @JsName("an_order_is_refused_paid_on_check2_and_check3_evidence_naming_invoice_amount")
+    @JsName("an_order_is_refused_paid_on_evidence_naming_only_the_payment_hash_provenance")
     @Test
-    fun `an order is refused paid on check-2 and check-3 evidence, naming INVOICE_AMOUNT`() {
+    fun `an order is refused paid on evidence that closed every check but the hash's provenance`() {
         val refused = OrderFixtures.refusedForChecks(
             machine,
             orders.getValue(OrderState.AWAITING_PAYMENT),
@@ -331,24 +335,27 @@ class OrderInvariantsTest {
         )
 
         assertTrue(
-            PaymentCheck.INVOICE_AMOUNT in refused.missing,
-            "check 4 is the one a provider inflating their invoice is caught by, and it must be " +
-                "named as the reason this order did not move: ${refused.missing}",
+            PaymentCheck.PAYMENT_HASH_PROVENANCE in refused.missing,
+            "check 3's operand is still a parameter every entry point takes, and it must be named " +
+                "as the reason this order did not move: ${refused.missing}",
         )
         assertEquals(
-            setOf(
-                PaymentCheck.PAYMENT_HASH_PROVENANCE,
-                PaymentCheck.INVOICE_AMOUNT,
-                PaymentCheck.INVOICE_EXPIRY,
-            ),
+            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
             refused.missing,
-            "and those three exactly — the ones needing the BOLT-11 parser this library lacks",
+            "and that one exactly — the only §9.2 obligation no path in this library closes",
         )
-        assertFalse(
-            PaymentCheck.INVOICE_IDENTITY in refused.missing,
-            "check 1 IS performed, against the stored `type=2`. Demanding it would hold an order " +
-                "for a check that was done, which is the mirror of the over-claim §17 forbids",
-        )
+        for (performed in listOf(
+            PaymentCheck.INVOICE_IDENTITY,
+            PaymentCheck.INVOICE_AMOUNT,
+            PaymentCheck.INVOICE_EXPIRY,
+        )) {
+            assertFalse(
+                performed in refused.missing,
+                "$performed IS performed, against the stored `type=2`. Demanding it would hold an " +
+                    "order for a check that was done, which is the mirror of the over-claim §17 " +
+                    "forbids",
+            )
+        }
 
         // The order did not move, and recorded nothing: a refusal is not a half-transition.
         val awaiting = orders.getValue(OrderState.AWAITING_PAYMENT)
@@ -366,8 +373,8 @@ class OrderInvariantsTest {
      * §9.2 check 6 is three obligations. They apply to a fee receipt and to nothing else, and what
      * proves the gate knows that is the **difference between two fee receipts**: one put through
      * `Settlement.verifyFeeReceipt`, which performs all three, and one put through plain
-     * `Settlement.verify`, which performs none. The first is missing only the three checks needing
-     * the parser; the second is missing those and check 6's three besides.
+     * `Settlement.verify`, which performs none. The first is missing only check 3's provenance;
+     * the second is missing that and check 6's three besides.
      *
      * ### Why the comparison is what discriminates
      *
@@ -394,8 +401,9 @@ class OrderInvariantsTest {
         assertEquals(
             OrderFixtures.CHECKS_NO_PATH_PERFORMS,
             feeBearing.missing,
-            "both receipts went through the path that performs check 1, and the fee receipt " +
-                "through the one that performs check 6's three, so only the parser's three remain",
+            "both receipts went through the path that performs checks 1, 4 and 5, and the fee " +
+                "receipt through the one that performs check 6's three, so only check 3's " +
+                "provenance remains",
         )
 
         val throughBareVerify = OrderFixtures.refusedForChecks(
@@ -424,7 +432,7 @@ class OrderInvariantsTest {
         assertEquals(
             OrderFixtures.CHECKS_NO_PATH_PERFORMS,
             providerOnly.missing,
-            "and a provider-only order is missing the same three and no more",
+            "and a provider-only order is missing the same one and no more",
         )
         for (check in Settlement.CHECK_SIX) {
             assertFalse(

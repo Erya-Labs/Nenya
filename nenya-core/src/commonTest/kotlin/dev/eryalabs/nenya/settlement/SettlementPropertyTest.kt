@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.settlement
 
+import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.VerifiedPayment
@@ -56,6 +57,16 @@ class SettlementPropertyTest {
 
         /** One seeded run, shared by every test here so the corpus is built once. */
         val corpus: List<SettlementFixtures.Fixture> by lazy { SettlementFixtures.pairs(CORPUS) }
+
+        /**
+         * §8.3's split every fixture's invoice was built for — §9.2 check 4's expected amounts.
+         *
+         * One value for the whole corpus because `SettlementFixtures.pairs` builds every invoice
+         * against it, and check 4 selects `price` or `fee` off it by the receipt's own payee. A
+         * test that passed a different split here would be testing check 4's refusal, which
+         * `SettlementCheckFourAndFiveTest` does on purpose and none of these properties does.
+         */
+        val SPLIT: FeeSplit = SettlementFixtures.split()
 
         /** Every request decoded through §8.6's codec. */
         val requests: List<PaymentRequest> by lazy {
@@ -201,14 +212,14 @@ class SettlementPropertyTest {
     @Test
     fun `every receipt settles against its own stored request`() {
         for (fixture in corpus) {
-            val settlement = Settlement.verify(receipts[fixture.index], fixture.paymentHash, store)
+            val settlement = Settlement.verify(receipts[fixture.index], fixture.paymentHash, store, SPLIT)
 
             val evidenced = assertIs<Settlement.Evidenced>(settlement, "fixture ${fixture.index}")
             assertEquals(fixture.payee, evidenced.payee)
             assertEquals(
                 Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH,
                 evidenced.checksPerformed,
-                "check 1 plus T3's two, on every fixture",
+                "checks 1, 4 and 5 plus T3's two, on every fixture",
             )
         }
     }
@@ -238,7 +249,7 @@ class SettlementPropertyTest {
 
         for (fixture in corpus) {
             val refused = assertFailsWith<SettlementException>("fixture ${fixture.index}") {
-                Settlement.verify(receipts[fixture.index], fixture.paymentHash, rotated)
+                Settlement.verify(receipts[fixture.index], fixture.paymentHash, rotated, SPLIT)
             }
             assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, refused.reason)
         }
@@ -268,12 +279,12 @@ class SettlementPropertyTest {
                 )
                 if (receiptIndex == requestIndex) {
                     assertIs<Settlement.Evidenced>(
-                        Settlement.verify(receipts[receiptIndex], fixture.paymentHash, paired),
+                        Settlement.verify(receipts[receiptIndex], fixture.paymentHash, paired, SPLIT),
                     )
                     matched++
                 } else {
                     val answer = assertFailsWith<SettlementException>("$receiptIndex vs $requestIndex") {
-                        Settlement.verify(receipts[receiptIndex], fixture.paymentHash, paired)
+                        Settlement.verify(receipts[receiptIndex], fixture.paymentHash, paired, SPLIT)
                     }
                     assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, answer.reason)
                     refused++
@@ -293,7 +304,7 @@ class SettlementPropertyTest {
 
         for (fixture in corpus) {
             val refused = assertFailsWith<SettlementException>("fixture ${fixture.index}") {
-                Settlement.verify(receipts[fixture.index], fixture.paymentHash, empty)
+                Settlement.verify(receipts[fixture.index], fixture.paymentHash, empty, SPLIT)
             }
             assertEquals(SettlementRejection.NO_STORED_REQUEST, refused.reason)
             count++
@@ -405,7 +416,7 @@ class SettlementPropertyTest {
 
         for (fixture in corpus) {
             val evidenced = assertIs<Settlement.Evidenced>(
-                Settlement.verify(receipts[fixture.index], fixture.paymentHash, store),
+                Settlement.verify(receipts[fixture.index], fixture.paymentHash, store, SPLIT),
                 "fixture ${fixture.index}",
             )
             assertEquals(fixture.payee, evidenced.payee)
@@ -437,11 +448,14 @@ class SettlementPropertyTest {
     @JsName("the_partition_invariant_fails_on_a_record_that_omits_a_check_from_both_sides")
     @Test
     fun `the partition invariant fails on a record that omits a check from both sides`() {
-        // The negative control. This is the record the library would produce if a path subtracted
-        // PAYMENT_HASH_PROVENANCE as well as INVOICE_IDENTITY — the exact mutation T18 exists to
-        // make visible. Both of its sides are individually plausible, and only the union catches it.
+        // The negative control. This is the record the library would produce if the store path
+        // subtracted PAYMENT_HASH_PROVENANCE as well as checks 1, 4 and 5 — the exact mutation T18
+        // exists to make visible, and the one T23 brings back within reach by making this path
+        // parse the invoice for a *different* field. Both of its sides are individually plausible —
+        // a performed set naming exactly what the path does, and a not-performed set naming nothing
+        // left over — and only the union against what **applies** catches it.
         val performed = Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH
-        val dropped = setOf(PaymentCheck.INVOICE_AMOUNT, PaymentCheck.INVOICE_EXPIRY)
+        val dropped = emptySet<PaymentCheck>()
 
         assertFails("an invariant nothing can fail proves nothing about what passes it") {
             assertPartitions(Payee.PROVIDER, performed, dropped, "negative control")

@@ -49,12 +49,16 @@ class ReceiptBindingTest {
             PaymentCheck.FEE_STATE_PRECONDITION,
         )
 
-        /** The three §9.2 obligations that need the BOLT-11 parser this library does not have. */
-        val NEEDS_THE_PARSER: Set<PaymentCheck> = setOf(
-            PaymentCheck.PAYMENT_HASH_PROVENANCE,
-            PaymentCheck.INVOICE_AMOUNT,
-            PaymentCheck.INVOICE_EXPIRY,
-        )
+        /**
+         * The one §9.2 obligation no path here closes: check 3's provenance.
+         *
+         * Checks 4 and 5 stood beside it until `Settlement.verify` began parsing the stored
+         * invoice for its amount and its expiry. The provenance did not move with them, and the
+         * distinction is the whole point of it being a constant of its own: this path opens the
+         * invoice to read the human-readable part's amount, and the payment hash the comparison
+         * runs against is still whatever the caller handed in.
+         */
+        val NEEDS_THE_PARSER: Set<PaymentCheck> = setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE)
     }
 
     private val machine = OrderFixtures.machineBeforeDeadlines()
@@ -98,7 +102,8 @@ class ReceiptBindingTest {
         assertEquals(
             NEEDS_THE_PARSER,
             refused.missing,
-            "what is left is exactly the three that need the BOLT-11 parser",
+            "what is left is exactly check 3's provenance — checks 4 and 5 are performed on this " +
+                "path now, and a narrower `missing` because more was verified is still a refusal",
         )
     }
 

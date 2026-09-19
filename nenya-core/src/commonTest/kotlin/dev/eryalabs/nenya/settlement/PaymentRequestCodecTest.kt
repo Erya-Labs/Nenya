@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.settlement
 
 import dev.eryalabs.nenya.channel.ChannelTags
 import dev.eryalabs.nenya.payment.Payee
+import dev.eryalabs.nenya.payment.PaymentFixtures
 import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.tag.NenyaKind
@@ -131,7 +132,7 @@ class PaymentRequestCodecTest {
     @JsName("a_well_formed_type_2_decodes_to_its_order_payee_and_verbatim_invoice")
     @Test
     fun `a well-formed type=2 decodes to its order, payee and verbatim invoice`() {
-        val invoice = SettlementFixtures.invoices(1).single()
+        val invoice = invoices(1).single()
         val tags = SettlementFixtures.requestTags(
             payment = SettlementFixtures.requestPaymentTag(invoice),
         )
@@ -214,7 +215,7 @@ class PaymentRequestCodecTest {
     @JsName("a_second_payment_tag_is_refused_and_a_missing_one_too")
     @Test
     fun `a second payment tag is refused, and a missing one too`() {
-        val invoices = SettlementFixtures.invoices(2)
+        val invoices = invoices(2)
         val base = SettlementFixtures.requestTags(
             payment = SettlementFixtures.requestPaymentTag(invoices[0]),
         )
@@ -257,7 +258,7 @@ class PaymentRequestCodecTest {
     @JsName("a_request_whose_payment_tag_is_not_s86s_three_elements_is_refused")
     @Test
     fun `a request whose payment tag is not §8_6's three elements is refused`() {
-        val invoice = SettlementFixtures.invoices(1).single()
+        val invoice = invoices(1).single()
         // Both directions: §9.2's four-element receipt form, which carries a proof no request can
         // have, and the two truncations below it. One branch, so all three are the same rule.
         val wrong = listOf(
@@ -285,7 +286,7 @@ class PaymentRequestCodecTest {
         // reissues an invoice is an ordinary wire event and a caller that must refuse a replacement
         // has to be able to see one — which it does by asking `find` before accepting.
         val store = PaymentRequestStore.inMemory()
-        val invoices = SettlementFixtures.invoices(2)
+        val invoices = invoices(2)
         val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
         val order = SettlementFixtures.orderHex(0)
         assertEquals(
@@ -412,7 +413,7 @@ class PaymentRequestCodecTest {
         // Without the explicit `lnurl` rule this would satisfy the human-readable part below —
         // `lnurl` is `ln` followed by letters — and be accepted as an invoice, which is precisely
         // the substitution §9.3 forbids. The data part is deliberately long enough to reach it.
-        val data = SettlementFixtures.invoices(1).single().substringAfterLast('1')
+        val data = invoices(1).single().substringAfterLast('1')
         val tags = SettlementFixtures.requestTags(
             payment = SettlementFixtures.requestPaymentTag("lnurl1$data"),
         )
@@ -425,7 +426,7 @@ class PaymentRequestCodecTest {
     @JsName("an_uppercase_invoice_is_refused_as_uppercase_and_never_normalised")
     @Test
     fun `an uppercase invoice is refused as uppercase, and never normalised`() {
-        val invoice = SettlementFixtures.invoices(1).single()
+        val invoice = invoices(1).single()
         val tags = SettlementFixtures.requestTags(
             payment = SettlementFixtures.requestPaymentTag(invoice.uppercase()),
         )
@@ -483,7 +484,7 @@ class PaymentRequestCodecTest {
     @JsName("the_recogniser_refuses_the_four_shapes_appendix_c_rules_out")
     @Test
     fun `the recogniser refuses the four shapes Appendix C rules out`() {
-        val invoice = SettlementFixtures.invoices(1).single()
+        val invoice = invoices(1).single()
         val separator = invoice.lastIndexOf('1')
         val data = invoice.substring(separator + 1)
 
@@ -616,7 +617,7 @@ class PaymentRequestCodecTest {
     @Test
     fun `the store is keyed by the pair §9_2 check 1 names`() {
         val store = PaymentRequestStore.inMemory()
-        val invoices = SettlementFixtures.invoices(4)
+        val invoices = invoices(4)
         val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
         // Two payees under one order, and two orders under one payee.
         val order = SettlementFixtures.orderHex(0)
@@ -658,7 +659,8 @@ class PaymentRequestCodecTest {
             FakeClock(SettlementFixtures.ACCEPTED_AT),
         )
         val receipt = SettlementFixtures.receipt(fixture.receiptTags)
-        val settlement = Settlement.verify(receipt, fixture.paymentHash, store)
+        val settlement =
+            Settlement.verify(receipt, fixture.paymentHash, store, SettlementFixtures.split())
         val secrets = listOf(fixture.invoice, fixture.orderHex, fixture.preimageHex)
         val printed = listOf(
             request.toString(),
@@ -684,6 +686,26 @@ class PaymentRequestCodecTest {
     // ---------------------------------------------------------------------------------------
     // Helpers.
     // ---------------------------------------------------------------------------------------
+
+    /**
+     * [count] distinct real invoices, each derived from a vendored example (decision D).
+     *
+     * Distinct because each carries the SHA-256 of its own preimage in its `p` field, which is what
+     * several controls here turn on — a store keyed by `(order, payee)` cannot be shown to key on
+     * the pair if the four records hold one string. The amounts cycle §8.6's two payee roles so
+     * that a request stored for a fee payee is one §9.2 check 4 would accept for that payee; no
+     * test in this file reaches check 4, and building the fixtures as though one might is what
+     * stops the next one from silently not reaching it either.
+     */
+    private fun invoices(count: Int): List<String> {
+        val split = SettlementFixtures.split()
+        return PaymentFixtures.preimageHex(count).mapIndexed { at, preimage ->
+            SettlementFixtures.invoice(
+                preimage,
+                SettlementFixtures.amountFor(Payee.entries[at % Payee.entries.size], split),
+            )
+        }
+    }
 
     private fun assertRefusedAsMalformed(reference: String) {
         val refused = assertFailsWith<SettlementException> {

@@ -210,12 +210,14 @@ public sealed interface OrderEvent {
      * per-invoice checks §11.2 lists on that row — amount `== price_msat`, fee amount
      * `== fee_msat`, sealed by the fee recipient (§8.7), fee term matching (§8.4) — are **not**
      * performed here: what reaches this event is which payees the caller accepted a request from.
-     * Two of the four now have somewhere to be performed —
-     * `Settlement.checkFeePaymentRequest` does §8.4 and §8.7 over a fee `type=2` — and the caller
-     * that runs it before constructing this event is the one honouring the row. The other two need
-     * the BOLT-11 parser this library does not have. That narrowing is not silently absorbed: it is
-     * the same set of unperformed checks every `VerifiedPayment` already publishes, and the order
-     * carries them forward (§17).
+     * All four now have somewhere to be performed — `Settlement.checkFeePaymentRequest` does §8.4
+     * and §8.7 over a fee `type=2`, and `Settlement.verify` holds the **stored** invoice to §9.2
+     * check 4's amount — and the caller that runs them is the one honouring the row. What this
+     * event still does not itself establish is that the caller did: it carries payee roles, not
+     * invoices. That narrowing is not silently absorbed — it is the same set of unperformed checks
+     * every `VerifiedPayment` publishes, and the order carries them forward (§17) — and it is
+     * narrowed for good at the point a payment request is refused at acceptance for an amount that
+     * is not what its payee is owed, which is T24's.
      *
      * §8.5 is why this event exists as its own thing rather than folding into the receipt: the
      * fee **payment request** is accepted as part of `committed → awaiting_payment` and nowhere

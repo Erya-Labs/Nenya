@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.settlement
 
+import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.order.Order
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentHash
@@ -549,11 +550,17 @@ class SettlementStructureTest {
     }
 
     /**
-     * §9.2 check 3's operands, pinned: the verifier takes a receipt, the hash it is checked against
-     * and the store it is compared with — and nothing a counterparty could say.
+     * §9.2's operands, pinned: the verifier takes a receipt, the hash it is checked against, the
+     * store it is compared with and the order's own §8.3 split — and nothing a counterparty could
+     * say.
+     *
+     * The `FeeSplit` is check 4's expected amount and is on this list for the same reason the store
+     * is: it is something **this implementation** computed from terms it accepted, not a figure a
+     * message carried. `FeeSplit`'s own constructor is `internal`, so there is no route by which a
+     * counterparty's number reaches one without passing through §8.3's arithmetic first.
      */
     @Test
-    fun `the verifier takes a receipt, a payment hash and the store, and nothing that can assert`() {
+    fun `the verifier takes a receipt, a payment hash, the store and the split, and nothing that can assert`() {
         val companion = mainClasses().single { it.name == "$PACKAGE.Settlement\$Companion" }
         val verify = companion.methods.single { it.name == "verify" && '$' !in it.name }
 
@@ -562,6 +569,7 @@ class SettlementStructureTest {
                 PaymentReceipt::class.java,
                 PaymentHash::class.java,
                 PaymentRequestStore::class.java,
+                FeeSplit::class.java,
             ),
             verify.parameterTypes.toList(),
             "anything else on this parameter list is something a counterparty could say",

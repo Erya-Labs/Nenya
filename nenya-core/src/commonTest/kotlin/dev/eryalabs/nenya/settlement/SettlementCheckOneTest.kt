@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.settlement
 
 import dev.eryalabs.nenya.conformance.Capabilities
 import dev.eryalabs.nenya.conformance.ConformanceStatus
+import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentCheck
 import dev.eryalabs.nenya.payment.PaymentException
@@ -49,10 +50,20 @@ class SettlementCheckOneTest {
         /** LATIN SMALL LETTER LONG S, which is outside the bech32 alphabet and is not uppercase. */
         const val LONG_S: Char = 'ſ'
 
-        /** How many fixtures to search for one carrying an `s`. A 111-character data part drawn
-         * from a 32-character alphabet misses one about three times in a hundred, so sixteen is a
-         * bound rather than a hope — and the search fails loudly if it finds none. */
+        /** How many fixtures to search for one carrying an `s`. Every derived invoice runs to
+         * hundreds of bech32 characters and the alphabet has thirty-two of them, so missing `s`
+         * in all sixteen is not a case anyone will meet — and the search fails loudly if it does. */
         const val HOMOGLYPH_SEARCH: Int = 16
+
+        /**
+         * §8.3's split every fixture invoice in this file was built for — check 4's expected
+         * amounts, selected by the receipt's own payee.
+         *
+         * This file is about §9.2 check 1, so every control here wants check 4 to pass and get out
+         * of the way. `SettlementCheckFourAndFiveTest` is where a split that disagrees with the
+         * invoice is the point.
+         */
+        val SPLIT: FeeSplit = SettlementFixtures.split()
     }
 
     /** One stored request and the receipt that settles it, both from the seeded corpus. */
@@ -82,7 +93,7 @@ class SettlementCheckOneTest {
         val settled = settled()
         val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
 
-        val settlement = Settlement.verify(receipt, settled.fixture.paymentHash, settled.store)
+        val settlement = Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT)
 
         val evidenced = assertIs<Settlement.Evidenced>(settlement)
         assertEquals(settled.fixture.payee, evidenced.payee)
@@ -97,14 +108,18 @@ class SettlementCheckOneTest {
         val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
 
         val evidenced = assertIs<Settlement.Evidenced>(
-            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store),
+            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT),
         )
 
         assertEquals(
-            VerifiedPayment.CHECKS_PERFORMED_HERE + PaymentCheck.INVOICE_IDENTITY,
+            VerifiedPayment.CHECKS_PERFORMED_HERE + setOf(
+                PaymentCheck.INVOICE_IDENTITY,
+                PaymentCheck.INVOICE_AMOUNT,
+                PaymentCheck.INVOICE_EXPIRY,
+            ),
             evidenced.checksPerformed,
-            "check 1 was performed on this path and T3's two were performed inside it; the set is " +
-                "composed from T3's rather than listed here",
+            "checks 1, 4 and 5 were performed on this path and T3's two were performed inside it; " +
+                "the set is composed from T3's rather than listed here",
         )
         assertEquals(
             Settlement.CHECKS_PERFORMED_ON_THE_STORE_PATH,
@@ -115,19 +130,15 @@ class SettlementCheckOneTest {
             PaymentCheck.INVOICE_IDENTITY in evidenced.checksNotPerformedHere,
             "a check cannot be on both sides of the same statement",
         )
-        // Exact, not containment: this path subtracts INVOICE_IDENTITY and must subtract nothing
-        // else, and only an exact set can say so. PAYMENT_HASH_PROVENANCE is the one this test
-        // gained — check 3's operand is still the caller's parameter however well check 1 went —
-        // so the expectation is strictly stronger than the containment pair it replaces.
+        // Exact, not containment: this path subtracts checks 1, 4 and 5 and must subtract nothing
+        // else, and only an exact set can say so. PAYMENT_HASH_PROVENANCE is what is left — check
+        // 3's operand is still the caller's parameter however well check 1 went, and parsing the
+        // stored invoice for its *amount* does not make it otherwise.
         assertEquals(
-            setOf(
-                PaymentCheck.PAYMENT_HASH_PROVENANCE,
-                PaymentCheck.INVOICE_AMOUNT,
-                PaymentCheck.INVOICE_EXPIRY,
-            ),
+            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
             evidenced.checksNotPerformedHere,
-            "checks 4 and 5 need the BOLT-11 parser this library does not have, and so does check " +
-                "3's provenance: the recogniser reads no amount, no expiry and no payment hash",
+            "what is left is check 3's provenance alone: this path parses the stored invoice for " +
+                "checks 4 and 5 and still takes the payment hash as a parameter",
         )
     }
 
@@ -144,6 +155,7 @@ class SettlementCheckOneTest {
                 SettlementFixtures.receipt(provider.fixture.receiptTags),
                 provider.fixture.paymentHash,
                 provider.store,
+                SPLIT,
             ),
         )
         val feeResult = assertIs<Settlement.Evidenced>(
@@ -151,6 +163,7 @@ class SettlementCheckOneTest {
                 SettlementFixtures.receipt(fee.fixture.receiptTags),
                 fee.fixture.paymentHash,
                 fee.store,
+                SPLIT,
             ),
         )
 
@@ -168,18 +181,14 @@ class SettlementCheckOneTest {
         // nothing else. A containment assertion alone cannot see a check dropped from the record,
         // which is what this file's own §17 rule is about.
         assertEquals(
-            setOf(
-                PaymentCheck.PAYMENT_HASH_PROVENANCE,
-                PaymentCheck.INVOICE_AMOUNT,
-                PaymentCheck.INVOICE_EXPIRY,
-            ),
+            setOf(PaymentCheck.PAYMENT_HASH_PROVENANCE),
             providerResult.checksNotPerformedHere,
         )
         assertEquals(
             providerResult.checksNotPerformedHere + CHECK_SIX,
             feeResult.checksNotPerformedHere,
-            "the same three, plus check 6's three — composed from the provider's record rather " +
-                "than listed again",
+            "the same provenance, plus check 6's three — composed from the provider's record " +
+                "rather than listed again",
         )
     }
 
@@ -239,7 +248,7 @@ class SettlementCheckOneTest {
         )
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store)
+            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT)
         }
 
         assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, refused.reason)
@@ -260,7 +269,7 @@ class SettlementCheckOneTest {
         )
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store)
+            Settlement.verify(receipt, settled.fixture.paymentHash, settled.store, SPLIT)
         }
 
         assertEquals(
@@ -298,7 +307,7 @@ class SettlementCheckOneTest {
         )
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, fixture.paymentHash, store)
+            Settlement.verify(receipt, fixture.paymentHash, store, SPLIT)
         }
 
         assertTrue(
@@ -320,7 +329,7 @@ class SettlementCheckOneTest {
         val uppercase = PaymentHash.ofHex(settled.fixture.paymentHash.toHex().uppercase())
 
         assertEquals(settled.fixture.paymentHash, uppercase)
-        assertIs<Settlement.Evidenced>(Settlement.verify(receipt, uppercase, settled.store))
+        assertIs<Settlement.Evidenced>(Settlement.verify(receipt, uppercase, settled.store, SPLIT))
     }
 
     @JsName("a_receipt_with_no_stored_request_is_refused_as_no_stored_request")
@@ -330,7 +339,7 @@ class SettlementCheckOneTest {
         val receipt = SettlementFixtures.receipt(fixture.receiptTags)
 
         val refused = assertFailsWith<SettlementException> {
-            Settlement.verify(receipt, fixture.paymentHash, PaymentRequestStore.inMemory())
+            Settlement.verify(receipt, fixture.paymentHash, PaymentRequestStore.inMemory(), SPLIT)
         }
 
         assertEquals(
@@ -344,7 +353,14 @@ class SettlementCheckOneTest {
     @JsName("a_receipt_matched_against_the_other_payees_request_is_refused")
     @Test
     fun `a receipt matched against the other payee's request is refused`() {
-        val invoices = SettlementFixtures.invoices(2)
+        // §8.6's two separate invoices, each for the amount its own payee is owed — so what refuses
+        // the crossed receipt below is check 1's byte comparison and not check 4's arithmetic,
+        // which would be the right verdict reported for the wrong reason.
+        val preimages = PaymentFixtures.preimageHex(2)
+        val invoices = listOf(
+            SettlementFixtures.invoice(preimages[0], SettlementFixtures.amountFor(Payee.PROVIDER, SPLIT)),
+            SettlementFixtures.invoice(preimages[1], SettlementFixtures.amountFor(Payee.FEE, SPLIT)),
+        )
         val order = SettlementFixtures.orderHex(0)
         val store = PaymentRequestStore.inMemory()
         val clock = FakeClock(SettlementFixtures.ACCEPTED_AT)
@@ -360,7 +376,7 @@ class SettlementCheckOneTest {
             store,
             clock,
         )
-        val preimageHex = PaymentFixtures.preimageHex(1).single()
+        val preimageHex = preimages[0]
         val providerReceipt = SettlementFixtures.receipt(
             SettlementFixtures.receiptTags(
                 order = order,
@@ -371,7 +387,7 @@ class SettlementCheckOneTest {
         val hash = PaymentFixtures.paymentHashOf(Preimage.ofHex(preimageHex))
 
         val missing = assertFailsWith<SettlementException> {
-            Settlement.verify(providerReceipt, hash, store)
+            Settlement.verify(providerReceipt, hash, store, SPLIT)
         }
         assertEquals(SettlementRejection.NO_STORED_REQUEST, missing.reason)
 
@@ -395,7 +411,8 @@ class SettlementCheckOneTest {
                 payeeTag = SettlementFixtures.payeeTag(Payee.PROVIDER),
             ),
         )
-        val mismatch = assertFailsWith<SettlementException> { Settlement.verify(crossed, hash, store) }
+        val mismatch =
+            assertFailsWith<SettlementException> { Settlement.verify(crossed, hash, store, SPLIT) }
         assertEquals(SettlementRejection.INVOICE_NOT_IDENTICAL, mismatch.reason)
     }
 
@@ -411,7 +428,7 @@ class SettlementCheckOneTest {
         val receipt = SettlementFixtures.receipt(settled.fixture.receiptTags)
 
         val refused = assertFailsWith<PaymentException> {
-            Settlement.verify(receipt, other.paymentHash, settled.store)
+            Settlement.verify(receipt, other.paymentHash, settled.store, SPLIT)
         }
 
         assertEquals(
@@ -459,7 +476,8 @@ class SettlementCheckOneTest {
             assertEquals(medium, receipt.medium)
             assertNull(receipt.preimage, "§9.4 defines no rule, so the proof is not read as a preimage")
 
-            val settlement: Settlement = Settlement.verify(receipt, fixture.paymentHash, store)
+            val settlement: Settlement =
+                Settlement.verify(receipt, fixture.paymentHash, store, SPLIT)
 
             val unverified = assertIs<Settlement.Unverified>(
                 settlement,
