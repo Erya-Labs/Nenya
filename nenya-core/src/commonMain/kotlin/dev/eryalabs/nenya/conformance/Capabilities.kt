@@ -335,7 +335,12 @@ public object Capabilities {
                 "implementation that cannot verify the seal's signature — a rumor whose claimed " +
                 "`pubkey` is not the seal's is discarded, no value is produced for it, and every " +
                 "message that survives is reported as authenticated-by-decryption only. " +
-                "Attribution has exactly one constant, so there is none for signature-verified. " +
+                "Attribution now carries a second constant, SIGNATURE_VERIFIED, and the door to it " +
+                "is narrow rather than wide: this codec cannot return it at all — it is handed two " +
+                "keys and a rumor, never a seal or a verifier — and it is reachable only from " +
+                "GiftWrap.open, after the injected Secp256k1Ops answered VALID for the kind:13 " +
+                "seal's signature over the id that package recomputed. Never on the strength of the " +
+                "gift wrap's signature, whatever its verdict (§7.2). " +
                 "§7.4's envelope with it: the four rumor kinds and the six `type` values are held " +
                 "equal to §7.4's own tables parsed at test time, an unimplemented `type` lands in " +
                 "a sink rather than on the nearest known value, `type=4` is readable and " +

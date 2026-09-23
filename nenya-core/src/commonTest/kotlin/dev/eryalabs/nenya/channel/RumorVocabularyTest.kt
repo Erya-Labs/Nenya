@@ -181,19 +181,45 @@ class RumorVocabularyTest {
     }
 
     /**
-     * §7.2's mode, as a shape rather than as a promise: there is one constant, so
-     * "never as signature-verified" is not something this package can accidentally report.
+     * §7.2's two modes, and the one this package can report.
+     *
+     * **This test changed when `GiftWrap.open` landed, and the change is declared rather than
+     * silent.** It used to assert that [Attribution] had exactly one constant, because until
+     * something in this library verified a signature there was nothing for a second one to mean, and
+     * "never as signature-verified" was best kept by having no constant for it. T13's own KDoc
+     * assigned the constant to "the task that first verifies a signature", and `GiftWrap.open` is it:
+     * it obtains a verdict from the injected `Secp256k1Ops` over the seal's recomputed id.
+     *
+     * So the assertion is now the **narrower** one it was standing in for, and it is narrower rather
+     * than weaker: §7.2's over-claim is still unrepresentable *through this package's door*. Every
+     * rumor [AttributedRumor.attribute] produces — over the whole generated corpus, not one
+     * example — reports authenticated-by-decryption, because that function is handed two keys and a
+     * rumor and has no signature to check. `GiftWrapOpenTest` proves the other half: the stronger
+     * constant appears only on a verdict actually obtained, and never on the strength of the gift
+     * wrap's signature (§7.2).
      */
-    @JsName("attribution_has_no_signature_verified_constant_to_return")
+    @JsName("the_public_attribution_door_never_reports_signature_verified")
     @Test
-    fun `attribution has no signature-verified constant to return`() {
-        assertEquals(1, Attribution.entries.size, "a second constant is a new evidence claim")
-        assertEquals(Attribution.AUTHENTICATED_BY_DECRYPTION, Attribution.entries.single())
-        assertTrue(
-            Attribution.entries.none { "SIGNATURE" in it.name },
-            "§7.2: messages in this mode are reported as authenticated-by-decryption only, never " +
-                "as signature-verified, and the way to keep that is to have no constant for it",
+    fun `the public attribution door never reports signature-verified`() {
+        assertEquals(
+            setOf(Attribution.AUTHENTICATED_BY_DECRYPTION, Attribution.SIGNATURE_VERIFIED),
+            Attribution.entries.toSet(),
+            "a third constant is a new evidence claim and needs §7.2 read again",
         )
+        assertTrue(
+            Attribution.entries.any { "SIGNATURE" in it.name },
+            "the assertion below is about a door that could report the stronger mode and does not; " +
+                "with no such constant it would prove nothing",
+        )
+
+        for (fixture in ChannelFixtures.rumors(ATTRIBUTION_SAMPLES)) {
+            assertEquals(
+                Attribution.AUTHENTICATED_BY_DECRYPTION,
+                ChannelFixtures.attribute(fixture).attribution,
+                "§7.2: this codec performs the pubkey-equality check and nothing else, so every " +
+                    "rumor it produces is authenticated-by-decryption only, never signature-verified",
+            )
+        }
     }
 
     private companion object {
@@ -209,5 +235,14 @@ class RumorVocabularyTest {
 
         /** U+2014, which is what §7.4 prints in the reserved row's Sender cell. */
         const val EM_DASH: String = "—"
+
+        /**
+         * Enough of `ChannelFixtures`' corpus to cover every shape it cycles, several times over.
+         *
+         * Not ten thousand: the property being asserted is that one accessor is a constant for every
+         * shape, `ChannelPropertyTest` already runs the whole corpus through this decoder, and this
+         * file's other tests parse the specification.
+         */
+        const val ATTRIBUTION_SAMPLES: Int = 200
     }
 }

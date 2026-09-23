@@ -70,11 +70,12 @@ import dev.eryalabs.nenya.wire.WireEvent
  * required tags for that kind and not the one §7.4 forbids; and its §5.3 values decode under §5.3's
  * Encoding column.
  *
- * It claims **nothing** about a signature. [attribution] is [Attribution.AUTHENTICATED_BY_DECRYPTION]
- * on every instance and there is no other constant for it to be, and [notPerformedHere] names
- * `BIP340_VERIFICATION` and `NIP44_DECRYPTION` — the second because **the decryption was the
- * caller's**. This library was handed a rumor and a pubkey; that the two came out of a seal the
- * caller genuinely decrypted is the caller's fact, not this library's.
+ * It claims **nothing** about a signature of its own: [attribute] is handed a pubkey and a rumor,
+ * never a seal or a verifier, so [Attribution.AUTHENTICATED_BY_DECRYPTION] is the only mode it can
+ * report and `ChannelCodecTest` pins that. [Attribution.SIGNATURE_VERIFIED] exists for the one
+ * caller that genuinely obtained a verdict — `GiftWrap.open`, through the `internal` path below —
+ * and [notPerformedHere] says what **this package** did not do either way; see it for why that set
+ * is the same on both paths.
  *
  * Pure computation: no clock, no randomness, no I/O.
  */
@@ -114,12 +115,24 @@ public sealed interface AttributedRumor {
     /** Which of §7.4's four rumor kinds this is. */
     public val kind: RumorKind
 
-    /** §7.2's mode. One constant, and see [Attribution] for why that is the point. */
+    /** §7.2's mode. [Attribution.AUTHENTICATED_BY_DECRYPTION] unless a seal signature verified. */
     public val attribution: Attribution
 
     /**
-     * What was **not** checked to produce this value (§17): BIP-340 verification, which this
-     * library does not have, and NIP-44 decryption, which was the caller's.
+     * What **this package** did not check to produce this value (§17): BIP-340 verification and
+     * NIP-44 decryption, neither of which happens in this file on any path.
+     *
+     * The same set on both of [Attribution]'s modes, and that is the rule rather than an oversight.
+     * "Here" means this codec: it performs §7.2's string comparison over two keys and §7.4's
+     * envelope, and it neither decrypts nor verifies on either path. On the public [attribute] the
+     * decryption was the **caller's** — this library was handed a rumor and a pubkey and takes no
+     * position on where they came from. On `GiftWrap.open`'s path the decryption is **orchestrated**
+     * one layer out and performed by the injected signer, and the signature verdict is obtained one
+     * layer out too, from the injected `Secp256k1Ops` — so `OpenedMessage` is where both are
+     * reported, as `sealSignature`, `wrapSignature` and its own `notPerformedHere`. Restating either
+     * as performed *here* would attribute somebody else's work to this codec, which is the §17
+     * over-claim in miniature; understating it costs a caller nothing, because the precise statement
+     * is published on the value that actually did the work.
      *
      * Published for the reason `VerifiedPayment.checksNotPerformedHere` is: §17 forbids reporting
      * unverified things as verified and requires the statement be machine-readable, and a caller
@@ -229,6 +242,36 @@ public sealed interface AttributedRumor {
             sealPubkey: String,
             rumor: CheckedEvent,
             limits: TagLimits = TagLimits.DEFAULT,
+        ): AttributedRumor = attribute(sealPubkey, rumor, limits, Attribution.AUTHENTICATED_BY_DECRYPTION)
+
+        /**
+         * The same rule, reporting [Attribution.SIGNATURE_VERIFIED] — for the one caller that
+         * actually obtained a verdict.
+         *
+         * `internal`, and that visibility is the whole of how §7.2's over-claim stays
+         * unrepresentable through the published API: the only call site is `GiftWrap.open`, which
+         * reaches it after the injected `Secp256k1Ops` answered `SignatureVerdict.VALID` for the
+         * `kind:13` seal's signature, against the seal's `pubkey`, over the id the envelope package
+         * recomputed itself (§4.1). Every §7.2 and §7.4 check below runs identically on both paths;
+         * the parameter decides nothing except which mode is reported, which is why it is a mode and
+         * not a flag that could switch a check off.
+         *
+         * There is deliberately no parameter for the **wrap's** verdict. §7.2: the wrap's signature
+         * "attributes nothing, it does not corroborate the seal, and an implementation MUST NOT
+         * report a message as signature-verified on the strength of it" — so it is not something
+         * this function could be handed even by mistake.
+         */
+        internal fun attributeSignatureVerified(
+            sealPubkey: String,
+            rumor: CheckedEvent,
+            limits: TagLimits = TagLimits.DEFAULT,
+        ): AttributedRumor = attribute(sealPubkey, rumor, limits, Attribution.SIGNATURE_VERIFIED)
+
+        private fun attribute(
+            sealPubkey: String,
+            rumor: CheckedEvent,
+            limits: TagLimits,
+            attribution: Attribution,
         ): AttributedRumor {
             val event = rumor.event
             val author = checkAttribution(sealPubkey, event)
@@ -271,9 +314,9 @@ public sealed interface AttributedRumor {
             checkVersionCollision(message, tags.nenyaVersion)
 
             return if (kind == RumorKind.CHAT) {
-                ChatRumor(author, rumor.id, event, kind, tags)
+                ChatRumor(author, rumor.id, event, kind, tags, attribution)
             } else {
-                BoundRumor(author, rumor.id, event, kind, tags, message, order)
+                BoundRumor(author, rumor.id, event, kind, tags, attribution, message, order)
             }
         }
 
@@ -290,7 +333,14 @@ public sealed interface AttributedRumor {
          */
         public fun requiredTags(): List<String> = ChannelVocabulary.REQUIRED
 
-        /** §17: BIP-340 is not available here, and the NIP-44 decryption was the caller's. */
+        /**
+         * §17: neither BIP-340 verification nor NIP-44 decryption happens in this file.
+         *
+         * On the public [attribute] the decryption was the caller's. On `GiftWrap.open`'s path it is
+         * orchestrated one layer out and **performed by the seam**, as the signature check is — so
+         * the set is the same on both, and [notPerformedHere] says why that is honest rather than
+         * stale.
+         */
         public val NOT_PERFORMED_HERE: Set<SeamCapability> = readOnlySetOf(
             linkedSetOf(SeamCapability.NIP44_DECRYPTION, SeamCapability.BIP340_VERIFICATION),
         )
@@ -511,13 +561,12 @@ public sealed interface AttributedRumor {
             private val event: WireEvent,
             final override val kind: RumorKind,
             final override val tags: TagSet,
+            final override val attribution: Attribution,
         ) : AttributedRumor {
 
             final override val createdAt: Long get() = event.createdAt
 
             final override val content: String get() = event.content
-
-            final override val attribution: Attribution get() = Attribution.AUTHENTICATED_BY_DECRYPTION
 
             final override val notPerformedHere: Set<SeamCapability> get() = NOT_PERFORMED_HERE
 
@@ -549,7 +598,8 @@ public sealed interface AttributedRumor {
             event: WireEvent,
             kind: RumorKind,
             tags: TagSet,
-        ) : Decoded(author, id, event, kind, tags), Chat
+            attribution: Attribution,
+        ) : Decoded(author, id, event, kind, tags, attribution), Chat
 
         /** §7.4's `kind:15`, `kind:16` and `kind:17`. */
         private class BoundRumor(
@@ -558,9 +608,10 @@ public sealed interface AttributedRumor {
             event: WireEvent,
             kind: RumorKind,
             tags: TagSet,
+            attribution: Attribution,
             override val type: OrderMessageKind?,
             override val order: OrderId?,
-        ) : Decoded(author, id, event, kind, tags), Bound {
+        ) : Decoded(author, id, event, kind, tags, attribution), Bound {
 
             /** The `type` is a kind of message and carries no identifier; the order id is not named. */
             override fun toString(): String =

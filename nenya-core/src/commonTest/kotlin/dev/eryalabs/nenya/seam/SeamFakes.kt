@@ -241,3 +241,46 @@ internal class OptimisticSecp256k1Ops : Secp256k1Ops {
         signature: ByteArray,
     ): SeamAnswer<SignatureVerdict> = SeamAnswer.Provided(SignatureVerdict.VALID)
 }
+
+/**
+ * A verifier that answers for **one key** and [SeamAnswer.Unavailable] for every other.
+ *
+ * §17 lets an adapter be partially capable, and §7.1's read procedure asks the same seam for two
+ * signatures under two different keys — the gift wrap's throwaway key at step 4 and the seal's at
+ * step 6. Every other verifier fake answers the same way for both, so a reader that read the
+ * *wrong* one of the two verdicts behaves identically under all of them. This one separates them:
+ * with the seal's key it yields a seal verdict and no wrap verdict, and with the wrap's throwaway
+ * key the reverse.
+ *
+ * Selective by **key** rather than by call number on purpose. A fake that answered "on the first
+ * call only" would pin today's call order as well as the property under test, so re-ordering two
+ * independent checks would turn it red for no reason; a key is what §7.1 actually distinguishes the
+ * two verdicts by.
+ *
+ * Delegates the verdict itself to [FakeSecp256k1Ops], so a signature that should not verify still
+ * does not: this fake narrows *which* questions are answered, never how honestly.
+ */
+internal class KeySelectiveSecp256k1Ops(
+
+    /** The lowercase-hex x-only key this verifier will answer for. */
+    private val answersFor: String,
+) : Secp256k1Ops {
+
+    private val honest = FakeSecp256k1Ops()
+
+    /** How many verdicts were actually produced, so a test can prove exactly one layer was checked. */
+    var verdicts: Int = 0
+        private set
+
+    override fun verifySchnorr(
+        publicKeyXOnly: ByteArray,
+        message: ByteArray,
+        signature: ByteArray,
+    ): SeamAnswer<SignatureVerdict> {
+        if (SeamFixtures.lowerHex(publicKeyXOnly) != answersFor) {
+            return SeamAnswer.unavailable(SeamCapability.BIP340_VERIFICATION)
+        }
+        verdicts++
+        return honest.verifySchnorr(publicKeyXOnly, message, signature)
+    }
+}

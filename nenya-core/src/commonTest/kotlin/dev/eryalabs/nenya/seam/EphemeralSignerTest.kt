@@ -59,6 +59,7 @@ class EphemeralSignerTest {
             "EmptyCiphertextSigner",
             "NonAsciiCiphertextSigner",
             "OversizedCiphertextSigner",
+            "OversizedPlaintextSigner",
             "NoSignatureSigner",
             "ShortSignatureSigner",
             "LyingNip44PayloadSigner",

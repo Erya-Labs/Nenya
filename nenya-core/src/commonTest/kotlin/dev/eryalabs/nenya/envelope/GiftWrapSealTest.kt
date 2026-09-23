@@ -614,6 +614,7 @@ class GiftWrapSealTest {
         EnvelopeFixtures.strangerKey(),
         EnvelopeFixtures.RUMOR_CONTENT,
         EnvelopeFixtures.ORDER_ID_HEX,
+        EnvelopeFixtures.ITEM_COORDINATE,
         FakeKey(FakeKeyRanges.EPHEMERAL).hex,
         FakeKey(FakeKeyRanges.EPHEMERAL + 1).hex,
         FakeKey(FakeKeyRanges.REUSED).hex,

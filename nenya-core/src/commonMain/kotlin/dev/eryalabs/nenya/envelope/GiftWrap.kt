@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.envelope
 
+import dev.eryalabs.nenya.channel.AttributedRumor
+import dev.eryalabs.nenya.channel.ChannelException
 import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.seam.EphemeralSigners
 import dev.eryalabs.nenya.seam.NenyaClock
@@ -10,11 +12,18 @@ import dev.eryalabs.nenya.seam.Secp256k1Ops
 import dev.eryalabs.nenya.seam.SignatureVerdict
 import dev.eryalabs.nenya.seam.Signer
 import dev.eryalabs.nenya.tag.NenyaKind
+import dev.eryalabs.nenya.tag.TagLimits
 import dev.eryalabs.nenya.text.strictUtf8OrNull
+import dev.eryalabs.nenya.wire.CheckedEvent
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.EventJson
+import dev.eryalabs.nenya.wire.JsonException
+import dev.eryalabs.nenya.wire.JsonRejection
+import dev.eryalabs.nenya.wire.ReadEvent
 import dev.eryalabs.nenya.wire.WireEvent
+import dev.eryalabs.nenya.wire.WireException
 import dev.eryalabs.nenya.wire.WireLimits
+import dev.eryalabs.nenya.wire.WireRejection
 
 /**
  * Which half of §7.1 a rejection belongs to: the write procedure or the read procedure.
@@ -231,6 +240,235 @@ public enum class EnvelopeRejection(
      * inside this file fails loudly instead of quietly linking two wraps.
      */
     THROWAWAY_SIGNER_REUSED(EnvelopeSide.SEAL),
+
+    // --------------------------------------------------------------------- §7.1's read procedure
+    //
+    // §7.1: "The steps MUST be applied in this order, and a rejection at any step stops the read:
+    // nothing below a failed step is attempted, and no part of the message is reported." The
+    // constants below are declared in that order, so the enum reads as the procedure does, and
+    // `GiftWrapOpenTest`'s non-vacuity floor enumerates them from the enum rather than from a list.
+
+    /**
+     * The wrap's JSON is longer than [EnvelopeLimits.DEFAULT_MAX_WRAP_JSON_BYTES] (§4.3).
+     *
+     * Measured and refused **before the scanner runs**, which is why it is its own reason rather
+     * than a [MALFORMED_WRAP] carrying the reader's own size complaint: a relay that serves a
+     * hundred megabytes must cost one comparison, and a caller told "malformed" would go looking
+     * for a syntax error in a document that is merely too big.
+     */
+    WRAP_TOO_LARGE(EnvelopeSide.OPEN),
+
+    /**
+     * The wrap is not §7.1's object form, or breaks a §4.3 rule about the event inside it. The wire
+     * layer's own [dev.eryalabs.nenya.wire.JsonRejection] or
+     * [dev.eryalabs.nenya.wire.WireRejection] is kept as the cause.
+     *
+     * One reason for both, because the fix is the same — the relay served something no conformant
+     * sender emits — and because §7.1's read procedure treats "parse it" as one step. A caller that
+     * must know which rule broke reads the cause.
+     */
+    MALFORMED_WRAP(EnvelopeSide.OPEN),
+
+    /**
+     * The wrap carries no `sig` key at all. §7.1 step 3 signs every gift wrap with the throwaway
+     * key, so an unsigned one is not a gift wrap.
+     *
+     * Refused even though this library may be unable to *verify* the signature: §7.1 step 4 is
+     * conditional on secp256k1 and the signature's **presence** is not. A wrap with nothing in the
+     * field is a message no conformant sender produced, and accepting it would mean accepting one
+     * from which the step 4 an equipped reader performs has been removed.
+     */
+    WRAP_UNSIGNED(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 1 and §4.1: the wrap's recomputed `id` is not the one it claims.
+     *
+     * First of the checks that look at the event, and §4.1 requires exactly that — "reject a
+     * received event whose `id` does not match its recomputed value **before any other
+     * processing**". So this is refused before the kind, before the `p` tag and long before any
+     * decryption.
+     */
+    WRAP_ID_MISMATCH(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 2: the kind is not `1059`.
+     *
+     * Includes `21059`, which §7.1 step 3 names: "the kind is `1059` and only `1059`; `21059` is
+     * defined elsewhere for another purpose and MUST NOT be used here".
+     */
+    NOT_A_GIFT_WRAP(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 3: the wrap carries no readable `p` tag, so it names no recipient.
+     *
+     * Covers a wrap with no `p` tag and one whose `p` tag has no value element (`["p"]`): each names
+     * nobody, and neither can be the reader.
+     */
+    MISSING_RECIPIENT(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 3 requires **exactly one** `p` tag, and this wrap carries more.
+     *
+     * Its own reason rather than [MISSING_RECIPIENT], and refused rather than resolved, for §4.3's
+     * reason: "first wins" and "last wins" are both defensible, which is exactly the problem — and
+     * here the two readings differ about who the message is *for*.
+     */
+    AMBIGUOUS_RECIPIENT(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 3: the wrap's single `p` tag is not the reader's own key.
+     *
+     * Raised **before any decryption is attempted**, which is what step 3's "Reject otherwise —
+     * before any decryption" asks for and what makes it more than tidiness: a stranger's ciphertext
+     * never reaches the signer, so a remote or NIP-55 signer is never asked to spend a key operation
+     * on somebody else's traffic.
+     *
+     * Both keys go through §4.3's accept-and-normalise rule before being compared, so a sender that
+     * spelled the reader's key in uppercase is not called a stranger for it.
+     */
+    NOT_ADDRESSED_TO_ME(EnvelopeSide.OPEN),
+
+    /** The reader's own [Signer] answered [SeamAnswer.Unavailable] for its public key. */
+    READER_PUBLIC_KEY_UNAVAILABLE(EnvelopeSide.OPEN),
+
+    /**
+     * The reader's own [Signer] answered something that is not 64 hex characters (§4.3).
+     *
+     * A named refusal rather than "then it is not the addressee", because the two are different
+     * facts with different fixes: one says this message is for somebody else and the other says the
+     * client's signer is broken. Treating a broken signer as a non-match would silently discard
+     * every message the user receives.
+     */
+    READER_PUBLIC_KEY_MALFORMED(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 4: the injected [Secp256k1Ops] checked the wrap's signature against the wrap's
+     * `pubkey`, over the id this library recomputed, and answered [SignatureVerdict.INVALID].
+     *
+     * §7.1: "What is forbidden is verifying and ignoring the answer: an implementation that *does*
+     * verify MUST reject on a bad signature." A verifier answering [SeamAnswer.Unavailable] is a
+     * different thing entirely and never lands here — the read continues and
+     * [OpenedMessage.wrapSignature] records [SignatureCheck.NOT_CHECKED] (§17, §7.2).
+     *
+     * Per §7.2 a valid verdict here establishes no identity whatsoever; it establishes only that the
+     * wrap reached the reader unaltered.
+     */
+    WRAP_SIGNATURE_INVALID(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 5: the wrap's `content` did not decrypt under the reader's conversation with
+     * the wrap's `pubkey`.
+     *
+     * The wrap's key is used here as a NIP-44 **counterparty** and nowhere else. §7.2 forbids
+     * displaying it, indexing by it or using it "in any comparison", and deriving a conversation key
+     * from it is none of the three: it is what NIP-59 encrypted the seal to, and no identity is read
+     * off it — [OpenedMessage] has no accessor for it at all.
+     */
+    COULD_NOT_DECRYPT_WRAP(EnvelopeSide.OPEN),
+
+    /**
+     * The decrypted seal is longer than [EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES], so it is not
+     * something NIP-44 could have carried.
+     *
+     * Measured before the scanner runs, as [WRAP_TOO_LARGE] is, and bounded by NIP-44's own ceiling
+     * rather than by a caller's [WireLimits]: a plaintext above it did not come out of a conformant
+     * NIP-44 payload, whatever bounds the client chose for ordinary events.
+     */
+    SEAL_TOO_LARGE(EnvelopeSide.OPEN),
+
+    /** §7.1 read step 6: the seal is not §7.1's object form. Same shape as [MALFORMED_WRAP]. */
+    MALFORMED_SEAL(EnvelopeSide.OPEN),
+
+    /**
+     * The seal carries no `sig` key. §7.1 step 2 signs it with the sender's real key, and §7.2 makes
+     * that signature the thing that binds every term in the rumor to a key.
+     *
+     * So this is refused even by a reader with no verifier, and the reason is §7.2's rather than
+     * step 6's: an implementation that cannot check the signature still reports the message as
+     * authenticated-by-decryption, and a seal with no signature at all has nothing for a better
+     * equipped reader to check. Accepting one would mean accepting a message whose only binding
+     * evidence has been deleted.
+     */
+    SEAL_UNSIGNED(EnvelopeSide.OPEN),
+
+    /** §7.1 read step 6 and §4.1: the seal's recomputed `id` is not the one it claims. */
+    SEAL_ID_MISMATCH(EnvelopeSide.OPEN),
+
+    /** §7.1 read step 6: the kind is not `13`. */
+    NOT_A_SEAL(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 6: "reject a seal whose `tags` are **not empty**".
+     *
+     * A MUST rather than a nicety, and its own reason because it is the one structural rule about a
+     * seal that is not about its kind or its id: §7.1 step 2 requires the tags be empty, so a tag
+     * here is a value somebody attached to a signed envelope for a reader to find.
+     */
+    SEAL_HAS_TAGS(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 6: the injected [Secp256k1Ops] checked the seal's signature against the seal's
+     * `pubkey`, over the id this library recomputed, and answered [SignatureVerdict.INVALID].
+     *
+     * The verdict that matters. §7.2 makes the seal's signature the thing that binds a term to a
+     * key, so a reader that obtains a refusal here and continues would be attributing terms to a key
+     * whose owner demonstrably did not sign them. [SeamAnswer.Unavailable] again continues, with
+     * [OpenedMessage.sealSignature] recording [SignatureCheck.NOT_CHECKED] and the rumor reported as
+     * [dev.eryalabs.nenya.channel.Attribution.AUTHENTICATED_BY_DECRYPTION].
+     */
+    SEAL_SIGNATURE_INVALID(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 7: the seal's `content` did not decrypt under the reader's conversation with
+     * the **seal's** `pubkey`.
+     *
+     * This is what "authenticated by decryption" means, stated as a refusal: a seal that claims
+     * somebody else's key does not decrypt under that key's conversation, so the claim fails here
+     * even against a reader with no verifier at all. It is the reason §7.2's mode is worth
+     * reporting rather than merely tolerable.
+     */
+    COULD_NOT_DECRYPT_SEAL(EnvelopeSide.OPEN),
+
+    /**
+     * The decrypted rumor is longer than [EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES].
+     *
+     * Unreachable through a conformant seal — [SEAL_TOO_LARGE]'s bound leaves room for a rumor of
+     * roughly 48 KB, so a larger plaintext means the injected signer returned more than NIP-44 can
+     * carry. Bounded anyway, and before the scanner runs, because §4.3's rule is about what this
+     * library parses and not about who handed it over.
+     */
+    RUMOR_TOO_LARGE_TO_OPEN(EnvelopeSide.OPEN),
+
+    /** §7.1 read step 8: the rumor is not §7.1's object form. Same shape as [MALFORMED_WRAP]. */
+    MALFORMED_RUMOR(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 8: "reject a rumor carrying a `sig` key **with any value at all**, including an
+     * empty string or `null`".
+     *
+     * All three shapes land here. A well-formed 128-hex signature is refused after the read, because
+     * `ReadEvent.signatureHex` is non-null; `"sig":""` and any other wrong-shaped string are refused
+     * *during* it, as [dev.eryalabs.nenya.wire.JsonRejection.SIGNATURE_MALFORMED], and mapped here
+     * rather than to [MALFORMED_RUMOR] because the rule broken is step 8's and not the grammar's.
+     *
+     * §7.1 gives the reason: a `sig` present "is either a sender that does not understand the
+     * construction or an attempt to have the rumor treated as independently signed".
+     */
+    RUMOR_SIGNED(EnvelopeSide.OPEN),
+
+    /** §7.1 read step 8 and §4.1: the rumor's recomputed `id` is not the one it claims. */
+    RUMOR_ID_MISMATCH(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 9: §7.2's attribution rule, or §7.4's envelope, refused the rumor.
+     *
+     * The [dev.eryalabs.nenya.channel.ChannelException] is kept as the cause with its own
+     * [dev.eryalabs.nenya.channel.ChannelRejection] intact, so
+     * `ChannelRejection.IMPERSONATION` — the refusal §7.2 exists for — stays assertable by name
+     * rather than collapsing into "the rumor was refused". Mapping each channel reason onto a
+     * reason here would be a second copy of §7.4's vocabulary, which is the shape that goes stale.
+     */
+    RUMOR_REFUSED(EnvelopeSide.OPEN),
 }
 
 /**
@@ -322,8 +560,138 @@ public sealed interface SealedMessage {
 }
 
 /**
- * §7.1's write procedure: a rumor, sealed and gift-wrapped twice, using only what the embedding
- * client plugs in.
+ * What happened when this library looked at one signature: it verified, or nobody checked.
+ *
+ * **There is no `INVALID` constant, and that absence is the design.** §7.1's read procedure says an
+ * implementation that verifies MUST reject on a bad signature, so an invalid verdict produces no
+ * [OpenedMessage] at all — it is [EnvelopeRejection.WRAP_SIGNATURE_INVALID] or
+ * [EnvelopeRejection.SEAL_SIGNATURE_INVALID], and a caller cannot be handed a message carrying a
+ * signature this library checked and refused.
+ *
+ * Two constants rather than a `Boolean`, for §17's reason: "an implementation's UI MUST distinguish
+ * *signature verified* from *decrypted and structurally valid*", and §7.2 adds that an
+ * implementation verifying for some messages and not others MUST distinguish them, "because a single
+ * label covering both claims the stronger property for the weaker case". A `Boolean` named
+ * `verified` would read `false` for both "checked and bad" — impossible here — and "never checked",
+ * which is exactly the conflation both sections forbid.
+ */
+public enum class SignatureCheck {
+
+    /**
+     * The injected [Secp256k1Ops] answered [SignatureVerdict.VALID] for this signature, against the
+     * event's own `pubkey`, over the id this library recomputed (§4.1).
+     */
+    VERIFIED,
+
+    /**
+     * No verdict was obtained: the injected [Secp256k1Ops] answered [SeamAnswer.Unavailable].
+     *
+     * §7.1 requires the read to **continue** past steps 4 and 6 in this case rather than discard the
+     * message — "a reader that dropped every message for want of a verifier it never claimed to have
+     * would be unable to receive anything at all" — and §7.2 requires the message then be reported as
+     * authenticated-by-decryption only.
+     */
+    NOT_CHECKED,
+}
+
+/**
+ * One `kind:1059` gift wrap opened: §7.1's read procedure run to its end, and §7.2 applied.
+ *
+ * ### There is no accessor for the wrap's `pubkey`, and that is the point
+ *
+ * §7.2: "The gift wrap's `pubkey` is random and carries **no** identity. Implementations MUST NOT
+ * display it, index by it, or use it in any comparison." So it is not on this type. `GiftWrap.open`
+ * uses it for exactly two things — a NIP-44 counterparty and the key the wrap's own signature is
+ * checked against — and then drops it; a caller wanting it back has to parse the wrap itself, which
+ * this library does nowhere. [OutgoingWrap] is the same shape on the write side for the same reason.
+ *
+ * ### What it claims
+ *
+ * Exactly this: the wrap's JSON was within §4.3's bound and parsed; its `id` recomputed (§4.1); its
+ * kind was `1059` and its single `p` tag was the reader's own key; the seal decrypted, parsed,
+ * recomputed its own id, was a `kind:13` with empty `tags`, and decrypted the rumor **under its own
+ * claimed key**; the rumor carried no `sig`, recomputed its id, and passed §7.2's and §7.4's rules.
+ * Plus, for each of the two signatures, whichever of [SignatureCheck]'s two answers this library
+ * actually obtained.
+ *
+ * It claims **nothing** about time. §4.6 and §7.1 both say so in as many words, and §7.1 restates it
+ * because step 5 of the write procedure deliberately produces timestamps up to two days old: no
+ * timestamp anywhere in this envelope is grounds for rejection, and [GiftWrap.open] takes no clock
+ * at all, so there is nothing here for a freshness rule to be built out of.
+ *
+ * ### Unforgeable through the published API
+ *
+ * Same shape and same reason as [SealedMessage], `CheckedEvent`, `VerifiedPayment` and
+ * `AttributedRumor`: a public `sealed interface` whose single implementation is a `private` class.
+ * An interface has no constructor to synthesise an accessor for, so `Class.getConstructors()` on it
+ * is empty by construction. The claim is "unforgeable **through the published API**", not
+ * unforgeable full stop.
+ */
+public sealed interface OpenedMessage {
+
+    /**
+     * The rumor, attributed by §7.2's rule and decoded by §7.4's (`AttributedRumor`).
+     *
+     * Its [dev.eryalabs.nenya.channel.AttributedRumor.attribution] is
+     * [dev.eryalabs.nenya.channel.Attribution.SIGNATURE_VERIFIED] exactly when [sealSignature] is
+     * [SignatureCheck.VERIFIED], and [dev.eryalabs.nenya.channel.Attribution.AUTHENTICATED_BY_DECRYPTION]
+     * otherwise — never on the strength of [wrapSignature], whatever that says (§7.2).
+     */
+    public val rumor: AttributedRumor
+
+    /** §7.1 read step 6's verdict on the `kind:13` seal's signature. The one that binds (§7.2). */
+    public val sealSignature: SignatureCheck
+
+    /**
+     * §7.1 read step 4's verdict on the `kind:1059` wrap's signature.
+     *
+     * Published, and deliberately not folded into [sealSignature] or into the attribution: §7.2 says
+     * a valid one "says only that the wrap reached the reader unaltered. It attributes nothing, it
+     * does not corroborate the seal, and an implementation MUST NOT report a message as
+     * signature-verified on the strength of it."
+     */
+    public val wrapSignature: SignatureCheck
+
+    /**
+     * The wrap's `id`, recomputed here from its own five fields (§4.1) and not merely claimed.
+     *
+     * Published for **de-duplication**, which a client needs because NIP-17 publishes one wrap to
+     * several relays and §4.6 forbids ordering the thread by anything the wrap claims about time. It
+     * is the wrap's id and not the rumor's on purpose: two wraps of one rumor are two messages to
+     * discard one of, and the rumor's id is the same in both.
+     */
+    public val wrapId: EventId
+
+    /**
+     * What was **not** checked while opening this message (§17).
+     *
+     * Empty when a verdict was obtained for both signatures; `{`[SeamCapability.BIP340_VERIFICATION]`}`
+     * when either was [SignatureCheck.NOT_CHECKED]. §17 permits omitting BIP-340 verification and
+     * forbids reporting an unverified thing as verified, and requires the statement be
+     * machine-readable rather than a paragraph in a README.
+     *
+     * It says nothing about NIP-44 decryption, which is **orchestrated** here and performed by the
+     * injected signer, nor about the signatures being *made*; `Capabilities.NOT_PERFORMED_HERE` is
+     * where the library-wide statement about those lives, and
+     * `AttributedRumor.notPerformedHere` says what the channel codec itself did not do.
+     */
+    public val notPerformedHere: Set<SeamCapability>
+}
+
+/**
+ * §7.1's two procedures: a rumor sealed and gift-wrapped twice ([seal]), and a gift wrap read back
+ * to an attributed rumor ([open]) — using only what the embedding client plugs in.
+ *
+ * ### The two halves are not symmetrical, and §7.1 says why
+ *
+ * [seal] is handed values by the client and refuses the ones no conformant sender may emit. [open]
+ * is handed **hostile input**: every byte comes off a relay, from a stranger, and §7.1 fixes the
+ * order its checks run in — "a rejection at any step stops the read: nothing below a failed step is
+ * attempted, and no part of the message is reported". Two consequences shape the code below. The
+ * three checks that cost no cryptography come first, so a wrap addressed to somebody else is
+ * discarded before the signer is asked to spend a key operation on it. And every refusal is a named
+ * [EnvelopeRejection] with side [EnvelopeSide.OPEN], so a caller can tell a relay serving rubbish
+ * from a counterparty impersonating somebody.
  *
  * ### The first production code in this library to call a seam
  *
@@ -459,6 +827,505 @@ public object GiftWrap {
         val toRecipient = state.copyFor(recipient)
         val toSelf = state.copyFor(senderKey)
         return Sealed(toRecipient, toSelf, state.notPerformed())
+    }
+
+    /**
+     * §7.1's read procedure, in §7.1's order, ending in §7.2's rule.
+     *
+     * The order is the contract and not an implementation detail. §7.1: "The steps MUST be applied
+     * **in this order**, and a rejection at any step stops the read: nothing below a failed step is
+     * attempted, and no part of the message is reported." Two properties of that order are worth
+     * naming, because both are invisible in the output and both are asserted rather than trusted:
+     *
+     * - **The id is recomputed before any of the event's own fields is read** (§4.1), so no decision
+     *   here is taken on a field of an event whose bytes do not hash to the id it claims. The one
+     *   thing looked at first is whether a `sig` key is present at all, which is a fact about the
+     *   *object* rather than a field of the event: §7.1 makes the signature's presence unconditional
+     *   and only its *verification* conditional, and a layer carrying none is refused whatever its
+     *   bytes hash to.
+     * - **The `p` tag is checked before the first decrypt call**, so a wrap addressed to somebody
+     *   else costs the injected signer nothing at all. That matters most where the signer is remote
+     *   or a NIP-55 app: a relay could otherwise make the user's signer perform a key operation per
+     *   message per stranger.
+     *
+     * ### Steps 4 and 6 are conditional, and the third answer is not a failure
+     *
+     * §7.1 is explicit that an implementation without secp256k1 MUST **continue** past the two
+     * signature checks rather than discard the message, and that §7.2 then requires the message be
+     * reported as authenticated-by-decryption only. So [secp] answering [SeamAnswer.Unavailable]
+     * opens the message with [OpenedMessage.wrapSignature] or [OpenedMessage.sealSignature] recording
+     * [SignatureCheck.NOT_CHECKED]; a verdict of [SignatureVerdict.INVALID] refuses, because §7.1
+     * forbids "verifying and ignoring the answer". Those are the only two outcomes:
+     * [SignatureCheck] has no constant for "checked and bad".
+     *
+     * ### No timestamp is checked anywhere
+     *
+     * §4.6 and §7.1 both forbid it, and §7.1 restates it because write step 5 deliberately produces
+     * timestamps up to two days old: "a reader that applied an ordinary freshness tolerance to them
+     * would discard conformant messages, and one that ordered a thread by them would order it by
+     * noise." This function takes **no clock**, so there is nothing here a freshness rule could be
+     * built out of, and `GiftWrapOpenTest` asserts the inverse — a wrap dated a year ahead, a seal
+     * dated 0 and a seal thirty days old all open.
+     *
+     * @param wrapJson the `kind:1059` gift wrap as §7.1's JSON object form, straight off a relay and
+     *   hostile in every byte.
+     * @param me the reader's own signer. Asked for its public key, to check §7.1 step 3's `p` tag,
+     *   and for the two NIP-44 decryptions — never for a signature.
+     * @param secp the BIP-340 verifier, defaulting to [Secp256k1Ops.FAIL_CLOSED]. See above for what
+     *   each of its three answers does.
+     * @param limits §4.3's bounds on the **rumor**, injected because §4.3 says they SHOULD be
+     *   configurable. The seal's and the wrap's are [EnvelopeLimits]' and are not a client's choice,
+     *   for the reason stated there: they are what NIP-44 can represent.
+     * @param tagLimits §4.3's fifth bound, for §7.4's tag decode in step 9.
+     * @throws EnvelopeException naming which of §7.1's steps refused, with side
+     *   [EnvelopeSide.OPEN], never echoing an input, and keeping the wire layer's or the channel
+     *   layer's own reason as the cause where there is one.
+     */
+    public fun open(
+        wrapJson: String,
+        me: Signer,
+        secp: Secp256k1Ops = Secp256k1Ops.FAIL_CLOSED,
+        limits: WireLimits = WireLimits.DEFAULT,
+        tagLimits: TagLimits = TagLimits.DEFAULT,
+    ): OpenedMessage = Opening(me, secp, limits, tagLimits).read(wrapJson)
+
+    // -----------------------------------------------------------------------------------------
+    // One message being read. Holds the three injected things and the one fact that accumulates
+    // across the two signature checks — whether a verdict was obtained for both of them.
+    // -----------------------------------------------------------------------------------------
+
+    private class Opening(
+        private val me: Signer,
+        private val secp: Secp256k1Ops,
+        private val limits: WireLimits,
+        private val tagLimits: TagLimits,
+    ) {
+
+        /** False as soon as one verdict was [SeamAnswer.Unavailable]; §17's over-claim guard. */
+        private var everySignatureVerified: Boolean = true
+
+        /** §7.1's read procedure. Each block below is one of its numbered steps, in its order. */
+        fun read(wrapJson: String): OpenedMessage {
+            // §4.3's bound on the whole wrap, before the scanner walks a single character.
+            boundBeforeParsing(
+                wrapJson,
+                EnvelopeLimits.DEFAULT_MAX_WRAP_JSON_BYTES,
+                EnvelopeRejection.WRAP_TOO_LARGE,
+                EnvelopeRejection.MALFORMED_WRAP,
+                "the gift wrap's JSON",
+            )
+            val wrap = readEvent(wrapJson, WRAP_READ_LIMITS, EnvelopeRejection.MALFORMED_WRAP)
+            val wrapSignature = wrap.signatureHex ?: throw refuse(
+                EnvelopeRejection.WRAP_UNSIGNED,
+                "§7.1 step 3 signs every gift wrap with its throwaway keypair and this object " +
+                    "carries no `sig` key at all; the presence of the signature is not the part " +
+                    "§7.1 makes conditional on secp256k1",
+            )
+            // Step 1, and §4.1's "before any other processing": nothing below reads a field of this
+            // event until the bytes it is made of have been hashed and matched.
+            val wrapChecked = checkId(
+                wrap,
+                WRAP_READ_LIMITS,
+                EnvelopeRejection.WRAP_ID_MISMATCH,
+                EnvelopeRejection.MALFORMED_WRAP,
+            )
+            // Step 2.
+            if (wrap.event.kind != NenyaKind.GIFT_WRAP) {
+                throw refuse(
+                    EnvelopeRejection.NOT_A_GIFT_WRAP,
+                    "§7.1 step 3: the kind is ${NenyaKind.GIFT_WRAP} and only " +
+                        "${NenyaKind.GIFT_WRAP}, and this event is kind:${wrap.event.kind}; " +
+                        "21059 is defined elsewhere for another purpose and MUST NOT be used here",
+                )
+            }
+            // Step 3, and it is the last step that costs no cryptography.
+            val addressee = soleRecipient(wrap.event.tags)
+            if (addressee != readerKey()) {
+                throw refuse(
+                    EnvelopeRejection.NOT_ADDRESSED_TO_ME,
+                    "§7.1 step 3: the wrap's `p` tag names a key that is not this reader's, and the " +
+                        "step requires rejecting before any decryption — so no ciphertext a stranger " +
+                        "addressed elsewhere is ever handed to the signer",
+                )
+            }
+            // Step 4. Over the id THIS library recomputed, against the key on the wrap itself.
+            val wrapCheck = verify(
+                wrap.event.pubkey,
+                wrapChecked.id,
+                wrapSignature,
+                EnvelopeRejection.WRAP_SIGNATURE_INVALID,
+            )
+
+            // Step 5.
+            val sealJson = decrypt(
+                wrap.event.pubkey,
+                wrap.event.content,
+                EnvelopeRejection.COULD_NOT_DECRYPT_WRAP,
+            )
+            // Step 6.
+            boundBeforeParsing(
+                sealJson,
+                EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES,
+                EnvelopeRejection.SEAL_TOO_LARGE,
+                EnvelopeRejection.MALFORMED_SEAL,
+                "the decrypted seal",
+            )
+            val seal = readEvent(sealJson, SEAL_READ_LIMITS, EnvelopeRejection.MALFORMED_SEAL)
+            val sealSignature = seal.signatureHex ?: throw refuse(
+                EnvelopeRejection.SEAL_UNSIGNED,
+                "§7.2 makes the kind:${NenyaKind.SEAL} seal's signature the thing that binds every " +
+                    "term in the rumor to a key, and this seal carries no `sig` key at all; a seal " +
+                    "with none has nothing for a better equipped reader to check either",
+            )
+            val sealChecked = checkId(
+                seal,
+                SEAL_READ_LIMITS,
+                EnvelopeRejection.SEAL_ID_MISMATCH,
+                EnvelopeRejection.MALFORMED_SEAL,
+            )
+            if (seal.event.kind != NenyaKind.SEAL) {
+                throw refuse(
+                    EnvelopeRejection.NOT_A_SEAL,
+                    "§7.1 step 6 rejects any kind other than ${NenyaKind.SEAL} inside a gift wrap, " +
+                        "and this one is kind:${seal.event.kind}",
+                )
+            }
+            if (seal.event.tags.isNotEmpty()) {
+                throw refuse(
+                    EnvelopeRejection.SEAL_HAS_TAGS,
+                    "§7.1 step 2 requires a seal's `tags` be empty and step 6 rejects a seal whose " +
+                        "are not; this one carries ${seal.event.tags.size}",
+                )
+            }
+            val sealCheck = verify(
+                seal.event.pubkey,
+                sealChecked.id,
+                sealSignature,
+                EnvelopeRejection.SEAL_SIGNATURE_INVALID,
+            )
+
+            // Step 7, with the seal's own claimed key as the counterparty — which is what
+            // "authenticated by decryption" means: a seal claiming a key it does not hold does not
+            // decrypt under that key's conversation, whatever this reader can verify.
+            val rumorJson = decrypt(
+                seal.event.pubkey,
+                seal.event.content,
+                EnvelopeRejection.COULD_NOT_DECRYPT_SEAL,
+            )
+            // Step 8.
+            boundBeforeParsing(
+                rumorJson,
+                EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES,
+                EnvelopeRejection.RUMOR_TOO_LARGE_TO_OPEN,
+                EnvelopeRejection.MALFORMED_RUMOR,
+                "the decrypted rumor",
+            )
+            val rumor = readRumor(rumorJson)
+            if (rumor.signatureHex != null) {
+                throw refuse(
+                    EnvelopeRejection.RUMOR_SIGNED,
+                    "§7.1 step 8 rejects a rumor carrying a `sig` key with any value at all: it is " +
+                        "either a sender that does not understand the construction or an attempt to " +
+                        "have the rumor treated as independently signed",
+                )
+            }
+            val rumorChecked = checkId(
+                rumor,
+                limits,
+                EnvelopeRejection.RUMOR_ID_MISMATCH,
+                EnvelopeRejection.MALFORMED_RUMOR,
+            )
+
+            // Step 9: §7.2's rule, which is what makes anything in the rumor binding.
+            val attributed = attribute(seal.event.pubkey, rumorChecked, sealCheck)
+            return Opened(attributed, sealCheck, wrapCheck, wrapChecked.id, notPerformed())
+        }
+
+        private fun notPerformed(): Set<SeamCapability> =
+            if (everySignatureVerified) NOTHING_UNPERFORMED else BIP340_NOT_PERFORMED
+
+        /**
+         * §4.3's bound on one layer, measured **before** it is parsed.
+         *
+         * The character count is checked first and is sound on its own: a UTF-8 encoding spends at
+         * least one byte per UTF-16 unit, so more units than the bound is more bytes than the bound,
+         * and a hostile hundred-megabyte payload costs one comparison. The exact count follows,
+         * because a relay hint of three-byte characters is a wrap whose units fit and whose bytes do
+         * not — and §4.3 measures this bound in bytes.
+         *
+         * Text with no UTF-8 encoding at all is [malformed] rather than a size, for §4.1's reason:
+         * it is not text, so it has no size to compare.
+         */
+        private fun boundBeforeParsing(
+            text: String,
+            bound: Int,
+            tooLarge: EnvelopeRejection,
+            malformed: EnvelopeRejection,
+            what: String,
+        ) {
+            if (text.length > bound) throw tooLargeFor(tooLarge, what, text.length, bound)
+            val bytes = strictUtf8OrNull(text) ?: throw refuse(
+                malformed,
+                "$what carries an unpaired UTF-16 surrogate, which has no UTF-8 encoding; §4.1 " +
+                    "requires rejecting it rather than substituting a replacement character",
+            )
+            if (bytes.size > bound) throw tooLargeFor(tooLarge, what, bytes.size, bound)
+        }
+
+        private fun tooLargeFor(
+            reason: EnvelopeRejection,
+            what: String,
+            size: Int,
+            bound: Int,
+        ): EnvelopeException = refuse(
+            reason,
+            "$what is $size bytes and §4.3 bounds it at $bound; §4.3 requires rejecting rather than " +
+                "truncating, and the bound is checked before the scanner runs so that oversized " +
+                "input costs one comparison",
+        )
+
+        /** T31's reader over one layer, its own reason kept as the cause. */
+        private fun readEvent(
+            text: String,
+            layerLimits: WireLimits,
+            malformed: EnvelopeRejection,
+        ): ReadEvent = try {
+            EventJson.read(text, layerLimits)
+        } catch (refused: IllegalArgumentException) {
+            throw malformedLayer(malformed, refused)
+        }
+
+        /**
+         * The rumor's read, which differs from [readEvent] in exactly one mapping.
+         *
+         * §7.1 step 8 forbids a `sig` key carrying **any** value, and two of the three shapes that
+         * rule is about are refused inside the reader rather than after it: `"sig":""` and any other
+         * wrong-shaped string arrive as [JsonRejection.SIGNATURE_MALFORMED]. Reporting those as
+         * [EnvelopeRejection.MALFORMED_RUMOR] would file step 8's own refusal under the grammar, and
+         * a caller asserting on §7.1's rule would find it under a reason about JSON.
+         */
+        private fun readRumor(text: String): ReadEvent = try {
+            EventJson.read(text, limits)
+        } catch (refused: JsonException) {
+            if (refused.reason == JsonRejection.SIGNATURE_MALFORMED) {
+                throw refuse(
+                    EnvelopeRejection.RUMOR_SIGNED,
+                    "§7.1 step 8 rejects a rumor carrying a `sig` key with any value at all, " +
+                        "including an empty string, and this one carries a `sig` that is not even " +
+                        "a signature's shape",
+                    refused,
+                )
+            }
+            throw malformedLayer(EnvelopeRejection.MALFORMED_RUMOR, refused)
+        } catch (refused: WireException) {
+            throw malformedLayer(EnvelopeRejection.MALFORMED_RUMOR, refused)
+        }
+
+        /**
+         * §4.1's recomputation over one layer, under that layer's §4.3 bounds.
+         *
+         * Two outcomes rather than one. A disagreement is the [mismatch] §4.1 is about; every other
+         * [WireException] `checkEventId` can raise is a §4.3 **bound** measured over the canonical
+         * serialisation — a tag value or a `content` past its limit, neither of which the object-form
+         * reader measures — and filing one of those as an id mismatch would tell a caller the relay
+         * served a forged event when it served an oversized one.
+         */
+        private fun checkId(
+            read: ReadEvent,
+            layerLimits: WireLimits,
+            mismatch: EnvelopeRejection,
+            malformed: EnvelopeRejection,
+        ): CheckedEvent = try {
+            CheckedEvent.checkEventId(read.claimedIdHex, read.event, layerLimits)
+        } catch (refused: WireException) {
+            if (refused.reason == WireRejection.ID_MISMATCH) {
+                throw refuse(
+                    mismatch,
+                    "§4.1: the id this event claims is not the SHA-256 of its own canonical " +
+                        "serialisation, and §4.1 requires rejecting it before any other processing",
+                    refused,
+                )
+            }
+            throw malformedLayer(malformed, refused)
+        }
+
+        private fun malformedLayer(
+            reason: EnvelopeRejection,
+            cause: IllegalArgumentException,
+        ): EnvelopeException = refuse(
+            reason,
+            "this layer of the envelope is not §7.1's object form of a §4.3-conformant event; the " +
+                "wire layer's own reason is kept as the cause of this exception, and is not " +
+                "restated here because it is not this layer's rule",
+            cause,
+        )
+
+        /**
+         * §7.1 step 3's single `p` tag, or the refusal that says which way it was wrong.
+         *
+         * The value is normalised per §4.3 when it can be, and left `null` when it cannot: a `p` tag
+         * carrying something that is not a 64-hex key names a key that is not this reader's, which is
+         * [EnvelopeRejection.NOT_ADDRESSED_TO_ME] and not a malformation of its own. §4.3's
+         * two-entry no-normalisation list names neither a pubkey nor an event id, so a sender that
+         * spelled the reader's key in uppercase is addressing the reader.
+         */
+        private fun soleRecipient(tags: List<List<String>>): String? {
+            val addressed = tags.filter { it[0] == RECIPIENT_TAG }
+            if (addressed.size > 1) {
+                throw refuse(
+                    EnvelopeRejection.AMBIGUOUS_RECIPIENT,
+                    "§7.1 step 3 requires exactly one `p` tag and this wrap carries " +
+                        "${addressed.size}; §4.3's rationale applies unchanged — first-wins and " +
+                        "last-wins are both defensible, and here they disagree about who the " +
+                        "message is for",
+                )
+            }
+            val tag = addressed.firstOrNull() ?: throw missingRecipient("no `p` tag at all")
+            val value = tag.getOrNull(RECIPIENT_VALUE_INDEX)
+                ?: throw missingRecipient("a `p` tag carrying no value")
+            return normalisedKeyOrNull(value)
+        }
+
+        private fun missingRecipient(what: String): EnvelopeException = refuse(
+            EnvelopeRejection.MISSING_RECIPIENT,
+            "§7.1 step 3 requires exactly one `$RECIPIENT_TAG` tag naming the reader, with the " +
+                "recipient's pubkey as its value, and this wrap carries $what",
+        )
+
+        /** The reader's own key, in §4.3's canonical lowercase, or the refusal that says why not. */
+        private fun readerKey(): String {
+            val answer = me.publicKey()
+            val key = when (answer) {
+                is SeamAnswer.Provided -> answer.value
+                is SeamAnswer.Unavailable -> throw refuse(
+                    EnvelopeRejection.READER_PUBLIC_KEY_UNAVAILABLE,
+                    "§7.1 step 3 compares the wrap's `p` tag against the reader's own public key " +
+                        "and the injected signer answered unavailable (${answer.capability.name})",
+                )
+            }
+            return normalisedKeyOrNull(key) ?: throw refuse(
+                EnvelopeRejection.READER_PUBLIC_KEY_MALFORMED,
+                "§4.3 fixes an x-only pubkey as exactly ${WireEvent.PUBKEY_HEX_LENGTH} hex " +
+                    "characters and the injected signer answered ${key.length} character(s) in " +
+                    "some other shape; treating that as `not the addressee` would discard every " +
+                    "message the user receives and call it somebody else's",
+            )
+        }
+
+        /**
+         * §7.1 steps 4 and 6, and §7.1's own three-way answer.
+         *
+         * The message handed to the verifier is [id]'s bytes — the id **this library** recomputed —
+         * and never anything the sender was in a position to choose, which is what makes a verdict
+         * worth reading at all (§4.1: "a signature on a nostr event is over the 32 bytes the `id`
+         * field spells and nothing else").
+         */
+        private fun verify(
+            publicKeyHex: String,
+            id: EventId,
+            signatureHex: String,
+            invalid: EnvelopeRejection,
+        ): SignatureCheck {
+            val verdict = secp.verifySchnorr(decodeHex(publicKeyHex), id.bytes(), decodeHex(signatureHex))
+            return when (verdict) {
+                is SeamAnswer.Unavailable -> {
+                    everySignatureVerified = false
+                    SignatureCheck.NOT_CHECKED
+                }
+                is SeamAnswer.Provided ->
+                    if (verdict.value == SignatureVerdict.VALID) {
+                        SignatureCheck.VERIFIED
+                    } else {
+                        throw refuse(
+                            invalid,
+                            "the injected BIP-340 verifier checked this layer's signature against " +
+                                "the key the layer itself carries, over the id this library " +
+                                "recomputed (§4.1), and refused it; §7.1 forbids verifying and then " +
+                                "ignoring the answer",
+                        )
+                    }
+            }
+        }
+
+        /**
+         * §7.1 steps 5 and 7, through the reader's own signer.
+         *
+         * [counterpartyPublicKeyHex] is the wrap's key at step 5 and the seal's at step 7, and in
+         * both cases it is used as a NIP-44 counterparty and for nothing else. §7.2 forbids
+         * displaying the wrap's key, indexing by it or using it "in any comparison": deriving a
+         * conversation key from it is none of the three, and [OpenedMessage] publishes no accessor
+         * for it.
+         */
+        private fun decrypt(
+            counterpartyPublicKeyHex: String,
+            payload: String,
+            reason: EnvelopeRejection,
+        ): String {
+            val answer = me.nip44Decrypt(counterpartyPublicKeyHex, payload)
+            return when (answer) {
+                is SeamAnswer.Provided -> answer.value
+                is SeamAnswer.Unavailable -> throw refuse(
+                    reason,
+                    "§7.1 decrypts at both layers through the injected signer and it answered " +
+                        "unavailable (${answer.capability.name}); NIP-44 answers exactly that when " +
+                        "a payload does not authenticate, which is the same refusal as a client " +
+                        "that cannot decrypt at all and is deliberately not distinguished here — " +
+                        "a reader that could tell the two apart would be an oracle for whether a " +
+                        "given key is the addressee's",
+                )
+            }
+        }
+
+        /**
+         * §7.1 step 9: §7.2's attribution rule and §7.4's envelope, through T13's codec.
+         *
+         * The mode is decided by the **seal's** verdict alone (§7.2: the wrap's signature
+         * "attributes nothing, it does not corroborate the seal"), and the channel layer's own
+         * [dev.eryalabs.nenya.channel.ChannelRejection] is kept on the cause so
+         * `IMPERSONATION` — the refusal §7.2 exists for — stays assertable by name.
+         */
+        private fun attribute(
+            sealPubkey: String,
+            rumor: CheckedEvent,
+            sealCheck: SignatureCheck,
+        ): AttributedRumor = try {
+            when (sealCheck) {
+                SignatureCheck.VERIFIED ->
+                    AttributedRumor.attributeSignatureVerified(sealPubkey, rumor, tagLimits)
+                SignatureCheck.NOT_CHECKED ->
+                    AttributedRumor.attribute(sealPubkey, rumor, tagLimits)
+            }
+        } catch (refused: ChannelException) {
+            throw refuse(
+                EnvelopeRejection.RUMOR_REFUSED,
+                "§7.1 step 9 applies §7.2's attribution rule, which is what makes anything in the " +
+                    "rumor binding, and it refused this one; the channel layer's own reason is kept " +
+                    "as the cause of this exception",
+                refused,
+            )
+        }
+    }
+
+    /** The single implementation of [OpenedMessage]; see that interface for why it is private. */
+    private class Opened(
+        override val rumor: AttributedRumor,
+        override val sealSignature: SignatureCheck,
+        override val wrapSignature: SignatureCheck,
+        override val wrapId: EventId,
+        override val notPerformedHere: Set<SeamCapability>,
+    ) : OpenedMessage {
+
+        /**
+         * Names the two verdicts and the attribution mode, and no identifier of any kind.
+         *
+         * §12 item 11 covers the id of a private message and an order id, §12 item 2 the
+         * counterparty pubkey, and §7.2 the wrap's own key. [AttributedRumor.toString] redacts for
+         * the same reason and [EventId.toString] carries no hex, so what is left is the three facts
+         * a debugging line can safely say.
+         */
+        override fun toString(): String =
+            "OpenedMessage(attribution=${rumor.attribution.name}, seal=${sealSignature.name}, " +
+                "wrap=${wrapSignature.name}, notPerformedHere=${notPerformedHere.map { it.name }})"
     }
 
     // -----------------------------------------------------------------------------------------
@@ -936,19 +1803,59 @@ public object GiftWrap {
         return true
     }
 
-    /** Only ever reached with a value [isLowerHex] and a fixed length have already accepted. */
-    private fun decodeHex(lowercaseHex: String): ByteArray {
-        val out = ByteArray(lowercaseHex.length / 2)
+    /**
+     * §4.3's pubkey as the **read** path needs it: 64 hex characters in either case, normalised to
+     * lowercase — or `null` for anything else.
+     *
+     * The opposite decision from [checkedKey] one function up, and both are §4.3's. That one is the
+     * write path, where the value goes verbatim into a `pubkey` field whose bytes the id hashes, so
+     * normalising would emit an event nobody signed. This one is a value being **compared**, which is
+     * exactly where §4.3's accept-and-normalise rule applies: its no-normalisation list has two
+     * entries, the BOLT-11 invoice string and the Lightning preimage, and states that it is
+     * exhaustive.
+     *
+     * `null` rather than a refusal, because the two callers want different things from a value that
+     * is not a key: the `p` tag's is a key that is not the reader's, and the reader's own signer
+     * answering one is a broken client.
+     */
+    private fun normalisedKeyOrNull(key: String): String? {
+        if (key.length != WireEvent.PUBKEY_HEX_LENGTH) return null
+        val out = StringBuilder(key.length)
+        for (character in key) {
+            when {
+                character in '0'..'9' || character in 'a'..'f' -> out.append(character)
+                character in 'A'..'F' -> out.append(character + ('a' - 'A'))
+                else -> return null
+            }
+        }
+        return out.toString()
+    }
+
+    /**
+     * Hex to bytes, in **either** case.
+     *
+     * Only ever reached with a value a fixed-length hex check has already accepted — [checkedKey] and
+     * [Emission.signature] on the write path, and on the read path a `pubkey` [WireEvent] checked and
+     * a `sig` `EventJson` checked, both of which §4.3 and NIP-01 accept in either case. Uppercase is
+     * therefore reachable here from a relay, and a decoder that handled only lowercase would hand the
+     * verifier the wrong bytes rather than refuse: a conformant peer's event reported as a bad
+     * signature, which is the one outcome §4.1's rules exist to prevent.
+     */
+    private fun decodeHex(hex: String): ByteArray {
+        val out = ByteArray(hex.length / 2)
         for (index in out.indices) {
-            val high = nibble(lowercaseHex[2 * index])
-            val low = nibble(lowercaseHex[2 * index + 1])
+            val high = nibble(hex[2 * index])
+            val low = nibble(hex[2 * index + 1])
             out[index] = ((high shl NIBBLE_BITS) or low).toByte()
         }
         return out
     }
 
-    private fun nibble(character: Char): Int =
-        if (character in '0'..'9') character - '0' else character - 'a' + DECIMAL_RADIX
+    private fun nibble(character: Char): Int = when (character) {
+        in '0'..'9' -> character - '0'
+        in 'a'..'f' -> character - 'a' + DECIMAL_RADIX
+        else -> character - 'A' + DECIMAL_RADIX
+    }
 
     private fun refuse(
         reason: EnvelopeRejection,
@@ -958,6 +1865,9 @@ public object GiftWrap {
 
     /** `["p", "<addressee>", "<relay hint>"]` — §7.1 step 3's single tag. */
     private const val RECIPIENT_TAG: String = "p"
+
+    /** The addressee sits second in that tag, after the name. */
+    private const val RECIPIENT_VALUE_INDEX: Int = 1
 
     /**
      * §4.3's bounds for a `kind:13` seal: NIP-44's plaintext ceiling, and one tag's worth of room
@@ -976,6 +1886,33 @@ public object GiftWrap {
         maxTagsPerEvent = 1,
         maxTagValueBytes = WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES,
         maxContentBytes = EnvelopeLimits.MAX_WRAP_CONTENT_CHARS,
+    )
+
+    /**
+     * The same two kinds' bounds for **reading**, and the tag count is the one thing that differs.
+     *
+     * §7.1 fixes one `p` tag on a wrap and none at all on a seal, which is what the two write-side
+     * sets above say — and a reader bounded that way could not *name* the refusal for breaking
+     * either. A wrap carrying two `p` tags is [EnvelopeRejection.AMBIGUOUS_RECIPIENT] and a seal
+     * carrying one is [EnvelopeRejection.SEAL_HAS_TAGS], and both of those are refusals about §7.1's
+     * structure; reaching them means reading the tags first, so the read-side bound is §4.3's
+     * ordinary tag count and the structural rule is applied afterwards. Every other number is
+     * identical to the write side's, because they are what NIP-44 can represent rather than a
+     * direction-dependent choice.
+     */
+    private val WRAP_READ_LIMITS: WireLimits = WireLimits(
+        maxSerialisedEventBytes = EnvelopeLimits.DEFAULT_MAX_WRAP_JSON_BYTES,
+        maxTagsPerEvent = WireLimits.DEFAULT_MAX_TAGS_PER_EVENT,
+        maxTagValueBytes = WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES,
+        maxContentBytes = EnvelopeLimits.MAX_WRAP_CONTENT_CHARS,
+    )
+
+    /** §4.3's bounds for reading a `kind:13` seal; see [WRAP_READ_LIMITS] for the tag count. */
+    private val SEAL_READ_LIMITS: WireLimits = WireLimits(
+        maxSerialisedEventBytes = EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES,
+        maxTagsPerEvent = WireLimits.DEFAULT_MAX_TAGS_PER_EVENT,
+        maxTagValueBytes = WireLimits.DEFAULT_MAX_TAG_VALUE_BYTES,
+        maxContentBytes = EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES,
     )
 
     private val NOTHING_UNPERFORMED: Set<SeamCapability> =

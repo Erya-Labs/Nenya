@@ -278,6 +278,58 @@ internal class OversizedCiphertextSigner(
     }
 }
 
+/**
+ * Reaches `RUMOR_TOO_LARGE_TO_OPEN`: a signer whose **decryption** returns a plaintext longer than
+ * NIP-44 can carry.
+ *
+ * The read path's innermost size bound cannot be reached by any conformant envelope, and that is a
+ * fact about the bounds rather than a gap in the tests: a seal is at most 65 535 bytes, which leaves
+ * room for a rumor of roughly 48 KB, so no wrap a conformant sender emits carries a rumor above the
+ * 65 535 the read path bounds it at. The only way a reader sees one is a seam returning more than
+ * NIP-44 ever produces — which is exactly what `OversizedCiphertextSigner` is on the write side, and
+ * this is the same fake pointed the other way.
+ *
+ * It misbehaves on **one** decryption and not on every one, because §7.1's read procedure decrypts
+ * twice: the wrap's `content` to the seal, then the seal's to the rumor. A fake that oversized both
+ * would be refused at the seal (`SEAL_TOO_LARGE`) and would never prove the rumor's bound exists.
+ *
+ * @param honestDecryptions how many decryptions to answer honestly before oversizing the next.
+ *   `1` reaches the rumor's bound; `0` reaches the seal's, which also has an honest control.
+ */
+internal class OversizedPlaintextSigner(
+    key: FakeKey,
+    private val honestDecryptions: Int = 1,
+    private val chars: Int = DEFAULT_CHARS,
+) : Nip44PayloadSigner(key) {
+
+    private var answered = 0
+
+    override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> {
+        // Through the honest path first, so a payload that genuinely does not authenticate is still
+        // refused as Unavailable and the call is still counted.
+        val answer = super.nip44Decrypt(counterpartyPublicKeyHex, payload)
+        if (answer is SeamAnswer.Unavailable) return answer
+        answered++
+        if (answered <= honestDecryptions) return answer
+        val out = StringBuilder(chars + PLAINTEXT_BLOCK)
+        var block = sha256("nenya-oversized-plaintext:${key.stream}".utf8Bytes())
+        while (out.length < chars) {
+            out.append(TestBase64.encode(block))
+            block = sha256(block)
+        }
+        return SeamAnswer.Provided(out.substring(0, chars))
+    }
+
+    private companion object {
+
+        /** One byte past `EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES`, so the bound is probed exactly. */
+        const val DEFAULT_CHARS: Int = 65_536
+
+        /** One SHA-256 digest in base64. */
+        const val PLAINTEXT_BLOCK: Int = 44
+    }
+}
+
 /** Reaches `SIGNATURE_UNAVAILABLE`: a signer that encrypts perfectly well and signs nothing. */
 internal class NoSignatureSigner(key: FakeKey) : FakeCryptoSigner(key) {
 
@@ -389,6 +441,14 @@ internal fun exerciseEveryMisbehavingFake(): Set<String> {
     exercise(OversizedCiphertextSigner(key)) {
         check(it.nip44Encrypt(counterparty.hex, COVERAGE).provided().length > OVERSIZED_FLOOR)
     }
+    exercise(OversizedPlaintextSigner(key, honestDecryptions = 1)) {
+        val payload = Nip44PayloadSigner(counterparty).nip44Encrypt(key.hex, COVERAGE).provided()
+        check(it.nip44Decrypt(counterparty.hex, payload).provided() == COVERAGE) {
+            "the first decryption must be honest, or the rumor bound could never be reached"
+        }
+        check(it.nip44Decrypt(counterparty.hex, payload).provided().length > PLAINTEXT_FLOOR)
+        it.nip44Decrypt(counterparty.hex, "not base64 at all").unavailable()
+    }
     exercise(NoSignatureSigner(key)) { it.signEvent(serialisation).unavailable() }
     exercise(ShortSignatureSigner(key)) {
         check(it.signEvent(serialisation).provided().length == SHORT_SIGNATURE_LENGTH)
@@ -415,3 +475,6 @@ private const val SHORT_SIGNATURE_LENGTH: Int = 127
 
 /** Past `EnvelopeLimits.MAX_WRAP_CONTENT_CHARS`, which is what makes the oversized fake oversized. */
 private const val OVERSIZED_FLOOR: Int = 87_472
+
+/** `EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES`, which the oversized plaintext must exceed. */
+private const val PLAINTEXT_FLOOR: Int = 65_535

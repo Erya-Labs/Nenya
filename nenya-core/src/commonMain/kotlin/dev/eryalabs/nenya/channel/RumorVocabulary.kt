@@ -147,16 +147,31 @@ public enum class OrderMessageKind(
 }
 
 /**
- * How a rumor's terms are attributed to a key, in the one mode this library can offer (§7.2).
+ * How a rumor's terms are attributed to a key: §7.2's two modes, and the door to the stronger one
+ * is narrow on purpose.
  *
- * §7.2: "An implementation that cannot verify the seal's signature (no secp256k1; see §17) still
- * MUST perform the pubkey-equality check, and MUST report messages in that mode as
- * **authenticated-by-decryption only, never as signature-verified**."
+ * §7.2 states both, and states them asymmetrically:
  *
- * One constant, and that is the point of the type rather than an accident of today's capabilities:
- * there is no `SIGNATURE_VERIFIED` constant for this package to return, so the over-claim §7.2
- * forbids is unrepresentable rather than merely untested. A second constant is a change to an
- * established evidence surface and belongs in the task that first verifies a signature.
+ * > "An implementation that cannot verify the seal's signature (no secp256k1; see §17) still MUST
+ * > perform the pubkey-equality check, and MUST report messages in that mode as
+ * > **authenticated-by-decryption only, never as signature-verified**." … "An implementation that
+ * > **did** verify the seal's signature, and found it valid over the seal's recomputed id (§4.1),
+ * > MAY report the message as signature-verified."
+ *
+ * So [AUTHENTICATED_BY_DECRYPTION] is always a truthful report and [SIGNATURE_VERIFIED] is one only
+ * for a verdict that was actually obtained. This type carried one constant until `GiftWrap.open`
+ * existed, because until then nothing in this library verified a signature and a constant for it
+ * would have been a claim with no code behind it.
+ *
+ * ### The public [AttributedRumor.Companion.attribute] still cannot return [SIGNATURE_VERIFIED]
+ *
+ * It takes a seal pubkey and a rumor and performs §7.2's string comparison, which is all it can do:
+ * it is handed no signature, no verifier and no seal to check one against. The stronger constant is
+ * reachable only from `GiftWrap.open`, through an `internal` path that the envelope package takes
+ * **after** the injected `Secp256k1Ops` answered `SignatureVerdict.VALID` over the seal's recomputed
+ * id. `RumorVocabularyTest` pins both halves — that the constant exists, and that the public door
+ * never yields it — because "reachable only from there" is otherwise a claim about today's call
+ * sites rather than about the code.
  */
 public enum class Attribution(
 
@@ -165,11 +180,27 @@ public enum class Attribution(
 ) {
 
     /**
-     * The seal decrypted for the caller, and its `pubkey` equals the rumor's (§7.2). No signature
-     * was checked: `Secp256k1Ops` answers `Unavailable` and this library verifies none.
+     * The seal decrypted, and its `pubkey` equals the rumor's (§7.2). **No signature was checked**
+     * — either none was available (`Secp256k1Ops` answered `Unavailable`) or the caller performed
+     * the decryption itself and this library was handed only the two keys.
      */
     AUTHENTICATED_BY_DECRYPTION(
         "the seal and rumor pubkeys agree; no signature was verified (§7.2, §17)",
+    ),
+
+    /**
+     * The same check, **and** the `kind:13` seal's BIP-340 signature verified against the seal's
+     * `pubkey` over the id this library recomputed (§4.1, §7.2, §7.1's read step 6).
+     *
+     * The gift wrap's signature is deliberately not part of this claim, whatever its verdict. §7.2:
+     * "It is a signature by the throwaway key over the wrap, so a valid one says only that the wrap
+     * reached the reader unaltered. It attributes nothing, it does not corroborate the seal, and an
+     * implementation MUST NOT report a message as signature-verified on the strength of it."
+     * `OpenedMessage` publishes the two verdicts separately for exactly that reason.
+     */
+    SIGNATURE_VERIFIED(
+        "the seal and rumor pubkeys agree and the seal's signature verified over its recomputed " +
+            "id (§7.2, §7.1 step 6)",
     ),
 }
 

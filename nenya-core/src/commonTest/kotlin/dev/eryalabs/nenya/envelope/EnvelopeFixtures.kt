@@ -1,10 +1,17 @@
 package dev.eryalabs.nenya.envelope
 
+import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.FakeCryptoSigner
 import dev.eryalabs.nenya.seam.FakeKey
+import dev.eryalabs.nenya.seam.FakeKeyRanges
+import dev.eryalabs.nenya.seam.Nip44PayloadEphemeralSigners
 import dev.eryalabs.nenya.seam.Nip44PayloadSigner
+import dev.eryalabs.nenya.seam.RecordingRandomness
+import dev.eryalabs.nenya.seam.Secp256k1Ops
+import dev.eryalabs.nenya.seam.Signer
 import dev.eryalabs.nenya.seam.provided
 import dev.eryalabs.nenya.tag.NenyaKind
+import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.wire.CheckedEvent
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.EventJson
@@ -84,24 +91,46 @@ internal object EnvelopeFixtures {
      *
      * The `created_at` is the **true** time (§7.1 step 1), which is the one timestamp in the
      * envelope that is not randomised.
+     *
+     * The `item` tag is §5.3's, and it is here because `GiftWrapOpenTest` reads this rumor back
+     * through T13: §5.3 marks exactly one `item` REQUIRED on a `kind:16` `type=1` (§7.5) and a
+     * `type=6` (§6.1), so without it every read-path control would end at §7.1 step 9 rather than
+     * where it was aimed. The write path this fixture was built for never looked, which is how the
+     * omission survived T32.
      */
     fun rumor(
         pubkey: String = senderKey(),
         createdAt: Long = NOW,
         content: String = RUMOR_CONTENT,
         orderIdHex: String = ORDER_ID_HEX,
+        kind: Int = NenyaKind.ORDER_MESSAGE,
     ): WireEvent = WireEvent(
         pubkey = pubkey,
         createdAt = createdAt,
-        kind = NenyaKind.ORDER_MESSAGE,
+        kind = kind,
         tags = listOf(
             listOf("nenya", "1"),
             listOf("p", recipientKey()),
             listOf("order", orderIdHex),
             listOf("type", "1"),
+            listOf("item", ITEM_COORDINATE, "1"),
         ),
         content = content,
     )
+
+    /**
+     * The §5.3 coordinate [rumor]'s `item` tag carries, so the redaction sweeps can look for it.
+     *
+     * A coordinate is `<kind>:<pubkey>:<d>`, so it **contains a third party's 64-hex pubkey** — §12
+     * item 2's value, arriving inside a tag rather than as a field. A refusal that echoed the
+     * offending tag value would carry both that key and the listing it names past a sweep that only
+     * looked for the two parties' own keys, which is why this is a forbidden string in its own right
+     * rather than covered by [senderKey] and friends.
+     */
+    val ITEM_COORDINATE: String = TagFixtures.coordinate(index = ITEM_INDEX)
+
+    /** Keeps the `item` coordinate's author distinct from the sender, the recipient and the stranger. */
+    private const val ITEM_INDEX: Int = 11
 
     /**
      * The `content` every fixture rumor carries, so the redaction sweep has a distinctive string to
@@ -160,6 +189,44 @@ internal object EnvelopeFixtures {
     /** The JSON [GiftWrap.seal] itself would write for [event], in UTF-8 bytes (all ASCII here). */
     fun jsonBytes(event: WireEvent, limits: WireLimits = WireLimits.DEFAULT): Int =
         EventJson.writeUnsigned(event, EventId.of(event, limits), limits).length
+
+    // -----------------------------------------------------------------------------------------
+    // An honest envelope, produced by the library itself.
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * §7.1's write path run with every dependency pinned — the envelope `GiftWrap.open` is held to be
+     * the inverse of.
+     *
+     * The library's own, not [Envelope]'s: the round trip and the §4.6 controls are about the two
+     * procedures being inverses, so the input to the read has to be something the write genuinely
+     * emitted. [Envelope] is the opposite tool, for controls that need a layer the write path would
+     * refuse to produce.
+     *
+     * Every seam is injected and deterministic — a pinned clock, a seeded [RecordingRandomness], and
+     * throwaway keys starting at [FakeKeyRanges.EPHEMERAL] so the redaction sweeps know which keys to
+     * look for. A fresh [Nip44PayloadEphemeralSigners] per call, because §7.1 step 3 requires a new
+     * throwaway key per wrap and `GiftWrap.seal` refuses a supplier that repeats one.
+     *
+     * `secp` defaults to [Secp256k1Ops.FAIL_CLOSED]: verifying on emit is the write path's business
+     * (T32 proves it), and a reader's verdict must come from the verifier the *reader* was given.
+     */
+    fun sealOf(
+        rumor: WireEvent = rumor(),
+        recipient: String = recipientKey(),
+        sender: Signer = senderSigner(),
+        secp: Secp256k1Ops = Secp256k1Ops.FAIL_CLOSED,
+        limits: WireLimits = WireLimits.DEFAULT,
+    ): SealedMessage = GiftWrap.seal(
+        rumor = rumor,
+        recipientPubkey = recipient,
+        sender = sender,
+        ephemeral = Nip44PayloadEphemeralSigners(),
+        clock = FakeClock(NOW),
+        randomness = RecordingRandomness(),
+        secp = secp,
+        limits = limits,
+    )
 
     // -----------------------------------------------------------------------------------------
     // The reading half.
