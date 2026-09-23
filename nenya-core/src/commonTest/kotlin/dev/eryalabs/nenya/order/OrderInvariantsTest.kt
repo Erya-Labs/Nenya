@@ -103,7 +103,7 @@ class OrderInvariantsTest {
         val awaiting = OrderFixtures.advanced(
             machine,
             orders.getValue(OrderState.COMMITTED),
-            OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER, Payee.FEE)),
+            OrderEvent.PaymentRequestsReceived(OrderFixtures.chain().requests),
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
@@ -112,7 +112,7 @@ class OrderInvariantsTest {
             val refusal = OrderFixtures.refusal(
                 machine,
                 orders.getValue(state),
-                OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER, Payee.FEE)),
+                OrderEvent.PaymentRequestsReceived(OrderFixtures.chain().requests),
             )
             assertEquals(TransitionRejection.WRONG_STATE_FOR_EVENT, refusal.reason)
         }
@@ -486,17 +486,23 @@ class OrderInvariantsTest {
     @JsName("an_order_that_required_no_receipt_carries_an_empty_record_in_both_directions")
     @Test
     fun `an order that required no receipt carries an empty record in both directions`() {
-        val nothingOwed = OrderTerms.of(Msat.ZERO, FeeTerm.of(250))
+        // A *stated* fee term with nothing owed, which is not `freeTerms`' absent one: §8.3's
+        // zero-amount clause reaches both shapes, and this is the one that still names a payee.
+        val nothingOwed = OrderTerms.of(
+            Msat.ZERO,
+            FeeTerm.of(250),
+            OrderFixtures.EXPIRATION,
+            OrderFixtures.DELIVER_BY,
+        )
         assertEquals(emptySet(), Payee.requiredPayees(nothingOwed.split))
 
-        val opened = machine.open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, nothingOwed))
+        val chain = OrderFixtures.chain(nothingOwed)
+        assertEquals(emptySet(), chain.requests, "nobody is owed anything, so no `type=2` exists")
+
+        val opened = machine.open(chain.proposal.asOrderEvent())
         val committed = OrderFixtures.advanced(
             machine,
-            OrderFixtures.advanced(
-                machine,
-                opened,
-                OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, nothingOwed),
-            ),
+            OrderFixtures.advanced(machine, opened, OrderEvent.AcceptanceReceived(chain.accepted)),
             OrderEvent.DeliveryCommitted(OrderFixtures.blob.commitment, Party.PROVIDER),
         )
         val awaiting = OrderFixtures.advanced(

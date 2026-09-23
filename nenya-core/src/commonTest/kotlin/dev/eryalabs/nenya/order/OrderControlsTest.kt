@@ -1,5 +1,10 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.channel.Acceptance
+import dev.eryalabs.nenya.channel.ChannelException
+import dev.eryalabs.nenya.channel.ChannelRejection
+import dev.eryalabs.nenya.channel.ChannelVocabulary
+import dev.eryalabs.nenya.channel.ProposalFixtures
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliverableHash
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
@@ -16,11 +21,13 @@ import dev.eryalabs.nenya.seam.LyingWallet
 import dev.eryalabs.nenya.seam.SeamFixtures
 import dev.eryalabs.nenya.seam.WalletPaymentState
 import dev.eryalabs.nenya.seam.provided
+import dev.eryalabs.nenya.settlement.SettlementFixtures
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNotSame
@@ -66,7 +73,7 @@ class OrderControlsTest {
         val awaiting = OrderFixtures.advanced(
             machine,
             orders.getValue(OrderState.COMMITTED),
-            OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER, Payee.FEE)),
+            OrderEvent.PaymentRequestsReceived(OrderFixtures.chain(terms).requests),
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
@@ -117,7 +124,7 @@ class OrderControlsTest {
         val awaiting = OrderFixtures.advanced(
             machine,
             orders.getValue(OrderState.COMMITTED),
-            OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER)),
+            OrderEvent.PaymentRequestsReceived(OrderFixtures.chain(terms).requests),
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
@@ -139,16 +146,26 @@ class OrderControlsTest {
         )
     }
 
-    /** §8.6 and §8.3: a fee request for an expected amount of `0` MUST be rejected, not ignored. */
+    /**
+     * §8.6 and §8.3: a fee request for an expected amount of `0` MUST be rejected, not ignored.
+     *
+     * The surplus record is a genuinely accepted one — minted by T24 for **this order id** under
+     * fee-bearing terms, which is the shape a fee recipient who believes a fee is owed produces —
+     * so the refusal is §8.3's rule about the *terms this order was opened with* and not an
+     * accident of the fixture being unable to build the message at all.
+     */
     @JsName("a_zero_fee_order_refuses_a_fee_payment_request_and_a_fee_receipt")
     @Test
     fun `a zero-fee order refuses a fee payment request and a fee receipt`() {
-        val orders = OrderFixtures.orders(OrderFixtures.zeroFeeTerms)
+        val terms = OrderFixtures.zeroFeeTerms
+        val orders = OrderFixtures.orders(terms)
 
         val request = OrderFixtures.refusal(
             machine,
             orders.getValue(OrderState.COMMITTED),
-            OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER, Payee.FEE)),
+            OrderEvent.PaymentRequestsReceived(
+                OrderFixtures.chain(terms).requests + OrderFixtures.chain().request(Payee.FEE),
+            ),
         )
         assertEquals(TransitionRejection.PAYMENT_REQUEST_NOT_REQUIRED, request.reason)
 
@@ -181,7 +198,9 @@ class OrderControlsTest {
         val refusal = OrderFixtures.refusal(
             machine,
             orders.getValue(OrderState.COMMITTED),
-            OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER, Payee.FEE)),
+            OrderEvent.PaymentRequestsReceived(
+                OrderFixtures.chain(terms).requests + OrderFixtures.chain().request(Payee.FEE),
+            ),
         )
         assertEquals(TransitionRejection.PAYMENT_REQUEST_NOT_REQUIRED, refusal.reason)
     }
@@ -529,52 +548,18 @@ class OrderControlsTest {
 
     // ---------------------------------------------------------------- §7.6 and §10.3
 
-    /** §7.6 — acceptance is a `type=3` from the **provider's** key, and from nobody else's. */
-    @JsName("an_acceptance_from_the_buyer_s_own_key_is_refused_as_the_wrong_sender")
-    @Test
-    fun `an acceptance from the buyer's own key is refused as the wrong sender`() {
-        val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
-        val refusal = OrderFixtures.refusal(
-            machine,
-            proposed,
-            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.BUYER, OrderFixtures.TERMS),
-        )
-        assertEquals(TransitionRejection.WRONG_SENDER, refusal.reason)
-    }
-
     /**
-     * §7.6 — an acceptance carrying different terms is a **counter-proposal**, and one carrying no
-     * terms at all is not an acceptance either.
-     */
-    @JsName("an_acceptance_with_altered_terms_or_none_is_refused_as_a_counter_proposal")
-    @Test
-    fun `an acceptance with altered terms, or none, is refused as a counter-proposal`() {
-        val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
-
-        for (asserted in listOf(OrderFixtures.zeroFeeTerms, null)) {
-            val refusal = OrderFixtures.refusal(
-                machine,
-                proposed,
-                OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, asserted),
-            )
-            assertEquals(TransitionRejection.TERMS_NOT_IDENTICAL, refusal.reason, "asserted=$asserted")
-        }
-    }
-
-    /**
-     * §7.6 fixes the terms an acceptance must carry as `item`, `amount_msat`, `fee` and
-     * `deliver_by` — and **not** `expiration`, which §7.5 makes the buyer's own acceptance
-     * deadline, evaluated against the buyer's own clock (§4.6).
+     * The old door is **shut**, not narrowed: no `type=3` `status=accepted` a caller assembles
+     * advances an order, whatever key it claims and whatever terms it carries.
      *
-     * This is the positive control the negative one above cannot supply: every other acceptance
-     * fixture passes the *same* `OrderTerms` instance, so value-versus-reference is never
-     * exercised on the happy path, and a comparison that also demanded `expiration` would refuse
-     * every conformant acceptance and deadlock the order at `proposed` until it expired. It fails
-     * closed, which is exactly why it would ship.
+     * Four shapes, and the first is the one that used to work: the provider's key with terms
+     * byte-identical to the proposal's. If that still advanced, everything below it would be a
+     * narrowing rather than a closure, and gap G3 would survive — a caller that hand-built this
+     * event skipped §7.6's byte comparison and §8.6's sender rule at once.
      */
-    @JsName("an_acceptance_echoing_only_the_four_terms_section_7_6_names_is_accepted")
+    @JsName("no_status_update_announcing_accepted_advances_an_order")
     @Test
-    fun `an acceptance echoing only the four terms section 7 6 names is accepted`() {
+    fun `no status update announcing accepted advances an order`() {
         val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
         val echoed = OrderTerms.of(
             OrderFixtures.PRICE,
@@ -584,12 +569,172 @@ class OrderControlsTest {
         )
         assertNotEquals(OrderFixtures.TERMS, echoed, "the two must differ, or this proves nothing")
 
+        for (event in listOf(
+            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, OrderFixtures.TERMS),
+            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, echoed),
+            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.BUYER, OrderFixtures.TERMS),
+            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, null),
+        )) {
+            val refusal = OrderFixtures.refusal(machine, proposed, event)
+            assertEquals(
+                TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE,
+                refusal.reason,
+                "asserted=${event.assertedTerms}, from=${event.from}",
+            )
+            assertEquals(OrderState.PROPOSED, refusal.order.state)
+        }
+    }
+
+    /**
+     * §7.6, whole, through the door that now decides it: `OrderProposal.accepts` compares the seal
+     * against the provider key the caller resolved, and a `type=3` sealed by anybody else is
+     * refused before the order ever sees it.
+     *
+     * Decision H's two attackers are different people and both are exercised: the **buyer**, who
+     * knows its own terms exactly and could otherwise accept its own order and then send itself the
+     * `payee=provider` invoice; and a **stranger** who merely saw the order id. Each seals a
+     * `type=3` carrying §7.6's four terms byte for byte, so the only thing wrong with either is who
+     * sealed it — which is what makes this the sender check and not the terms comparison.
+     *
+     * The order-level half is the point: because `accepts` throws, there is no
+     * `Acceptance.Accepted` to build an [OrderEvent.AcceptanceReceived] from, so the order cannot
+     * be advanced by any means, and it is still `proposed` afterwards.
+     */
+    @JsName("an_acceptance_sealed_by_the_buyer_or_a_stranger_never_reaches_the_order")
+    @Test
+    fun `an acceptance sealed by the buyer or a stranger never reaches the order`() {
+        val chain = OrderFixtures.chain()
+        val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
+        val provider = SettlementFixtures.provider(OrderFixtures.ORDER_INDEX)
+
+        // The positive control that makes the two below a *sender* test: the same four term tags,
+        // sealed by the provider, accept. Each impostor message is built from
+        // `chain.proposalTerms()` exactly as this one is, so the seal is the only difference.
+        assertIs<Acceptance.Accepted>(
+            chain.proposal.accepts(chain.update, provider),
+            "the fixture's own acceptance must accept, or a refusal below proves nothing",
+        )
+
+        for (impostor in listOf(
+            SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX),
+            SettlementFixtures.stranger(OrderFixtures.ORDER_INDEX),
+        )) {
+            val sealed = chain.acceptanceSealedBy(impostor)
+            val refused = assertFailsWith<ChannelException> { chain.proposal.accepts(sealed, provider) }
+            assertEquals(ChannelRejection.ACCEPTANCE_NOT_FROM_PROVIDER, refused.reason)
+
+            // §7.6 refused, so there is no `Acceptance.Accepted` to build an `AcceptanceReceived`
+            // out of — that is a compile-time fact, not one a test can assert. What a test *can*
+            // assert is that the event a caller would reach for instead leaves the order put.
+            val refusal = OrderFixtures.refusal(
+                machine,
+                proposed,
+                OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, OrderFixtures.TERMS),
+            )
+            assertEquals(TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE, refusal.reason)
+            assertEquals(OrderState.PROPOSED, refusal.order.state)
+        }
+    }
+
+    /**
+     * Gap G3, inverted — the whole reason acceptance moved into the codec.
+     *
+     * A `type=3` naming the **same basis points** and a **different fee recipient** is a
+     * counter-proposal to `OrderProposal.accepts`, which compares §8.4's fee pair as a raw tag. It
+     * was an acceptance to `OrderMachine`, whose `OrderTerms.namesTheSameDealAs` compares only the
+     * points — so the same message was a counter-proposal in one half of this library and an
+     * acceptance in the other, and the half that advanced the order was the one that could not see
+     * the recipient. §8.6 then routes the fee payment to whoever the acceptance named.
+     *
+     * Now there is one answer: `CounterProposal`, no `AcceptanceReceived` to build, and the
+     * `StatusUpdate` a caller might reach for instead refused. The order stays `proposed`.
+     */
+    @JsName("an_acceptance_naming_another_fee_recipient_is_a_counter_proposal_and_advances_nothing")
+    @Test
+    fun `an acceptance naming another fee recipient is a counter-proposal and advances nothing`() {
+        val chain = OrderFixtures.chain()
+        val swapped = ProposalFixtures.feeTag(
+            OrderFixtures.OTHER_ORDER_INDEX,
+            OrderFixtures.FEE_BASIS_POINTS,
+        )
+        assertEquals(
+            chain.feeTag?.get(1),
+            swapped[1],
+            "the same basis points, which is what `namesTheSameDealAs` compares and all it does",
+        )
+        assertNotEquals(
+            chain.feeTag,
+            swapped,
+            "and a different recipient, which is the element it cannot see",
+        )
+
+        val sealed = chain.acceptanceSealedBy(
+            SettlementFixtures.provider(OrderFixtures.ORDER_INDEX),
+            ProposalFixtures.replacing(chain.proposalTerms(), swapped),
+        )
+        val answer = chain.proposal.accepts(sealed, SettlementFixtures.provider(OrderFixtures.ORDER_INDEX))
+        val counter = assertIs<Acceptance.CounterProposal>(
+            answer,
+            "§8.4's fee pair diverged, so §7.6's answer is a counter-proposal",
+        )
+        assertTrue(ChannelVocabulary.FEE in counter.divergentTerms, "${counter.divergentTerms}")
+
+        // The terms this acceptance asserts *do* satisfy `namesTheSameDealAs`, which is exactly
+        // why the status-update door had to be shut rather than left with a stricter comparison.
+        val asserted = OrderTerms.of(
+            OrderFixtures.PRICE,
+            FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+            expiration = OrderFixtures.EXPIRATION,
+            deliverBy = OrderFixtures.DELIVER_BY,
+        )
+        assertTrue(asserted.namesTheSameDealAs(OrderFixtures.TERMS), "the narrowing, made explicit")
+
+        val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
+        val refusal = OrderFixtures.refusal(
+            machine,
+            proposed,
+            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, asserted),
+        )
+        assertEquals(TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE, refusal.reason)
+        assertEquals(OrderState.PROPOSED, refusal.order.state)
+    }
+
+    /**
+     * A checked acceptance is an ordinary value, so the one comparison §11.2 still makes is the
+     * binding: an `Acceptance.Accepted` for another order advances nothing here.
+     *
+     * Paired with the positive half, because "it did not move" is satisfied by a machine with no
+     * `→ accepted` edge at all: this order's own acceptance moves it, and records the provider key
+     * §8.6 is checked against one state later.
+     */
+    @JsName("an_acceptance_for_another_order_is_refused_and_this_order_s_own_advances")
+    @Test
+    fun `an acceptance for another order is refused, and this order's own advances`() {
+        val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
+        val elsewhere = OrderFixtures.chain(index = OrderFixtures.OTHER_ORDER_INDEX).accepted
+        assertNotEquals(proposed.id, elsewhere.order, "the two orders must differ in their id")
+
+        val refusal = OrderFixtures.refusal(
+            machine,
+            proposed,
+            OrderEvent.AcceptanceReceived(elsewhere),
+        )
+        assertEquals(TransitionRejection.ACCEPTANCE_FOR_ANOTHER_ORDER, refusal.reason)
+        assertEquals(OrderState.PROPOSED, refusal.order.state)
+        assertEquals(null, refusal.order.provider, "a refusal records nothing")
+
         val accepted = OrderFixtures.advanced(
             machine,
             proposed,
-            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, echoed),
+            OrderEvent.AcceptanceReceived(OrderFixtures.chain().accepted),
         )
         assertEquals(OrderState.ACCEPTED, accepted.state)
+        assertEquals(
+            SettlementFixtures.provider(OrderFixtures.ORDER_INDEX),
+            accepted.provider,
+            "§7.6's checked key travels onto the order, which is what §8.6's `payee=provider` " +
+                "rule is compared against at `committed → awaiting_payment`",
+        )
         assertEquals(
             OrderFixtures.TERMS,
             accepted.terms,
@@ -597,23 +742,126 @@ class OrderControlsTest {
         )
     }
 
-    /** A `deliver_by` that differs *is* on §7.6's list, so it is a counter-proposal. */
-    @JsName("an_acceptance_whose_deliver_by_differs_is_refused")
+    /**
+     * Decision I, at the order: a `payee=provider` record every check T24 makes accepts, and that
+     * §11.2 still refuses because it was not sealed by **this** order's provider.
+     *
+     * The record is genuine — accepted under an `Acceptance.Accepted` for this same order id whose
+     * resolved provider happened to be a stranger — so the settlement package has nothing left to
+     * object to: the seal equals the key that acceptance was checked against, the invoice is this
+     * order's own provider invoice, and the order id matches. The only operand that disagrees is
+     * the key the order recorded when it advanced to `accepted`.
+     *
+     * Paired with the record accepted under the order's **own** acceptance, which enters
+     * `awaiting_payment`, so that a check refusing everything cannot pass this.
+     */
+    @JsName("a_provider_request_sealed_by_another_key_is_refused_and_the_order_s_own_advances")
     @Test
-    fun `an acceptance whose deliver_by differs is refused`() {
-        val proposed = OrderFixtures.orders().getValue(OrderState.PROPOSED)
-        val altered = OrderTerms.of(
-            OrderFixtures.PRICE,
-            FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
-            expiration = OrderFixtures.EXPIRATION,
-            deliverBy = OrderFixtures.DELIVER_BY + 1L,
+    fun `a provider request sealed by another key is refused, and the order's own advances`() {
+        val committed = OrderFixtures.orders().getValue(OrderState.COMMITTED)
+        val chain = OrderFixtures.chain()
+        val stranger = OrderFixtures.providerRequestUnderAStranger()
+
+        assertEquals(committed.id, stranger.order, "same order id: the refusal must not be that")
+        assertEquals(Payee.PROVIDER, stranger.payee)
+        assertNotEquals(
+            committed.provider,
+            stranger.sealedBy,
+            "and a different sealing key, which is the whole of the refusal",
         )
+        assertEquals(
+            chain.request(Payee.PROVIDER).invoice.text,
+            stranger.invoice.text,
+            "the same invoice too, so nothing about the amount or the expiry is what fires",
+        )
+
         val refusal = OrderFixtures.refusal(
             machine,
-            proposed,
-            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, altered),
+            committed,
+            OrderEvent.PaymentRequestsReceived(setOf(stranger, chain.request(Payee.FEE))),
         )
-        assertEquals(TransitionRejection.TERMS_NOT_IDENTICAL, refusal.reason)
+        assertEquals(TransitionRejection.PROVIDER_REQUEST_NOT_FROM_PROVIDER, refusal.reason)
+        assertEquals(OrderState.COMMITTED, refusal.order.state)
+
+        val awaiting = OrderFixtures.advanced(
+            machine,
+            committed,
+            OrderEvent.PaymentRequestsReceived(chain.requests),
+        )
+        assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
+    }
+
+    /**
+     * §9.2 check 1 keys the store by `(order, payee)`: a record for another order is not this one's.
+     *
+     * Two sets, and the second is the one that discriminates. A set in which **every** record names
+     * the other order is refused by a rule reading `all` as readily as by one reading `any`; the
+     * mixed set — this order's provider record beside another order's fee record — is the shape a
+     * client actually produces when it routes one message onto the wrong thread, and only `any`
+     * catches it. Without it the set arithmetic below would find the payees complete and enter
+     * `awaiting_payment` against an invoice §9.2 check 1 will never find for this order.
+     */
+    @JsName("a_payment_request_accepted_for_another_order_is_refused")
+    @Test
+    fun `a payment request accepted for another order is refused`() {
+        val committed = OrderFixtures.orders().getValue(OrderState.COMMITTED)
+        val chain = OrderFixtures.chain()
+        val elsewhere = OrderFixtures.chain(index = OrderFixtures.OTHER_ORDER_INDEX)
+        assertNotEquals(committed.id, elsewhere.request(Payee.PROVIDER).order)
+
+        for (requests in listOf(
+            elsewhere.requests,
+            setOf(chain.request(Payee.PROVIDER), elsewhere.request(Payee.FEE)),
+        )) {
+            val refusal = OrderFixtures.refusal(
+                machine,
+                committed,
+                OrderEvent.PaymentRequestsReceived(requests),
+            )
+            assertEquals(TransitionRejection.PAYMENT_REQUEST_FOR_ANOTHER_ORDER, refusal.reason)
+            assertEquals(OrderState.COMMITTED, refusal.order.state)
+        }
+    }
+
+    /**
+     * §8.6 is one invoice per payee, and the trigger becoming a set of **records** is what makes
+     * two of them for one role expressible at all.
+     *
+     * `AcceptedPaymentRequest.accept` refuses a second `type=2` for an `(order, payee)` pair, but it
+     * asks *one* store — and this event is a set the caller assembles, so two records from two
+     * stores arrive with nothing having compared them. Reducing them to payee roles, which is what
+     * the required-set arithmetic does, collapses the two into one `Payee.PROVIDER` and the order
+     * advances with §9.2 check 1 pointed at whichever invoice the store it later consults holds.
+     *
+     * The fee record is in the set deliberately: without it the order would be refused
+     * `PAYMENT_REQUESTS_INCOMPLETE` and this control would pass with the new rule deleted.
+     */
+    @JsName("two_stored_requests_for_one_payee_are_refused")
+    @Test
+    fun `two stored requests for one payee are refused`() {
+        val committed = OrderFixtures.orders().getValue(OrderState.COMMITTED)
+        val chain = OrderFixtures.chain()
+        val second = OrderFixtures.secondProviderRequest()
+
+        assertEquals(Payee.PROVIDER, second.payee)
+        assertEquals(committed.id, second.order, "same order, so that is not what fires")
+        assertEquals(committed.provider, second.sealedBy, "and the right sealing key, nor that")
+        assertNotEquals(
+            chain.request(Payee.PROVIDER).invoice.text,
+            second.invoice.text,
+            "two genuinely different invoices: one of them bills for something else, which is " +
+                "the whole of §8.6's rule",
+        )
+
+        val refusal = OrderFixtures.refusal(
+            machine,
+            committed,
+            OrderEvent.PaymentRequestsReceived(
+                setOf(chain.request(Payee.PROVIDER), second, chain.request(Payee.FEE)),
+            ),
+        )
+        assertEquals(TransitionRejection.PAYMENT_REQUEST_PAYEE_DUPLICATED, refusal.reason)
+        assertEquals(OrderState.COMMITTED, refusal.order.state)
     }
 
     /** §7.4, §10.1 — the `type=5` commitment is the provider's. */
@@ -884,6 +1132,7 @@ class OrderControlsTest {
         val rumors = listOf<() -> OrderEvent.Rumor>(
             { OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS, createdAt = -1L) },
             { OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, createdAt = -1L) },
+            { OrderEvent.AcceptanceReceived(OrderFixtures.chain().accepted, createdAt = -1L) },
             { OrderEvent.PrivateBid(Party.BUYER, createdAt = Long.MIN_VALUE) },
             { OrderEvent.ChatMessage(Party.BUYER, createdAt = -1L) },
             { OrderEvent.ShippingUpdate(Party.PROVIDER, createdAt = -1L) },
@@ -962,7 +1211,11 @@ class OrderControlsTest {
             OrderFixtures.refusal(
                 machine,
                 orders.getValue(OrderState.COMMITTED),
-                OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER)),
+                // The provider's record alone, on an order that owes a fee as well — the fee
+                // recipient's `type=2` has simply not arrived yet.
+                OrderEvent.PaymentRequestsReceived(
+                    setOf(OrderFixtures.chain().request(Payee.PROVIDER)),
+                ),
             ).reason,
             "§11.2 enters `awaiting_payment` on one valid type=2 per required payee",
         )
@@ -1042,12 +1295,22 @@ class OrderControlsTest {
         val orders = OrderFixtures.orders()
         val price = OrderFixtures.PRICE.millisatoshis.toString()
         val deadline = OrderFixtures.DELIVER_BY.toString()
+        // §12 item 2: the provider key is a counterparty pubkey, and it is a plain hex `String`
+        // with no `toString` of its own to redact — so `Order.toString` is the only thing between
+        // it and a log line.
+        val provider = SettlementFixtures.provider(OrderFixtures.ORDER_INDEX)
+        assertEquals(
+            provider,
+            orders.getValue(OrderState.ACCEPTED).provider,
+            "the order must actually be holding the key, or the assertion below is vacuous",
+        )
 
         assertFalse(OrderFixtures.TERMS.toString().contains(price))
         assertFalse(OrderFixtures.TERMS.toString().contains(deadline))
         for ((state, order) in orders) {
             assertFalse(order.toString().contains(price), "$state printed the price")
             assertFalse(order.toString().contains(deadline), "$state printed a deadline")
+            assertFalse(order.toString().contains(provider), "$state printed the provider's key")
         }
     }
 

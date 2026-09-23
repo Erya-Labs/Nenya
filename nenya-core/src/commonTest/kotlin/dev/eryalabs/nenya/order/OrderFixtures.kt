@@ -48,6 +48,20 @@ import kotlin.test.fail
  * not compile in the first place. The one exception is [OrderState.UNKNOWN], which no transition
  * reaches by design and which [OrderMachine.unrecognised] is the only door to.
  *
+ * ### And every event in that chain comes out of a codec — decision J
+ *
+ * The chain used to assemble two of its own events: `StatusUpdate(ACCEPTED, PROVIDER, terms)` and
+ * `PaymentRequestsReceived(setOf(PROVIDER, FEE))`. Neither shape exists any more. [OrderChain]
+ * builds one order's whole §7-to-§8 message set for the terms asked for — a `type=1` decoded by
+ * T14's codec, a `type=3` sealed by the provider and put through `OrderProposal.accepts` against
+ * the key the caller resolved, and one `type=2` per required payee accepted into a
+ * [PaymentRequestStore] by T24's `AcceptedPaymentRequest.accept` — so the fixture chain reaches
+ * `accepted` and `awaiting_payment` through exactly the doors a client has.
+ *
+ * That is what makes the controls in `OrderControlsTest` mean anything: a fixture that could still
+ * hand-build an acceptance would let a test "prove" the order-level half of §7.6 while the codec's
+ * sender check was deleted.
+ *
  * ### Every fixture receipt is *verified*, the only way the library now allows
  *
  * `OrderEvent.ReceiptsVerified` takes `Settlement.Evidenced`, so a receipt here cannot be a
@@ -353,21 +367,31 @@ internal object OrderFixtures {
      */
     fun orders(terms: OrderTerms = TERMS, index: Int = ORDER_INDEX): Map<OrderState, Order> {
         val machine = machineBeforeDeadlines()
+        val chain = chain(terms, index)
         val required = Payee.requiredPayees(terms.split)
 
-        val proposed = machine.open(OrderEvent.Proposal(orderId(index), terms))
-        val accepted = advanced(
-            machine,
-            proposed,
-            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, assertedTerms = terms),
-        )
+        val proposed = machine.open(chain.proposal.asOrderEvent())
+        // The chain's `type=1` tags are built *from* [terms], so this is the assertion that the
+        // round trip through §7.5's tags and T14's codec landed on the very deal the caller asked
+        // for. Without it a fixture whose fee tag or deadline failed to survive encoding would
+        // quietly hand every test below an order about something else.
+        assertEquals(terms, proposed.terms, "the decoded `type=1` must carry the terms asked for")
+        assertEquals(orderId(index), proposed.id, "and the `order` tag the codec read")
+
+        val accepted = advanced(machine, proposed, OrderEvent.AcceptanceReceived(chain.accepted))
         val committed = advanced(
             machine,
             accepted,
             OrderEvent.DeliveryCommitted(blob.commitment, Party.PROVIDER),
         )
         val awaitingPayment =
-            advanced(machine, committed, OrderEvent.PaymentRequestsReceived(required))
+            advanced(machine, committed, OrderEvent.PaymentRequestsReceived(chain.requests))
+        assertEquals(
+            required,
+            chain.requests.mapTo(LinkedHashSet()) { it.payee },
+            "the stored `type=2`s must cover exactly the payees §9.2 requires, or the transition " +
+                "above was reached on the wrong set",
+        )
 
         // The refusing half of decision B's gate, on the one incomplete shape this library can
         // still build. The streams match `receipts` below — provider 0, fee 1 — so the two offers
@@ -460,6 +484,236 @@ internal object OrderFixtures {
             )
         }
 
+    // ------------------------------------------------------------------ the §7-to-§8 chain
+
+    /**
+     * Which of the two preimage streams the stored `type=2`s of a chain are derived from.
+     *
+     * Stream `0`, so that for [TERMS] a chain's provider invoice is character-for-character the one
+     * [invoice] hands the receipt fixtures — same preimage, same amount, same composer. The two
+     * live in different stores and are the same invoice, which is what a real order has.
+     */
+    const val REQUEST_STREAM: Int = 0
+
+    /**
+     * One order's whole §7-to-§8 message set, for [terms] at [index], every value decoded or
+     * checked by the codec that owns it.
+     *
+     * Cached by the five things that distinguish one: the index, the price, the fee term's shape
+     * and the two deadlines. Building one decodes three events and recomputes as many SHA-256 event
+     * ids, derives up to two BOLT-11 invoices, and the cross-product asks for the same few
+     * thousands of times.
+     */
+    fun chain(terms: OrderTerms = TERMS, index: Int = ORDER_INDEX): OrderChain =
+        chains.getOrPut(chainKey(terms, index)) { OrderChain(terms, index) }
+
+    private val chains: MutableMap<String, OrderChain> = mutableMapOf()
+
+    private fun chainKey(terms: OrderTerms, index: Int): String {
+        val fee =
+            if (terms.split.term == FeeTerm.Absent) "absent" else terms.split.term.basisPoints.toString()
+        return "$index/${terms.split.price.millisatoshis}/$fee/${terms.expiration}/${terms.deliverBy}"
+    }
+
+    /**
+     * A `payee=provider` record for **this** order id that every check T24 makes accepts, and that
+     * §11.2 must still refuse.
+     *
+     * The shape decision I's order-level half is about. A caller resolved a stranger as the
+     * provider and put a `type=3` that stranger really did seal through `accepts`; §7.6 is
+     * satisfied — the seal equals the key it was told to compare against — so it holds a
+     * well-formed `Acceptance.Accepted` for this order. The provider `type=2` it then accepts under
+     * that acceptance is sealed by the stranger, which is exactly what §8.6 requires *of that
+     * acceptance*. Nothing in the settlement package can tell that the caller resolved the wrong
+     * party; only the key **the order** recorded when it advanced to `accepted` can.
+     *
+     * Its invoice is the chain's own provider invoice, so the refusal under test cannot be the
+     * amount, the expiry or the order id.
+     */
+    fun providerRequestUnderAStranger(index: Int = ORDER_INDEX): AcceptedPaymentRequest =
+        strangerRequests.getOrPut(index) {
+            val chain = chain(TERMS, index)
+            val stranger = SettlementFixtures.stranger(index)
+            val sealed = chain.acceptanceSealedBy(stranger)
+            val acceptance = chain.proposal.accepts(sealed, stranger) as? Acceptance.Accepted
+                ?: fail("a `type=3` sealed by the key it is checked against must accept")
+            AcceptedPaymentRequest.accept(
+                SettlementFixtures.requestSealedBy(
+                    stranger,
+                    SettlementFixtures.requestTags(
+                        index = index,
+                        payment = SettlementFixtures.requestPaymentTag(chain.requestInvoice(Payee.PROVIDER)),
+                        payeeTag = SettlementFixtures.payeeTag(Payee.PROVIDER, index),
+                    ),
+                    TERMS.split,
+                ),
+                acceptance,
+                PaymentRequestStore.inMemory(),
+                FakeClock(SettlementFixtures.ACCEPTED_AT),
+            )
+        }
+
+    private val strangerRequests: MutableMap<Int, AcceptedPaymentRequest> = mutableMapOf()
+
+    /**
+     * A **second**, distinct `payee=provider` record for the same order — and one that every check
+     * T24 makes accepts, because §8.6's no-replacement rule is asked of one store and this record
+     * went into another.
+     *
+     * Same order, same provider key, same amount, an invoice derived from the other preimage
+     * stream. That is the shape §8.6's "one invoice per payee" forbids and the shape a set the
+     * caller assembles can express: two records a client kept across two stores, or one it held on
+     * to after its own store refused the replacement. Nothing about the sender, the amount, the
+     * expiry or the order id is wrong with it, which is what makes the refusal it earns the
+     * duplicate rule and nothing else.
+     */
+    fun secondProviderRequest(index: Int = ORDER_INDEX): AcceptedPaymentRequest =
+        secondProviderRequests.getOrPut(index) {
+            AcceptedPaymentRequest.accept(
+                SettlementFixtures.requestSealedBy(
+                    SettlementFixtures.provider(index),
+                    SettlementFixtures.requestTags(
+                        index = index,
+                        payment = SettlementFixtures.requestPaymentTag(
+                            SettlementFixtures.invoice(
+                                preimageHex(index, REQUEST_STREAM + 1),
+                                SettlementFixtures.amountFor(Payee.PROVIDER, TERMS.split),
+                            ),
+                        ),
+                        payeeTag = SettlementFixtures.payeeTag(Payee.PROVIDER, index),
+                    ),
+                    TERMS.split,
+                ),
+                chain(TERMS, index).accepted,
+                PaymentRequestStore.inMemory(),
+                FakeClock(SettlementFixtures.ACCEPTED_AT),
+            )
+        }
+
+    private val secondProviderRequests: MutableMap<Int, AcceptedPaymentRequest> = mutableMapOf()
+
+    /** [tags] decoded as a `type=3` whose **seal** is [author] — §7.6's and §8.7's operand. */
+    fun statusSealedBy(author: String, tags: List<List<String>>): OrderStatusMessage =
+        OrderStatusMessage.decode(SettlementFixtures.boundSealedBy(author, tags))
+
+    /**
+     * The §7.5 proposal, §7.6 acceptance and §8.6 payment requests of one fixture order.
+     *
+     * Everything here is generated: the tags come from [ProposalFixtures] and [SettlementFixtures],
+     * the keys are real BIP-340 keys out of the vendored file, the order id is a digest and the
+     * invoices are derived from a vendored BOLT-11 example (decision D).
+     */
+    internal class OrderChain(val terms: OrderTerms, val index: Int) {
+
+        /** §8.1's fee tag for these terms, or `null` for a proposal carrying no `fee` tag at all. */
+        val feeTag: List<String>? =
+            if (terms.split.term == FeeTerm.Absent) null
+            else ProposalFixtures.feeTag(index, terms.split.term.basisPoints)
+
+        /** §7.5's tags, built to express exactly [terms] — the assertion [orders] makes on them. */
+        val proposalTags: List<List<String>> = ProposalFixtures.proposalTags(
+            index = index,
+            amountMsat = terms.split.price.millisatoshis.toString(),
+            fee = feeTag,
+            deliverBy = terms.deliverBy,
+            expiration = terms.expiration,
+        )
+
+        /** The `type=1`, sealed by the buyer and decoded by T14's codec. */
+        val proposal: OrderProposal = ProposalFixtures.proposal(proposalTags, index)
+
+        /** §7.6's `type=3`, sealed by the provider, carrying the four terms byte for byte. */
+        val update: OrderStatusMessage = acceptanceSealedBy(SettlementFixtures.provider(index))
+
+        /**
+         * §7.6's checked answer, against the provider key the caller resolved.
+         *
+         * `Acceptance.Accepted`'s constructor is `internal` and therefore reachable from this
+         * source set — building one directly would make every order test pass with §7.6's own
+         * sender check deleted, which is half of what this task is about.
+         */
+        val accepted: Acceptance.Accepted =
+            proposal.accepts(update, SettlementFixtures.provider(index)).let {
+                it as? Acceptance.Accepted ?: fail("the fixture acceptance must accept, not $it")
+            }
+
+        /** §8.6's `type=2` for [payee], sealed by the key §8.6 and §8.7 require of it. */
+        fun paymentRequest(payee: Payee): PaymentRequest = SettlementFixtures.requestSealedBy(
+            when (payee) {
+                Payee.PROVIDER -> SettlementFixtures.provider(index)
+                Payee.FEE -> SettlementFixtures.feeRecipient(index)
+            },
+            SettlementFixtures.requestTags(
+                index = index,
+                payment = SettlementFixtures.requestPaymentTag(requestInvoice(payee)),
+                payeeTag = SettlementFixtures.payeeTag(payee, index),
+                // §8.4 marks the tag REQUIRED on the fee request and OPTIONAL on the provider's,
+                // and forbids requiring one there — so the provider's carries none.
+                fee = if (payee == Payee.FEE) feeTag else null,
+            ),
+            terms.split,
+        )
+
+        /** A real invoice for what [payee] is owed under [terms] (decision D). */
+        fun requestInvoice(payee: Payee): String = SettlementFixtures.invoice(
+            preimageHex(index, REQUEST_STREAM),
+            SettlementFixtures.amountFor(payee, terms.split),
+        )
+
+        /** The store the records below were accepted into, at [SettlementFixtures.ACCEPTED_AT]. */
+        val store: PaymentRequestStore = PaymentRequestStore.inMemory()
+
+        /**
+         * One accepted, stored `type=2` per required payee — §11.2's
+         * `committed → awaiting_payment` trigger, minted the only way T24 allows.
+         *
+         * Empty for an order that owes nobody anything, which is §9.2's non-zero clause and the
+         * reason `awaiting_payment` is reachable for a free order at all.
+         */
+        val requests: Set<AcceptedPaymentRequest> =
+            Payee.requiredPayees(terms.split).mapTo(LinkedHashSet()) { payee ->
+                AcceptedPaymentRequest.accept(
+                    paymentRequest(payee),
+                    accepted,
+                    store,
+                    FakeClock(SettlementFixtures.ACCEPTED_AT),
+                    signedPoints(),
+                )
+            }
+
+        /** The stored record for [payee], or a loud failure where these terms owe none. */
+        fun request(payee: Payee): AcceptedPaymentRequest =
+            requests.firstOrNull { it.payee == payee }
+                ?: fail("this chain owes $payee nothing, so it accepted no `type=2` for it")
+
+        /** §8.4's two REQUIRED points that precede every `type=2`, in message order. */
+        fun signedPoints(): List<FeeTermSighting> = listOf(
+            FeeTermSighting.onProposal(proposal),
+            FeeTermSighting.onAcceptance(update),
+        )
+
+        /**
+         * §7.6's `type=3` for this proposal, sealed by [author] and carrying [signedTerms].
+         *
+         * The seal is a parameter because every §7.6 control is about it: an acceptance sealed by
+         * the buyer, or by a stranger, is what decision H refuses, and a fixture that could not
+         * choose the sealing key could not state the rule at all. So is [signedTerms]: §8.4's fee
+         * pair is what gap G3 was about, and the control that inverts it needs a `type=3` naming
+         * the same basis points and a different recipient.
+         */
+        fun acceptanceSealedBy(
+            author: String,
+            signedTerms: List<List<String>> = proposalTerms(),
+        ): OrderStatusMessage = statusSealedBy(
+            author,
+            ProposalFixtures.acceptanceTags(proposalTags, index, terms = signedTerms),
+        )
+
+        /** §7.6's four terms, exactly as the proposal signed them. */
+        fun proposalTerms(): List<List<String>> =
+            proposalTags.filter { it[0] in ProposalFixtures.TERM_NAMES }
+    }
+
     // ------------------------------------------------------------------ the settlement path
 
     /**
@@ -517,19 +771,12 @@ internal object OrderFixtures {
      */
     private fun feeJudgementOrder(index: Int): Order = feeJudgementOrders.getOrPut(index) {
         val machine = machineBeforeDeadlines()
-        val proposed = machine.open(OrderEvent.Proposal(orderId(index), TERMS))
-        val accepted = advanced(
-            machine,
-            proposed,
-            OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, assertedTerms = TERMS),
-        )
+        val chain = chain(TERMS, index)
+        val proposed = machine.open(chain.proposal.asOrderEvent())
+        val accepted = advanced(machine, proposed, OrderEvent.AcceptanceReceived(chain.accepted))
         val committed =
             advanced(machine, accepted, OrderEvent.DeliveryCommitted(blob.commitment, Party.PROVIDER))
-        advanced(
-            machine,
-            committed,
-            OrderEvent.PaymentRequestsReceived(Payee.requiredPayees(TERMS.split)),
-        )
+        advanced(machine, committed, OrderEvent.PaymentRequestsReceived(chain.requests))
     }
 
     private val feeJudgementOrders: MutableMap<Int, Order> = mutableMapOf()

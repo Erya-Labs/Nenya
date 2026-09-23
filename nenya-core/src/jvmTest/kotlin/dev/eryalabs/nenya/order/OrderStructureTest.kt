@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.seam.OrderId
 import java.io.File
 import java.lang.reflect.Executable
@@ -85,6 +86,12 @@ class OrderStructureTest {
 
         /** The type that must appear nowhere in this package's generic signatures. */
         const val VERIFIED_PAYMENT: String = "dev.eryalabs.nenya.payment.VerifiedPayment"
+
+        /** T24's stored `type=2` record — what `committed → awaiting_payment` now consumes. */
+        const val ACCEPTED_REQUEST: String = "dev.eryalabs.nenya.settlement.AcceptedPaymentRequest"
+
+        /** §8.6's payee role, which must appear in **no** parameter of this package as a set. */
+        const val PAYEE: String = "dev.eryalabs.nenya.payment.Payee"
 
         /**
          * The classes this sweep is *about*. Asserted by name rather than by count: a count is
@@ -337,6 +344,68 @@ class OrderStructureTest {
             }
         }
         assertTrue(swept > 20, "the sweep inspected only $swept members, which is not the package")
+    }
+
+    /**
+     * Gap G3's remaining half, made structural: neither of the two transitions this task closes has
+     * a parameter a caller can assert into.
+     *
+     * Two assertions, and each is about a different way of asserting.
+     *
+     * - **`committed → awaiting_payment` takes no `Set<Payee>`, anywhere in the package.** That was
+     *   three enum constants a caller wrote down to mean "I accepted a request from each", and a
+     *   caller that had run none of §8.4, §8.6, §8.7 or §9.2 checks 4 and 5 produced exactly the
+     *   same value as one that had run them all. The sweep is over the **generic** signatures for
+     *   the reason the `VerifiedPayment` one is: `Set<Payee>` and `Set<AcceptedPaymentRequest>`
+     *   erase to the same `java.util.Set`, so `parameterTypes` cannot tell them apart, and it
+     *   covers the whole package rather than one constructor because a second door taking one
+     *   would restore the shape. The element type that *is* there is checked too — an
+     *   `AcceptedPaymentRequest` exists only where T24 accepted and stored a real `type=2`.
+     * - **`proposed → accepted` takes a checked `Acceptance.Accepted` and nothing else.** No
+     *   `Party`, no `OrderTerms`, no `OrderState`, no `String`: every operand §7.6 names was
+     *   compared by `OrderProposal.accepts` over a seal and raw tags, and a parameter here for any
+     *   of them would be a caller's chance to disagree with that comparison after the fact. The
+     *   `createdAt` a `Rumor` carries is the only other parameter, and nothing reads it (§4.6).
+     */
+    @Test
+    fun `the two codec-fed transitions take checked values and nothing assertable`() {
+        var swept = 0
+        for (type in publishedClasses()) {
+            for (executable in publishedExecutables(type)) {
+                swept++
+                for (named in executable.genericParameterTypes.map { it.typeName }) {
+                    assertFalse(
+                        named.startsWith("java.util.Set<") && PAYEE in named,
+                        "${label(type, executable)} takes a $named. §11.2's " +
+                            "`committed → awaiting_payment` consumes the `type=2` records T24 " +
+                            "accepted and stored, not payee labels a caller chose: a set of roles " +
+                            "is the same value whether or not §8.4, §8.6, §8.7 and §9.2 checks 4 " +
+                            "and 5 were ever run",
+                    )
+                }
+            }
+        }
+        assertTrue(swept > 20, "the sweep inspected only $swept members, which is not the package")
+
+        val requests = OrderStructure.mainClasses()
+            .single { it.name == "$PACKAGE.OrderEvent\$PaymentRequestsReceived" }
+        val element = requests.constructors.single { !it.isSynthetic }
+            .genericParameterTypes.first().typeName
+        assertTrue(
+            element.startsWith("java.util.Set<") && ACCEPTED_REQUEST in element,
+            "the payment requests must arrive as a Set of $ACCEPTED_REQUEST, which only " +
+                "`AcceptedPaymentRequest.accept` mints. It was $element",
+        )
+
+        val acceptance = OrderStructure.mainClasses()
+            .single { it.name == "$PACKAGE.OrderEvent\$AcceptanceReceived" }
+        assertEquals(
+            listOf(Acceptance.Accepted::class.java, java.lang.Long::class.java),
+            acceptance.constructors.single { !it.isSynthetic }.parameterTypes.toList(),
+            "§7.6's checked answer and a rumor's `created_at`, and nothing else: a Party, an " +
+                "OrderTerms or a status-shaped String here is a caller overriding the comparison " +
+                "`OrderProposal.accepts` made over the seal and the raw tags",
+        )
     }
 
     /**

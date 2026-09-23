@@ -108,7 +108,21 @@ public class OrderTerms(
     }
 
     /**
-     * §7.6's identity check: are [other]'s terms the ones this order was proposed with?
+     * §7.6's identity check, narrowed: are [other]'s terms the ones this order was proposed with?
+     *
+     * ### It no longer decides acceptance anywhere in this library
+     *
+     * It did, until decision J: `OrderMachine` advanced `proposed → accepted` on this comparison
+     * over the terms a caller-assembled `OrderEvent.StatusUpdate` asserted. The three narrowings
+     * below are all real, and the third routes money — so the whole question moved to
+     * `dev.eryalabs.nenya.channel.OrderProposal.accepts`, which compares the **raw signed tags**
+     * and the seal, and whose answer reaches §11.2 as `OrderEvent.AcceptanceReceived`. A
+     * `status=accepted` status update is now refused from every state
+     * ([TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE]).
+     *
+     * What is left here is a published comparison of two parsed terms objects, for a caller that
+     * wants one and knows what it excludes. It is not an acceptance test, and nothing in this
+     * library treats it as one.
      *
      * **`expiration` is deliberately not compared, and that is §7.6's own list.** §7.6 fixes the
      * terms an acceptance must carry byte-identically as `item`, `amount_msat`, `fee` and

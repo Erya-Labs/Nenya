@@ -1,12 +1,13 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliverableRelease
 import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
-import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.seam.OrderId
+import dev.eryalabs.nenya.settlement.AcceptedPaymentRequest
 import dev.eryalabs.nenya.settlement.Settlement
 
 /**
@@ -143,11 +144,27 @@ public sealed interface OrderEvent {
     /**
      * `kind:16` `type=3` — a status update (§7.4), carrying a `["status", ...]` token from §11.1.
      *
-     * **Announces; does not decide** (§11.3 invariant 5). Exactly two statuses can move an order,
-     * and both are named in §11.2's own trigger column: `accepted` from the provider's key with
-     * byte-identical terms (§7.6), and `cancelled` from either party before `paid`. Every other
+     * **Announces; does not decide** (§11.3 invariant 5). Exactly *one* status can now move an
+     * order through this event: `cancelled`, from either party before `paid`, which §11.2 names in
+     * its own trigger column and §11.3 invariant 5 permits from an assertion alone. Every other
      * status — `paid`, `settled`, `disputed`, `released`, an unrecognised token that read as
      * [OrderState.UNKNOWN] — changes nothing, from any key, in any state.
+     *
+     * ### `accepted` is no longer one of them, and that is decision J
+     *
+     * §11.2's `proposed → accepted` row wants a `type=3` from the provider's **key** carrying terms
+     * **byte-identical** to the proposal's (§7.6). Neither operand is reachable from here: this
+     * event carries a [Party] the caller labelled and parsed [OrderTerms], so the comparison this
+     * class could support was `OrderTerms.namesTheSameDealAs` — which compares the fee term by its
+     * basis points and not by its recipient, and reads no seal at all. A caller assembling one of
+     * these by hand therefore skipped §7.6's byte comparison and §8.6's sender rule at once, which
+     * is gap G3.
+     *
+     * So a `status=accepted` update is refused wherever it arrives
+     * ([TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE]) and the only door to
+     * `accepted` is [AcceptanceReceived], which carries `OrderProposal.accepts`'s checked answer.
+     * The old door is **shut**, not narrowed: there is no shape of these three fields that advances
+     * an order.
      *
      * [status] is an [OrderState] and not a `String` because the token was already read by
      * [OrderStatusCodec], which is §11.1's codec and no other: a status-shaped `String` reaching
@@ -163,14 +180,78 @@ public sealed interface OrderEvent {
         public val from: Party,
 
         /**
-         * The terms the update asserts, for the `status=accepted` case (§7.6), or `null` when it
-         * asserted none.
+         * The terms the update asserts, or `null` when it asserted none.
          *
-         * §7.6: an acceptance MUST carry terms byte-identical to the proposal's, and one carrying
-         * different terms is a counter-proposal. An acceptance carrying **no** terms is therefore
-         * not an acceptance either, and is refused rather than assumed to agree.
+         * **Read by nothing, and kept for the reason [Rumor.createdAt] is kept.** It was §7.6's
+         * operand while a `status=accepted` could still advance an order; now that it cannot, a
+         * field a caller can fill in with any terms it likes is exactly what must not be consulted,
+         * and a field nothing reads is the only way to write a test that would fail the day
+         * something starts reading it. §7.6's comparison is `OrderProposal.accepts`', over the raw
+         * signed tags, and its answer arrives on [AcceptanceReceived].
          */
         public val assertedTerms: OrderTerms? = null,
+
+        override val createdAt: Long? = null,
+    ) : Rumor {
+
+        init {
+            requireNonNegativeCreatedAt(createdAt)
+        }
+    }
+
+    /**
+     * §7.6's acceptance, **as the codec checked it** — the only way to reach `accepted` (§11.2).
+     *
+     * ### What an `Acceptance.Accepted` already establishes, and this event therefore need not
+     *
+     * It exists only where `OrderProposal.accepts(update, provider)` compared, in this order:
+     * the `["order", ...]` id on the `type=3` against the proposal's; the **seal's** pubkey against
+     * the provider key the caller resolved independently of both messages (§7.6, decision H); and
+     * then §7.6's four terms over the **raw signed tags** — `item`, `amount_msat`, `fee` and
+     * `deliver_by`, the `fee` pair including its recipient. A divergence in any of them is an
+     * `Acceptance.CounterProposal` and a `status` that is not `accepted` is an
+     * `Acceptance.NotAnAcceptance`; neither is constructible into this event, so §7.6's three
+     * outcomes stay three outcomes all the way into §11.2.
+     *
+     * That is strictly more than the transition function could ever have checked for itself, and
+     * two of the three are things it had no operand for: it holds no tags, so it cannot compare
+     * bytes, and it holds no seal, so it cannot tell the provider's key from the buyer's. The order
+     * therefore **never trusts whoever sealed an acceptance** — it trusts the comparison the codec
+     * made against a key the caller resolved — and what is left for [OrderMachine] is the one
+     * question the codec cannot answer, because a checked acceptance is an ordinary value a caller
+     * may offer to any order: is this acceptance *this* order's
+     * ([TransitionRejection.ACCEPTANCE_FOR_ANOTHER_ORDER])?
+     *
+     * ### What is still open, stated rather than implied
+     *
+     * The acceptance's terms are **not** compared against the order's. For the pair of messages
+     * §7.6 is about that comparison is already made, over bytes, inside `accepts` — so repeating it
+     * here on parsed values would be `OrderTerms.namesTheSameDealAs` a second time, which is the
+     * narrower comparison decision J exists to stop deciding acceptance.
+     *
+     * What that leaves open is the **genesis** row, not this one. [Proposal] is still a
+     * caller-assembled event carrying a bare [OrderId] and parsed [OrderTerms], so a client can
+     * open an order under a real proposal's id with terms that proposal never carried, and then
+     * advance it with this event. The order would go on to compute `Payee.requiredPayees` from one
+     * split while `AcceptedPaymentRequest.accept` checked §9.2 check 4 against another. That is a
+     * client lying to itself about its own `type=1`, which §13 puts outside what this library
+     * defends against, and the comparison it replaced was caller-value against caller-value and so
+     * was never evidence of anything against a counterparty. It is named here because the signed
+     * terms *are* in hand at this point, and closing it means the genesis row taking
+     * `OrderProposal`'s checked output the way this row takes `accepts`' — a change to [Proposal],
+     * not to this event.
+     */
+    public class AcceptanceReceived(
+
+        /**
+         * §7.6's checked answer, from `OrderProposal.accepts`.
+         *
+         * `Acceptance.Accepted` carries the order the two messages agreed on, the accepted terms,
+         * and [Acceptance.Accepted.provider] — the key the seal was actually compared against,
+         * which the order records as it advances so that §8.6's revision `1.5` sender rule has the
+         * same operand one state later.
+         */
+        public val acceptance: Acceptance.Accepted,
 
         override val createdAt: Long? = null,
     ) : Rumor {
@@ -256,21 +337,33 @@ public sealed interface OrderEvent {
     }
 
     /**
-     * `kind:16` `type=2` — the payment requests received for this order (§8.6), as a set of the
-     * payee roles that sent a valid one.
+     * `kind:16` `type=2` — the payment requests **accepted and stored** for this order (§8.6),
+     * as the records T24's `AcceptedPaymentRequest.accept` minted.
      *
-     * Plural because §11.2's trigger is plural: "one valid `type=2` per **required** payee". The
-     * per-invoice checks §11.2 lists on that row — amount `== price_msat`, fee amount
-     * `== fee_msat`, sealed by the fee recipient (§8.7), fee term matching (§8.4) — are **not**
-     * performed here: what reaches this event is which payees the caller accepted a request from.
-     * All four now have somewhere to be performed — `Settlement.checkFeePaymentRequest` does §8.4
-     * and §8.7 over a fee `type=2`, and `Settlement.verify` holds the **stored** invoice to §9.2
-     * check 4's amount — and the caller that runs them is the one honouring the row. What this
-     * event still does not itself establish is that the caller did: it carries payee roles, not
-     * invoices. That narrowing is not silently absorbed — it is the same set of unperformed checks
-     * every `VerifiedPayment` publishes, and the order carries them forward (§17) — and it is
-     * narrowed for good at the point a payment request is refused at acceptance for an amount that
-     * is not what its payee is owed, which is T24's.
+     * Plural because §11.2's trigger is plural: "one valid `type=2` per **required** payee".
+     *
+     * ### Records, not payee labels — decision J
+     *
+     * This used to carry a `Set<Payee>`: three enum constants a caller wrote down, asserting that
+     * it had accepted a request from each. Nothing about the invoices survived the trip, so
+     * `committed → awaiting_payment` was entered on a caller's say-so and a caller that skipped
+     * §8.4, §8.6 and §8.7 entirely looked exactly like one that had not.
+     *
+     * An [AcceptedPaymentRequest] is not assertable: the only door that mints one is
+     * `AcceptedPaymentRequest.accept`, which first refuses the request unless §7.6's checked
+     * acceptance names the same order, unless the seal is the right key for the payee (the
+     * acceptance's provider key for `payee=provider`, §8.4 and §8.7 through
+     * `Settlement.checkFeePaymentRequest` for `payee=fee`), unless the invoice parses under
+     * Appendix C for §9.2 check 4's amount and check 5's expiry against the clock reading it took
+     * itself, and unless §8.6's two uniqueness rules hold. So every record here is an invoice this
+     * library read, checked and persisted, and the roles below are the ones the messages' own
+     * `["payee", …]` tags carried rather than labels a caller chose.
+     *
+     * What the record still cannot establish is **whose order** it is and **whose key** it came
+     * under *relative to this order*: a record is an ordinary value keyed by `(order, payee)`, and
+     * an acceptance the caller resolved against a stranger's key mints a perfectly well-formed
+     * `payee=provider` record. Both comparisons are therefore made again by [OrderMachine], against
+     * `Order.id` and `Order.provider` (decision I).
      *
      * §8.5 is why this event exists as its own thing rather than folding into the receipt: the
      * fee **payment request** is accepted as part of `committed → awaiting_payment` and nowhere
@@ -283,14 +376,14 @@ public sealed interface OrderEvent {
     public class PaymentRequestsReceived(
 
         /**
-         * The payee roles a valid `type=2` was received from.
+         * The `type=2`s accepted and stored for this order, one per payee (§8.6).
          *
-         * MUST equal the required set (§9.2, §11.2): a missing one leaves the order `committed`,
-         * and a surplus one is refused — §8.6 and §8.3 both say a fee request for an expected
-         * amount of `0` MUST be rejected, and §8.1 says every fee invoice for an order proposed
-         * with no `fee` tag MUST be refused.
+         * The payees they name MUST equal the required set (§9.2, §11.2): a missing one leaves the
+         * order `committed`, and a surplus one is refused — §8.6 and §8.3 both say a fee request
+         * for an expected amount of `0` MUST be rejected, and §8.1 says every fee invoice for an
+         * order proposed with no `fee` tag MUST be refused.
          */
-        public val payees: Set<Payee>,
+        public val requests: Set<AcceptedPaymentRequest>,
 
         override val createdAt: Long? = null,
     ) : Rumor {

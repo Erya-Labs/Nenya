@@ -1301,13 +1301,17 @@ class FeeTermCheckTest {
         val awaiting = OrderFixtures.advanced(
             machine,
             committed,
-            OrderEvent.PaymentRequestsReceived(required),
+            OrderEvent.PaymentRequestsReceived(OrderFixtures.chain(messages.terms()).requests),
         )
         assertEquals(OrderState.AWAITING_PAYMENT, awaiting.state)
 
         // And never earlier: the same event from `accepted` is refused by §11.2's own table.
         val accepted = messages.order(OrderState.ACCEPTED)
-        OrderFixtures.refusal(machine, accepted, OrderEvent.PaymentRequestsReceived(required))
+        OrderFixtures.refusal(
+            machine,
+            accepted,
+            OrderEvent.PaymentRequestsReceived(OrderFixtures.chain(messages.terms()).requests),
+        )
 
         // The receipt, which is the half §8.5 does refuse, is now accepted at `awaiting_payment`.
         assertIs<Settlement.Evidenced>(

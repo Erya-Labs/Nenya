@@ -50,10 +50,77 @@ public enum class TransitionRejection {
 
     /**
      * §11.3 invariant 5 — a `type=3` status update announces; it does not decide. Only
-     * `accepted` (§7.6) and `cancelled` can move an order, and everything else, from any key, in
-     * any state, changes nothing.
+     * `cancelled` can move an order through one, and everything else, from any key, in any state,
+     * changes nothing.
+     *
+     * `accepted` is refused by [ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE] instead, and the two are
+     * kept apart on purpose: this one says the status decides nothing anywhere, and that one says
+     * the status decides something *and this is not the message that carries the decision*.
      */
     STATUS_UPDATE_DECIDES_NOTHING,
+
+    /**
+     * A `type=3` `status=accepted` was offered as an acceptance. It is not one, in any state, from
+     * any key, carrying any terms.
+     *
+     * §7.6 fixes acceptance as two comparisons over things a caller-assembled
+     * [OrderEvent.StatusUpdate] does not carry: the **seal's** pubkey against the provider key the
+     * caller resolved independently of both messages, and §7.6's four terms **byte-identically**
+     * against the proposal's — the `fee` pair including its recipient, which
+     * [OrderTerms.namesTheSameDealAs] does not compare. An order advanced on that event had
+     * therefore had neither made, which is gap G3: a `type=3` naming the same basis points and a
+     * different fee recipient was a counter-proposal in `OrderProposal.accepts` and an acceptance
+     * here.
+     *
+     * Both comparisons live in `OrderProposal.accepts`, and its answer reaches §11.2 as
+     * [OrderEvent.AcceptanceReceived] (decision J). This refusal is what makes the old door shut
+     * rather than merely narrow: no shape of a `StatusUpdate` advances an order to `accepted`.
+     */
+    ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE,
+
+    /**
+     * An [OrderEvent.AcceptanceReceived] whose checked acceptance names a **different** order.
+     *
+     * The one question `OrderProposal.accepts` cannot answer, for the reason
+     * [RECEIPT_FOR_ANOTHER_ORDER] and [RELEASE_FOR_ANOTHER_ORDER] exist two and three rows later:
+     * `accepts` compared the `type=3`'s `order` tag against **the proposal it was called on**, and
+     * the `Acceptance.Accepted` it returns is then an ordinary value a caller may offer to any
+     * order. Two orders between the same two parties differ in nothing else a rule here reads.
+     */
+    ACCEPTANCE_FOR_ANOTHER_ORDER,
+
+    /**
+     * A stored `type=2` record in an [OrderEvent.PaymentRequestsReceived] names a **different**
+     * order.
+     *
+     * §9.2 check 1 keys the store by `(order, payee)` and §7.4 makes the order id the handle every
+     * message in a thread carries, so a record carries the id its `type=2` named. Without this
+     * comparison a request accepted for another order at the same price satisfies every other rule
+     * on this row, because every other rule is about the payee and the sealing key and neither is
+     * order-specific — and the order would enter `awaiting_payment` against an invoice §9.2 check 1
+     * will never find for it.
+     */
+    PAYMENT_REQUEST_FOR_ANOTHER_ORDER,
+
+    /**
+     * A `payee=provider` record was sealed by a key that is not the one this order's acceptance was
+     * checked against (§8.6 revision `1.5`, decision I).
+     *
+     * `AcceptedPaymentRequest.accept` makes this comparison too — against
+     * `Acceptance.Accepted.provider`, the key **that acceptance** was checked against. That is the
+     * same rule about a different subject, and the gap between the two is the whole of this
+     * constant: a caller that resolved a stranger as the provider, was refused at `accepts`, and
+     * then resolved that stranger for a *second* `accepts` call over a `type=3` the stranger really
+     * did seal, holds a well-formed `Acceptance.Accepted` for this order id and a well-formed
+     * provider record under it. Every check T24 makes passes on it. What does not pass is the
+     * comparison against the key **this order** recorded when it advanced to `accepted`.
+     *
+     * An order holding no provider key at all is refused here as well, and that is the fail-closed
+     * direction rather than an oversight: §11.2 reaches `committed` only through
+     * `proposed → accepted`, so a `committed` order with no recorded provider is a state this
+     * library cannot produce, and comparing a real key against its absence must not read as a match.
+     */
+    PROVIDER_REQUEST_NOT_FROM_PROVIDER,
 
     /**
      * A `cancelled` status update arrived at or after `paid`. §11.3 invariant 5: cancellation is
@@ -70,18 +137,33 @@ public enum class TransitionRejection {
     WRONG_STATE_FOR_EVENT,
 
     /**
-     * The key it came from may not send this. §7.6 fixes acceptance to the provider's key, §7.4
-     * fixes the commitment and the release to the provider, and §11.2 accepts cancellation from
-     * "either party" — which §8.5 makes clear the fee recipient is not.
+     * The key it came from may not send this. §7.4 fixes the commitment and the release to the
+     * provider, and §11.2 accepts cancellation from "either party" — which §8.5 makes clear the
+     * fee recipient is not.
+     *
+     * §7.6's own sender rule for an acceptance is **not** here: it is made over a real seal, one
+     * layer down, by `OrderProposal.accepts`, and the events that reach this file carry a [Party]
+     * the caller labelled rather than a key anything compared.
      */
     WRONG_SENDER,
 
     /**
-     * §7.6 — an acceptance whose terms are not byte-identical to the proposal's, or which
-     * asserts no terms at all. That is a **counter-proposal**, and the correct response is a new
-     * `type=1` from the buyer with a new order id, not a transition on these terms.
+     * Two stored `type=2` records in one set for the same payee (§8.6 revision `1.5`).
+     *
+     * §8.6 is one invoice per payee, so a second record for a role is not a duplicate to be
+     * collapsed: one of the two bills for something else, and §9.2 check 1 compares a receipt
+     * against *the* stored request. It is the same rule [RECEIPT_PAYEE_DUPLICATED] makes one row
+     * later, and it is needed here for the first time because the trigger became a set of records
+     * rather than a set of payee roles — a `Set<Payee>` could not express the shape at all.
+     *
+     * `AcceptedPaymentRequest.accept` refuses it within **one** store
+     * ([dev.eryalabs.nenya.settlement.SettlementRejection.REQUEST_ALREADY_STORED]), and that is not
+     * this rule: the event is a set the caller assembles, and a caller holding records from two
+     * stores — or one record it kept after the store refused its replacement — assembles this
+     * without either door noticing. Deduplicating to the payee here, which is what the required-set
+     * arithmetic below would otherwise do on its own, would let it through silently.
      */
-    TERMS_NOT_IDENTICAL,
+    PAYMENT_REQUEST_PAYEE_DUPLICATED,
 
     /** §11.2 — a required payee (§9.2) sent no valid `type=2`. The order stays `committed`. */
     PAYMENT_REQUESTS_INCOMPLETE,
@@ -450,6 +532,30 @@ public sealed interface Order {
     /** The terms it was opened with (§7.5). Immutable: §7.6 makes altered terms a new order. */
     public val terms: OrderTerms
 
+    /**
+     * The provider's key this order's acceptance was **checked against** (§7.6), in §4.3's
+     * canonical lowercase — or `null` at `proposed`, in the `unknown` sink, and on the
+     * `proposed → cancelled` and `proposed → expired` rows, where no acceptance ever arrived.
+     *
+     * Recorded, rather than left with the caller, because the next message in the order depends on
+     * it: §8.6 (revision `1.5`) requires a `payee=provider` `type=2` to arrive under "the same key
+     * the acceptance for that order was checked against", and that comparison is made here, at
+     * `committed → awaiting_payment`, against **this** field
+     * ([TransitionRejection.PROVIDER_REQUEST_NOT_FROM_PROVIDER], decision I). A caller re-supplying
+     * the key at that point could supply a different one, and the two checks would be about two
+     * different providers while looking like one rule.
+     *
+     * It is the key the **caller resolved** and this library compared a seal against — never one
+     * this library discovered. §7.6 names the two places the answer really comes from, the author
+     * of the offer or the bidder the buyer chose, and §13 leaves the resolution where only the
+     * caller can do it. See `Acceptance.Accepted.provider`.
+     *
+     * **It is never printed.** §12 item 2 keeps a counterparty pubkey out of anything public and
+     * §12 item 11 out of the string representation of anything this library exposes, so [toString]
+     * on the implementation names no key at all and a test asserts the hex is absent.
+     */
+    public val provider: String?
+
     /** §10.1's commitment, once the provider has sent one; `null` before `committed`. */
     public val commitment: DeliverableCommitment?
 
@@ -558,6 +664,23 @@ public sealed interface Order {
  * ([TransitionRejection.RECEIPT_FOR_ANOTHER_ORDER]) before any other rule runs. Verified evidence
  * for somebody else's order is still evidence of something; it is not evidence of this.
  *
+ * ### The two transitions the codecs feed, and the two comparisons left here
+ *
+ * The same argument reaches two rows further up the table (decision J). `proposed → accepted`
+ * consumes an `Acceptance.Accepted`, which exists only where `OrderProposal.accepts` compared the
+ * seal against the provider key the caller resolved and then §7.6's four terms over the raw signed
+ * tags; `committed → awaiting_payment` consumes `AcceptedPaymentRequest`s, which exist only where
+ * T24 held a real `type=2` to §8.4, §8.6, §8.7, Appendix C and §9.2 checks 4 and 5 and then stored
+ * it. A `type=3` `status=accepted` a caller assembles advances nothing, from any state
+ * ([TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE]), and there is no shape of payment
+ * request that is a payee label.
+ *
+ * What is left here is what a checked value cannot know, because both are ordinary values a caller
+ * may offer to any order: whether it is *this* order's ([TransitionRejection.ACCEPTANCE_FOR_ANOTHER_ORDER],
+ * [TransitionRejection.PAYMENT_REQUEST_FOR_ANOTHER_ORDER]), and whether a `payee=provider` request
+ * came under the key **this** order's acceptance was checked against
+ * ([TransitionRejection.PROVIDER_REQUEST_NOT_FROM_PROVIDER], decision I).
+ *
  * ### The seams are injected, both of them
  *
  * §4.6 makes the injected clock the only time this library may know — every deadline in NENYA-1
@@ -619,6 +742,9 @@ public class OrderMachine(
         id = proposal.order,
         state = OrderState.PROPOSED,
         terms = proposal.terms,
+        // §11.2's genesis row is the buyer's own act: no acceptance has arrived, so there is no
+        // checked provider key to record and nothing is invented to stand in for one.
+        provider = null,
         commitment = null,
         paidAt = null,
         releasedAt = null,
@@ -653,6 +779,9 @@ public class OrderMachine(
         id = id,
         state = OrderState.UNKNOWN,
         terms = terms,
+        // The sink is a thread a caller could not read, not one it took part in: §7.6 was never
+        // reached, so there is no key an acceptance was compared against.
+        provider = null,
         commitment = null,
         paidAt = null,
         releasedAt = null,
@@ -673,7 +802,11 @@ public class OrderMachine(
      *    `type=4` — "in any state, from any key";
      * 2. §11.3 invariant 5 — a `type=3` announcing anything other than `accepted` or `cancelled`
      *    changes nothing, from any key, in any state. `paid`, `settled` and `disputed` are the
-     *    ones that matter, and `disputed` is the one an implementer reaches for as a trigger;
+     *    ones that matter, and `disputed` is the one an implementer reaches for as a trigger.
+     *    `accepted` changes nothing either, and is deliberately **not** refused here: it earns its
+     *    own reason a moment later ([TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE]),
+     *    because "that status decides nothing" and "that status decides something and this is not
+     *    the message carrying the decision" send a client to do different things;
      * 3. a `type=1` cannot reach an order that already exists (§7.6).
      */
     public fun on(order: Order, event: OrderEvent): OrderOutcome {
@@ -721,6 +854,11 @@ public class OrderMachine(
      * of a status update announcing `paid` or `settled`. A terminal-state check running first
      * would answer `STATE_IS_TERMINAL` for four of the eleven and make those rules impossible to
      * state as one assertion.
+     *
+     * `accepted` is not on this list even though it now advances nothing either. It is refused by
+     * [statusUpdate] with its own reason, which means a terminal or `unknown` order answers
+     * `STATE_IS_TERMINAL` or `STATE_IS_UNKNOWN` for one — the more specific answer, and the same
+     * treatment `cancelled` already gets.
      */
     private fun advancesNothingEver(event: OrderEvent): Pair<TransitionRejection, String>? = when {
         event is OrderEvent.ChatMessage || event is OrderEvent.PrivateBid ->
@@ -738,10 +876,11 @@ public class OrderMachine(
             event.status != OrderState.ACCEPTED &&
             event.status != OrderState.CANCELLED ->
             TransitionRejection.STATUS_UPDATE_DECIDES_NOTHING to
-                "§11.3 invariant 5: a type=3 status update announces; it does not decide. Only " +
-                "`cancelled` is accepted from a counterparty's assertion alone, and only before " +
-                "`paid`; `accepted` additionally requires the provider's key and byte-identical " +
-                "terms (§7.6)"
+                "§11.3 invariant 5: a type=3 status update announces; it does not decide. " +
+                "`cancelled` is the only status one of these can move an order on, and only " +
+                "before `paid`. `accepted` is not a second one: §7.6's comparison is made over a " +
+                "seal and the raw signed tags, one layer down, and no type=3 a caller assembles " +
+                "advances an order"
 
         event is OrderEvent.Proposal ->
             TransitionRejection.ORDER_ALREADY_OPEN to
@@ -755,9 +894,14 @@ public class OrderMachine(
     // ------------------------------------------------------------------ per-state dispatch
 
     private fun fromProposed(order: Order, event: OrderEvent): OrderOutcome = when (event) {
-        is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = order.terms)
+        is OrderEvent.AcceptanceReceived -> acceptance(order, event)
+        is OrderEvent.StatusUpdate -> statusUpdate(order, event)
         is OrderEvent.ClockChecked -> acceptanceDeadline(order)
-        else -> wrongState(order, "proposed", "a type=3 acceptance or cancellation, or the clock passing `expiration`")
+        else -> wrongState(
+            order,
+            "proposed",
+            "§7.6's checked acceptance, a type=3 cancellation, or the clock passing `expiration`",
+        )
     }
 
     private fun fromAccepted(order: Order, event: OrderEvent): OrderOutcome = when (event) {
@@ -778,14 +922,14 @@ public class OrderMachine(
                 )
             }
 
-        is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
+        is OrderEvent.StatusUpdate -> statusUpdate(order, event)
         is OrderEvent.ClockChecked -> acceptanceDeadline(order)
         else -> wrongState(order, "accepted", "a type=5 commitment, a cancellation, or the clock passing `expiration`")
     }
 
     private fun fromCommitted(order: Order, event: OrderEvent): OrderOutcome = when (event) {
         is OrderEvent.PaymentRequestsReceived -> paymentRequests(order, event)
-        is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
+        is OrderEvent.StatusUpdate -> statusUpdate(order, event)
         is OrderEvent.ClockChecked -> acceptanceDeadline(order)
         is OrderEvent.LocallyDisputed -> advance(
             order.with(state = OrderState.DISPUTED, disputeGround = DisputeGround.RAISED_LOCALLY),
@@ -801,7 +945,7 @@ public class OrderMachine(
 
     private fun fromAwaitingPayment(order: Order, event: OrderEvent): OrderOutcome = when (event) {
         is OrderEvent.ReceiptsVerified -> receipts(order, event)
-        is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
+        is OrderEvent.StatusUpdate -> statusUpdate(order, event)
         is OrderEvent.ClockChecked -> acceptanceDeadline(order)
         is OrderEvent.LocallyDisputed -> advance(
             order.with(state = OrderState.DISPUTED, disputeGround = DisputeGround.RAISED_LOCALLY),
@@ -818,7 +962,7 @@ public class OrderMachine(
     private fun fromPaid(order: Order, event: OrderEvent): OrderOutcome = when (event) {
         is OrderEvent.DeliverableReleased -> release(order, event)
         is OrderEvent.ClockChecked -> releaseDeadline(order)
-        is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
+        is OrderEvent.StatusUpdate -> statusUpdate(order, event)
         else -> wrongState(order, "paid", "a kind:15 release, or the clock passing `deliver_by`")
     }
 
@@ -829,7 +973,7 @@ public class OrderMachine(
         )
 
         is OrderEvent.ClockChecked -> verificationDeadline(order)
-        is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
+        is OrderEvent.StatusUpdate -> statusUpdate(order, event)
         else -> wrongState(
             order,
             "released",
@@ -841,38 +985,29 @@ public class OrderMachine(
     // ------------------------------------------------------------------ the individual triggers
 
     /**
-     * §7.6's acceptance and §11.2's cancellation, the only two statuses that move anything.
+     * §11.2's cancellation — the one status that still moves anything — and the flat refusal of a
+     * `status=accepted`.
      *
-     * @param acceptable the terms an `accepted` update must match, or `null` in a state where
-     *   §11.2 lists no `→ accepted` row at all. `null` is not "match anything": it refuses.
+     * The `accepted` branch takes no operand at all, and that is the change decision J asks for:
+     * there is no terms parameter to compare against and no sender to be right, because neither
+     * operand §7.6 names is on this event. A `Party` is a label the caller applied and
+     * [OrderTerms] are parsed values, so the two comparisons that would have run here were a
+     * strictly weaker imitation of the ones `OrderProposal.accepts` makes over the seal and the raw
+     * tags. It is refused from every state, including `proposed`, so the old door is shut rather
+     * than narrowed.
      */
-    private fun statusUpdate(order: Order, event: OrderEvent.StatusUpdate, acceptable: OrderTerms?): OrderOutcome =
+    private fun statusUpdate(order: Order, event: OrderEvent.StatusUpdate): OrderOutcome =
         when (event.status) {
-            OrderState.ACCEPTED -> when {
-                acceptable == null -> wrongState(
-                    order,
-                    order.state.token ?: "unknown",
-                    "§11.2 lists `→ accepted` only out of `proposed`",
-                )
-
-                event.from != Party.PROVIDER -> wrongSender(
-                    order,
-                    "§7.6: acceptance is a type=3 from the **provider's** key, and an " +
-                        "implementation MUST NOT treat silence, a chat message or a public event " +
-                        "as acceptance",
-                )
-
-                event.assertedTerms?.namesTheSameDealAs(acceptable) != true -> refuse(
-                    order,
-                    TransitionRejection.TERMS_NOT_IDENTICAL,
-                    "§7.6: an acceptance carries `item`, `amount_msat`, `fee` and `deliver_by` " +
-                        "byte-identical to the proposal's. One carrying different terms — or none " +
-                        "at all — is a counter-proposal, and the correct response is a new type=1 " +
-                        "from the buyer with a new order id",
-                )
-
-                else -> advance(order.with(state = OrderState.ACCEPTED))
-            }
+            OrderState.ACCEPTED -> refuse(
+                order,
+                TransitionRejection.ACCEPTANCE_NOT_DECIDED_BY_STATUS_UPDATE,
+                "§7.6 decides acceptance by comparing the seal's pubkey against the provider key " +
+                    "the caller resolved, and then the four terms **byte-identically** against the " +
+                    "proposal's raw tags — the `fee` pair, its recipient included. Neither operand " +
+                    "is on a type=3 assembled by a caller: the sender here is a label and the terms " +
+                    "are parsed values. That comparison is `OrderProposal.accepts`', and its " +
+                    "checked answer is the only thing that reaches `accepted`",
+            )
 
             OrderState.CANCELLED -> when {
                 order.state == OrderState.PAID || order.state == OrderState.RELEASED -> refuse(
@@ -901,6 +1036,42 @@ public class OrderMachine(
                 "§11.3 invariant 5: a status update announces; it does not decide",
             )
         }
+
+    /**
+     * §11.2's `proposed → accepted` row: §7.6's acceptance, as `OrderProposal.accepts` checked it.
+     *
+     * One comparison, because the codec already made the other two and made them over operands
+     * this file does not hold. What is left is the binding — is this acceptance *this* order's —
+     * for the reason §10.3 gives about its own release: routing is on the `order` id, and equality
+     * of anything else is a check rather than the binding. Two orders between the same buyer and
+     * provider carry the same provider key and can carry identical terms, so every other rule on
+     * this row would pass on a misrouted acceptance.
+     *
+     * The provider key travels onto the order as it advances, and is the operand §8.6's revision
+     * `1.5` sender rule is checked against one state later (decision I, decision H).
+     */
+    private fun acceptance(order: Order, event: OrderEvent.AcceptanceReceived): OrderOutcome {
+        if (event.acceptance.order != order.id) {
+            return refuse(
+                order,
+                TransitionRejection.ACCEPTANCE_FOR_ANOTHER_ORDER,
+                "§7.6 compares an acceptance against the proposal it answers, and this one was " +
+                    "checked against another order's. §7.4 makes the order id the handle every " +
+                    "message in a thread carries: the acceptance may well be genuine, and it is " +
+                    "not this order's",
+            )
+        }
+        return advance(
+            order.with(
+                state = OrderState.ACCEPTED,
+                // §7.6's checked key, recorded so that §8.6's `payee=provider` rule has the same
+                // operand at `committed → awaiting_payment` that T24 had at acceptance. Never a
+                // key this library discovered: it is the one the caller resolved and `accepts`
+                // compared the seal against.
+                provider = event.acceptance.provider,
+            ),
+        )
+    }
 
     /** §11.2's `→ expired` rows: the injected clock passing the proposal's `expiration` (§4.6). */
     private fun acceptanceDeadline(order: Order): OrderOutcome {
@@ -1051,10 +1222,67 @@ public class OrderMachine(
      * happens to an implementation that requires an invoice per *named* payee instead: at
      * `bps = 1` and `price_msat = 3000` the fee is `floor(3000 × 1 / 10000) = 0`, no fee invoice
      * may legally exist, and every such order deadlocks into `expired`.
+     *
+     * ### The two comparisons that come first, and why a stored record does not already make them
+     *
+     * Every operand below is read off an [dev.eryalabs.nenya.settlement.AcceptedPaymentRequest],
+     * which `AcceptedPaymentRequest.accept` minted after §8.4, §8.6, §8.7, Appendix C and §9.2
+     * checks 4 and 5. Two things that record cannot know are checked here, both against **this**
+     * order:
+     *
+     * 1. the order id, for the reason [TransitionRejection.PAYMENT_REQUEST_FOR_ANOTHER_ORDER]
+     *    gives — a record is keyed by `(order, payee)` and is otherwise an ordinary value;
+     * 2. the sealing key of a `payee=provider` record against [Order.provider], the key **this
+     *    order's** acceptance was checked against (decision I). T24 compared it against the key
+     *    *the acceptance it was handed* carried, which is the same rule about a different subject:
+     *    a caller holding an `Acceptance.Accepted` resolved against a stranger mints a record that
+     *    passes every check T24 makes.
+     *
+     * The payee of a `payee=fee` record is not held to a key here: §8.7 binds a fee invoice to the
+     * recipient named in the **signed fee term**, which is a sequence of raw tags no [Order] holds,
+     * and `Settlement.checkFeePaymentRequest` made that comparison before the record existed.
      */
     private fun paymentRequests(order: Order, event: OrderEvent.PaymentRequestsReceived): OrderOutcome {
+        if (event.requests.any { it.order != order.id }) {
+            return refuse(
+                order,
+                TransitionRejection.PAYMENT_REQUEST_FOR_ANOTHER_ORDER,
+                "a `type=2` accepted for another order was offered as this one's. §7.4 makes the " +
+                    "order id the handle every message in a thread carries and §9.2 check 1 keys " +
+                    "the store by (order, payee); the invoice may well be valid, and it is not " +
+                    "this order's",
+            )
+        }
+        // `order.provider` is null only where no acceptance ever arrived, which §11.2 makes
+        // unreachable at `committed` — and a null compares unequal to every real key, so the
+        // shape this library cannot produce fails closed rather than matching.
+        if (event.requests.any { it.payee == Payee.PROVIDER && it.sealedBy != order.provider }) {
+            return refuse(
+                order,
+                TransitionRejection.PROVIDER_REQUEST_NOT_FROM_PROVIDER,
+                "§8.6: a `type=2` with `[\"payee\", \"provider\"]` MUST arrive in a gift wrap " +
+                    "whose seal is the provider's key — the same key the acceptance for **this** " +
+                    "order was checked against (§7.6, §11.2) — and any other MUST be rejected. A " +
+                    "provider invoice from another key is somebody else's bill under the " +
+                    "provider's name, and §9.2 check 1 would anchor this order's whole payment " +
+                    "evidence to it",
+            )
+        }
         val required = Payee.requiredPayees(order.terms.split)
-        val surplus = event.payees - required
+        val offered = event.requests.mapTo(LinkedHashSet()) { it.payee }
+        // Before the set arithmetic, because the set arithmetic is what would hide it: reducing
+        // records to roles collapses two provider invoices into one `Payee.PROVIDER` and the order
+        // advances with §9.2 check 1 pointed at whichever of them the store happens to hold.
+        if (offered.size != event.requests.size) {
+            return refuse(
+                order,
+                TransitionRejection.PAYMENT_REQUEST_PAYEE_DUPLICATED,
+                "§8.6 is one invoice per payee, so two accepted `type=2`s for one role are not a " +
+                    "duplicate to be collapsed: one of them bills for something else, and §9.2 " +
+                    "check 1 compares a receipt against *the* stored request for that payee",
+            )
+        }
+        val surplus = offered - required
         if (surplus.isNotEmpty()) {
             return refuse(
                 order,
@@ -1065,7 +1293,7 @@ public class OrderMachine(
                     "no `fee` tag",
             )
         }
-        val missing = required - event.payees
+        val missing = required - offered
         if (missing.isNotEmpty()) {
             return refuse(
                 order,
@@ -1403,6 +1631,7 @@ private fun sameCommitment(one: DeliverableCommitment, other: DeliverableCommitm
  */
 private fun Order.with(
     state: OrderState = this.state,
+    provider: String? = this.provider,
     commitment: DeliverableCommitment? = this.commitment,
     paidAt: Long? = this.paidAt,
     releasedAt: Long? = this.releasedAt,
@@ -1418,6 +1647,7 @@ private fun Order.with(
     id = id,
     state = state,
     terms = terms,
+    provider = provider,
     commitment = commitment,
     paidAt = paidAt,
     releasedAt = releasedAt,
@@ -1433,6 +1663,7 @@ private class OpenOrder(
     override val id: OrderId,
     override val state: OrderState,
     override val terms: OrderTerms,
+    override val provider: String?,
     override val commitment: DeliverableCommitment?,
     override val paidAt: Long?,
     override val releasedAt: Long?,
@@ -1445,13 +1676,15 @@ private class OpenOrder(
 
     /**
      * Names the state, the dispute ground and the two capability records — and no order id, no
-     * amount, no deadline, no hash and no clock reading, [Order.paidAt] and [Order.releasedAt]
-     * included (§12 item 11, and see [OrderTerms.toString]).
+     * counterparty pubkey, no amount, no deadline, no hash and no clock reading, [Order.paidAt] and
+     * [Order.releasedAt] included (§12 item 11, and see [OrderTerms.toString]).
      *
      * The order id is the addition worth naming: §12 item 11 lists it beside key material and
      * preimages, and it is a correlation handle for anyone who later learns it, so it is absent
      * here rather than delegated to `OrderId.toString` — a redaction two levels deep is one a
-     * later `id.toHex()` in a debugging line undoes without anybody noticing.
+     * later `id.toHex()` in a debugging line undoes without anybody noticing. [Order.provider] is
+     * absent for the same reason under §12 item 2: it is a plain 64-character hex `String` with no
+     * `toString` of its own to redact, so this is the only place that can keep it out of a log.
      */
     override fun toString(): String =
         "Order(state=${state.token ?: "unknown"}, disputeGround=$disputeGround, " +

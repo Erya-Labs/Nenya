@@ -63,9 +63,18 @@ abstract class PortableTransitionTotalityTest {
      */
     protected val events: List<OrderEvent> = listOf(
         OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS),
+        // The three `status=accepted` shapes a caller might still assemble — the provider's key
+        // with identical terms, the buyer's, and the provider's with somebody else's terms. None
+        // of them advances anything any more, and the set equality below is what says so over the
+        // whole cross-product rather than at one state.
         OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, OrderFixtures.TERMS),
         OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.BUYER, OrderFixtures.TERMS),
         OrderEvent.StatusUpdate(OrderState.ACCEPTED, Party.PROVIDER, OrderFixtures.zeroFeeTerms),
+        // §7.6's checked answer, for this order and for another — the only door to `accepted`.
+        OrderEvent.AcceptanceReceived(OrderFixtures.chain().accepted),
+        OrderEvent.AcceptanceReceived(
+            OrderFixtures.chain(index = OrderFixtures.OTHER_ORDER_INDEX).accepted,
+        ),
         OrderEvent.StatusUpdate(OrderState.CANCELLED, Party.BUYER),
         OrderEvent.StatusUpdate(OrderState.CANCELLED, Party.PROVIDER),
         OrderEvent.StatusUpdate(OrderState.CANCELLED, Party.FEE_RECIPIENT),
@@ -75,9 +84,13 @@ abstract class PortableTransitionTotalityTest {
         OrderEvent.StatusUpdate(OrderState.UNKNOWN, Party.PROVIDER),
         OrderEvent.DeliveryCommitted(OrderFixtures.blob.commitment, Party.PROVIDER),
         OrderEvent.DeliveryCommitted(OrderFixtures.blob.commitment, Party.BUYER),
-        OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER, Payee.FEE)),
-        OrderEvent.PaymentRequestsReceived(setOf(Payee.PROVIDER)),
+        // The stored `type=2` records, in the four shapes §11.2 and decision I distinguish: both
+        // payees, the provider alone, none at all, and one whose `payee=provider` record was
+        // accepted under a stranger's acceptance for this same order id.
+        OrderEvent.PaymentRequestsReceived(OrderFixtures.chain().requests),
+        OrderEvent.PaymentRequestsReceived(setOf(OrderFixtures.chain().request(Payee.PROVIDER))),
         OrderEvent.PaymentRequestsReceived(emptySet()),
+        OrderEvent.PaymentRequestsReceived(setOf(OrderFixtures.providerRequestUnderAStranger())),
         OrderEvent.ReceiptsVerified(OrderFixtures.bothReceipts()),
         OrderEvent.ReceiptsVerified(setOf(OrderFixtures.receipt(Payee.PROVIDER))),
         OrderEvent.ReceiptsVerified(emptySet()),
