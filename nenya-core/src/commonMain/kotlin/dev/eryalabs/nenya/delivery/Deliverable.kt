@@ -211,14 +211,22 @@ public class DeliverableHash private constructor(value: ByteArray) {
  * because `ox` is published before the buyer pays and before the decryption key exists in the
  * buyer's hands, the provider cannot substitute a different file afterwards (§10.5).
  *
- * ### These are typed parameters, not a parse
+ * ### These are typed parameters, not a parse — and the parse now exists elsewhere
  *
- * There is no tag codec in this library yet, so the caller supplies the four values it read
- * out of the `["x", ...]`, `["ox", ...]`, `["m", ...]` and `["size", ...]` tags. Building that
- * codec here is out of scope; the narrowing is recorded machine-readably on every
- * [DeliveryEvidence] this package issues, as [DeliveryCheck.COMMITMENT_CARRIES_NO_KEY] and
- * [DeliveryCheck.ENCRYPTION_PARAMETERS] — both §10 obligations that live in tags this type
- * does not carry.
+ * The caller supplies the four values it read out of the `["x", ...]`, `["ox", ...]`,
+ * `["m", ...]` and `["size", ...]` tags. This type is still built that way, and stays public:
+ * an implementation reconstructing an order thread may hold a commitment it did not decode from
+ * a message at all.
+ *
+ * What changed is that there is now a decoder that does read those tags —
+ * `DeliveryCommitmentMessage` in the channel package, which produces one of these from a
+ * §7.2-attributed `kind:16` `type=5` and refuses a commitment carrying `decryption-key` or
+ * `decryption-nonce` by name. The narrowing this type still carries is therefore about *this*
+ * type and not about the library: a value built here from four parameters has had §10.1's
+ * key-absence rule applied by nobody, which is why every [DeliveryEvidence] this package issues
+ * still records [DeliveryCheck.COMMITMENT_CARRIES_NO_KEY] and
+ * [DeliveryCheck.ENCRYPTION_PARAMETERS] as unperformed. The decoded path says so for itself, on
+ * the order rather than on the evidence.
  *
  * ### What it does not hold
  *
@@ -283,10 +291,14 @@ public class DeliverableCommitment(
      * compares the two **parsed** integers, because it takes a `Long` and never sees the decimal
      * string §10.3 is talking about. `["size", "018342912"]` and `["size", "18342912"]` are not
      * byte-identical and would compare equal here. That is not a gap this check can close: §4.3
-     * requires a timestamp-shaped tag value be rejected unless it is a canonical non-negative
-     * decimal integer, which makes the leading-zero form refusable **on parse**, and the parse is
-     * the tag codec's — which does not exist yet. So the obligation belongs to the codec when it
-     * lands, and is recorded here so that it lands with it.
+     * requires only that a timestamp-shaped tag value be a non-negative decimal integer, so
+     * `018342912` is a spelling a conformant peer may emit and the leading-zero form is **not**
+     * refusable on parse — refusing it would make that peer look broken. So the obligation belongs
+     * where §10.3 wrote it, over the bytes, and it is now discharged there:
+     * `DeliverableReleaseMessage.divergenceFrom` in the channel package compares the raw tag value
+     * elements of both messages and reports that pair as a divergence. This check remains the one
+     * the state machine runs, because it reports which operand diverged as a typed refusal and
+     * because an order may hold a commitment that was never decoded from a message.
      *
      * Any mismatch in any of the four MUST move the order to `disputed` (§10.3). That is the
      * caller's transition to make: this function reports *which* operand diverged and has no
@@ -344,14 +356,16 @@ public class DeliverableCommitment(
  * so a generic NIP-17 client can render it, which is why its MIME type travels as `file-type`
  * rather than as the commitment's `m`.
  *
- * ### These are typed parameters, not a parse
+ * ### These are typed parameters, not a parse — and the parse now exists elsewhere
  *
- * As with [DeliverableCommitment]: no tag codec exists yet, so the caller supplies what it read
- * out of the tags. This type deliberately does **not** hold `decryption-key` or
+ * As with [DeliverableCommitment]: the caller supplies what it read out of the tags, and
+ * `DeliverableReleaseMessage` in the channel package is the decoder that does that reading, from
+ * a §7.2-attributed `kind:15`. This type deliberately does **not** hold `decryption-key` or
  * `decryption-nonce`, because this library does not decrypt — §10.4 step 2 is the caller's, and
  * every [DeliveryEvidence] says so as [DeliveryCheck.GCM_AUTHENTICATION]. Holding a decryption
  * key in a type that has no use for one would put key material one careless `toString` away
- * from a log (§12 item 11).
+ * from a log (§12 item 11). The decoder honours the same rule from the other side: it checks
+ * §10.2's two encodings and then drops both values rather than publishing them.
  *
  * Pure computation: no clock, no randomness, no I/O.
  */

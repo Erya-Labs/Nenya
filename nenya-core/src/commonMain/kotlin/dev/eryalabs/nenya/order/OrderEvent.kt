@@ -1,7 +1,9 @@
 package dev.eryalabs.nenya.order
 
+import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliverableRelease
+import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.seam.OrderId
@@ -186,19 +188,70 @@ public sealed interface OrderEvent {
      * malformed one cannot be constructed — so what is left for the transition to check is the
      * sender.
      */
-    public class DeliveryCommitted(
+    public class DeliveryCommitted internal constructor(
 
-        /** §10.1's four values, already read out of the tags by the caller. */
+        /** §10.1's four values, already read out of the tags by whoever built this event. */
         public val commitment: DeliverableCommitment,
 
         /** Whose key sealed it. §11.2: the provider's, and nobody else's. */
         public val from: Party,
 
-        override val createdAt: Long? = null,
+        override val createdAt: Long?,
+
+        /**
+         * The §10 obligations the code that built this event performed on the `type=5` itself
+         * (§17), which the order records as it enters `committed`.
+         *
+         * **Not reachable from the published constructor, and that is the point rather than
+         * tidiness.** This field is an assertion about what was verified, and §17's one prohibition
+         * is reporting an unverified thing as verified. A public parameter here would let any
+         * caller hand an order `DeliveryCheck.GCM_AUTHENTICATION` — §10.4 step 2, which this
+         * library cannot perform at all — and `OrderMachine` would then record it as performed
+         * *and subtract it* from the not-performed set a `DeliveryEvidence` had honestly reported.
+         * So the primary constructor is `internal`, the published one is the three-parameter
+         * secondary below, and [DECLARABLE_CHECKS] bounds what even an internal caller may assert.
+         *
+         * `DeliveryCommitmentMessage.asOrderEvent` is the one path that fills it, with
+         * [dev.eryalabs.nenya.delivery.DeliveryCheck.COMMITMENT_CARRIES_NO_KEY], because that
+         * decoder made the check itself over the tags it was refusing.
+         */
+        public val checksPerformed: Set<DeliveryCheck>,
     ) : Rumor {
+
+        /**
+         * The published door: a bare [DeliverableCommitment], and **no** capability claim.
+         *
+         * A caller that assembled four typed values has read the tags itself, and nothing here
+         * knows whether it applied §10.1's rule that a commitment carrying `decryption-key` or
+         * `decryption-nonce` MUST be rejected. So an event built this way records that nobody
+         * checked, which is the honest answer and the only one this constructor can give.
+         */
+        public constructor(
+            commitment: DeliverableCommitment,
+            from: Party,
+            createdAt: Long? = null,
+        ) : this(commitment, from, createdAt, emptySet())
 
         init {
             requireNonNegativeCreatedAt(createdAt)
+            requireDeclarable(checksPerformed, DECLARABLE_CHECKS, "a kind:16 type=5 commitment")
+        }
+
+        public companion object {
+
+            /**
+             * The only §10 obligations a `type=5` message can discharge, and therefore the only
+             * ones this event may carry.
+             *
+             * §10.1's key-absence rule is a statement about the commitment's **own tags**, which is
+             * exactly what a `type=5` is. Nothing else on [DeliveryCheck] is: §10.4's hashes need
+             * the blob, §10.3's identity check needs a release beside it, and §10.2's parameters
+             * need an implementation that encrypts. Enforced in `init` rather than trusted, so the
+             * cap holds even for the Java caller `AttributedRumor`'s note says `internal` does not
+             * stop.
+             */
+            public val DECLARABLE_CHECKS: Set<DeliveryCheck> =
+                readOnlySetOf(linkedSetOf(DeliveryCheck.COMMITMENT_CARRIES_NO_KEY))
         }
     }
 
@@ -262,19 +315,91 @@ public sealed interface OrderEvent {
      * key material in a type with no use for it would put it one careless `toString` from a log
      * (§12 item 11).
      */
-    public class DeliverableReleased(
+    public class DeliverableReleased internal constructor(
 
-        /** §10.3's four values, already read out of the tags by the caller. */
+        /** §10.3's four values, already read out of the tags by whoever built this event. */
         public val release: DeliverableRelease,
 
         /** Whose key sealed it. §11.2: the provider's. */
         public val from: Party,
 
-        override val createdAt: Long? = null,
+        override val createdAt: Long?,
+
+        /**
+         * §10.3's `["order", ...]` tag, when this event was built from a decoded `kind:15`, and
+         * `null` when it was built from a bare [DeliverableRelease] that carried no tags.
+         *
+         * Carried for the reason [Proposal.order] is, one row of §11.2 later: an order that does
+         * not know whose evidence this is cannot tell its own from somebody else's. §10.3's binding
+         * is checked by `DeliverableReleaseMessage.asOrderEvent` against the [Order] it was handed
+         * — but the *event* it returns is an ordinary value a caller may then offer to any order,
+         * and one offered to a different order with the same commitment would otherwise record
+         * [dev.eryalabs.nenya.delivery.DeliveryCheck.RELEASE_ORDER_BINDING] for a binding that was
+         * checked against a different thread. So the id travels, and [OrderMachine] compares it
+         * again ([TransitionRejection.RELEASE_FOR_ANOTHER_ORDER]).
+         *
+         * `null` is not a pass: it means the event carries no claim about which order it is for,
+         * and such an event carries no [checksPerformed] either.
+         */
+        public val order: OrderId?,
+
+        /**
+         * The §10 obligations the code that built this event performed on the `kind:15` itself
+         * (§17), which the order records as it enters `released`.
+         *
+         * **Not reachable from the published constructor**, for the reason
+         * [DeliveryCommitted.checksPerformed] is not: a field asserting what was verified must not
+         * be something a caller can simply assert. A caller holding a bare [DeliverableRelease] has
+         * four typed values and no `order` tag, so nothing here can know whether §10.3's binding
+         * was ever checked, and the published door says so by having no parameter for it.
+         *
+         * `DeliverableReleaseMessage.asOrderEvent` is the one path that fills it, with
+         * [dev.eryalabs.nenya.delivery.DeliveryCheck.RELEASE_ORDER_BINDING]: it takes the [Order]
+         * and makes both halves of that comparison, and it is the only way to build this event from
+         * a decoded release.
+         */
+        public val checksPerformed: Set<DeliveryCheck>,
     ) : Rumor {
+
+        /**
+         * The published door: a bare [DeliverableRelease], no order id and **no** capability claim.
+         *
+         * Four typed values carry no `["order", ...]` tag, so there is nothing for §10.3's binding
+         * to be about and nothing for this event to claim about it.
+         */
+        public constructor(
+            release: DeliverableRelease,
+            from: Party,
+            createdAt: Long? = null,
+        ) : this(release, from, createdAt, null, emptySet())
 
         init {
             requireNonNegativeCreatedAt(createdAt)
+            requireDeclarable(checksPerformed, DECLARABLE_CHECKS, "a kind:15 release")
+            if (order == null && checksPerformed.isNotEmpty()) {
+                throw OrderStateException(
+                    OrderStateRejection.UNBOUND_CAPABILITY_CLAIM,
+                    "§10.3 binds a release to its order by its `order` tag, so an event carrying no " +
+                        "order id cannot have had that binding checked against anything; §17 " +
+                        "forbids reporting an unverified thing as verified",
+                )
+            }
+        }
+
+        public companion object {
+
+            /**
+             * The only §10 obligation a `kind:15` message plus an [Order] can discharge, and
+             * therefore the only one this event may carry.
+             *
+             * Not [dev.eryalabs.nenya.delivery.DeliveryCheck.RELEASE_IDENTITY]: §10.3's comparison
+             * is `DeliverableReleaseMessage.divergenceFrom`, a separate call the caller may not
+             * have made, and that constant's own KDoc says evidence produced without it MUST NOT be
+             * read as having performed it. Enforced in `init` for the reason
+             * [DeliveryCommitted.DECLARABLE_CHECKS] is.
+             */
+            public val DECLARABLE_CHECKS: Set<DeliveryCheck> =
+                readOnlySetOf(linkedSetOf(DeliveryCheck.RELEASE_ORDER_BINDING))
         }
     }
 
@@ -457,6 +582,31 @@ public sealed interface OrderEvent {
      * [DeliveryRefused], not by this.
      */
     public data object LocallyDisputed : Local
+}
+
+/**
+ * §17's one prohibition, made structural on the two events that carry a capability claim: an event
+ * may assert only the checks its **own message** could have discharged.
+ *
+ * The `internal` primary constructors already keep a Kotlin caller out; this is the cap that holds
+ * regardless — a `type=5` cannot establish that the blob decrypted, and no path through this
+ * library may say it did. Checked rather than documented, because a record of what was verified
+ * that a caller can write is not a record.
+ */
+private fun requireDeclarable(
+    claimed: Set<DeliveryCheck>,
+    declarable: Set<DeliveryCheck>,
+    what: String,
+) {
+    val overclaimed = claimed - declarable
+    if (overclaimed.isNotEmpty()) {
+        throw OrderStateException(
+            OrderStateRejection.UNDECLARABLE_CHECK,
+            "$what can discharge only $declarable, and this event claims ${overclaimed.size} " +
+                "obligation(s) it could not have: $overclaimed. §17 forbids reporting an " +
+                "unverified thing as verified",
+        )
+    }
 }
 
 /**

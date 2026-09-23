@@ -61,6 +61,29 @@ public enum class OrderStateRejection {
      * therefore made up rather than decoded, and is refused at construction.
      */
     NEGATIVE_TIMESTAMP,
+
+    /**
+     * An [OrderEvent] claims a §10 obligation its own message could not have discharged (§17).
+     *
+     * §17's one prohibition is reporting an unverified thing as verified, and an event's
+     * `checksPerformed` is exactly such a report: the order records it, and `OrderMachine`
+     * *subtracts* it from the set a `DeliveryEvidence` honestly published as not performed. So the
+     * claim is bounded by what the message can establish — `DeliveryCommitted.DECLARABLE_CHECKS`
+     * and `DeliverableReleased.DECLARABLE_CHECKS` — rather than trusted. A `type=5` asserting that
+     * AES-GCM authentication passed is the case this exists for: nothing in this library decrypts,
+     * so no path through it may say one did.
+     */
+    UNDECLARABLE_CHECK,
+
+    /**
+     * An [OrderEvent.DeliverableReleased] carrying no order id claims §10.3's binding anyway.
+     *
+     * §10.3 binds a release to its order by its `["order", ...]` tag, so an event that carries no
+     * id has nothing that binding could have been checked against. Its own constant rather than
+     * [UNDECLARABLE_CHECK]: the check being claimed is one a `kind:15` genuinely can discharge, and
+     * what is missing is the operand.
+     */
+    UNBOUND_CAPABILITY_CLAIM,
 }
 
 /**

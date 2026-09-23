@@ -463,6 +463,9 @@ public object Capabilities {
                 "dev.eryalabs.nenya.delivery.DeliverableCommitment",
                 "dev.eryalabs.nenya.delivery.ServedBytesVerified",
                 "dev.eryalabs.nenya.delivery.DeliveryEvidence",
+                "dev.eryalabs.nenya.channel.DeliveryCommitmentMessage",
+                "dev.eryalabs.nenya.channel.DeliverableReleaseMessage",
+                "dev.eryalabs.nenya.channel.DeliveryTags",
             ),
             notPerformed = setOf(
                 DeliveryCheck.GCM_AUTHENTICATION,
@@ -474,10 +477,42 @@ public object Capabilities {
                 "SHA-256, in §10.4's order, " +
                 "enforced by the type system rather than by a comment — there is no way to " +
                 "reach the `ox` check without having passed the `x` check. §10.3's " +
-                "four-operand identity check is implemented as its own call. What is missing is " +
-                "§10.2 itself: this library does not decrypt, so AES-256-GCM authentication is " +
-                "the caller's and the encryption parameters are unchecked. Evidence produced " +
-                "here says so rather than implying otherwise.",
+                "four-operand identity check is implemented as its own call, now in both of the " +
+                "shapes §10.3 and §10.4 need: over parsed values, which is what the state machine " +
+                "runs, and over the raw tag value elements, which is what §10.3 actually says — " +
+                "`[\"size\", \"018342912\"]` against `[\"size\", \"18342912\"]` is a divergence " +
+                "there and cannot be one in a numeric comparison. What changed here is that the " +
+                "two delivery messages are now decoded rather than assembled from typed " +
+                "parameters: a `kind:16` `type=5` is refused by name if it carries " +
+                "`decryption-key` or `decryption-nonce` (§10.1), a `kind:15` has both values held " +
+                "to §10.2's encodings — lowercase hex of 64 and 24 characters, or standard base64 " +
+                "decoding to 32 and 12 bytes, refused when it is the wrong length under both — and " +
+                "both messages are refused for an `encryption-algorithm` other than `aes-gcm`. " +
+                "§10.3's binding is enforced where §10.3 puts it, on the `order` tag and not on " +
+                "hash equality: building the `paid → released` event takes the open `Order`, " +
+                "refuses a release naming another order, and refuses one naming an order this " +
+                "implementation's own view does not hold in `paid`. Neither key nor nonce is " +
+                "published by any member or any `toString`: they are checked and dropped, because " +
+                "this library does not decrypt and the caller already holds the rumor it " +
+                "decrypted (§12 item 11). " +
+                "THE FOUR CONSTANTS BELOW ALL STAY, AND THE TWO THAT LOOK LIKE CONTRADICTIONS ARE " +
+                "NOT ONE. `Capabilities.NOT_PERFORMED_HERE` is derived from " +
+                "`DeliveryEvidence.CHECKS_PERFORMED_HERE`, so it is a claim about the " +
+                "VERIFICATION CHAIN — a commitment and two byte arrays — which holds no tags and " +
+                "no order and genuinely performs neither COMMITMENT_CARRIES_NO_KEY nor " +
+                "RELEASE_ORDER_BINDING. The machine-readable record of what the DECODED path did " +
+                "is the order's own `deliveryChecksPerformed`, which the two message types fill " +
+                "through `asOrderEvent` and which an order built from a bare " +
+                "`DeliverableCommitment` or `DeliverableRelease` leaves empty, because nobody " +
+                "checked. The same shape §17 item 6 takes for the payment store, and for the same " +
+                "reason: widening the global claim on the strength of a path a caller may not have " +
+                "taken is the over-claim this surface exists to prevent. ENCRYPTION_PARAMETERS " +
+                "stays for a second reason too — the algorithm token matches and the key and nonce " +
+                "are the right lengths, but §10.2 is AES-256-GCM whole, including a nonce never " +
+                "reused with the same key, a 128-bit tag appended to the ciphertext and no AAD, " +
+                "and this library performs no encryption at all. GCM_AUTHENTICATION and " +
+                "SERVED_BYTES_PROVENANCE are unchanged and unreachable from here: §10.4 step 2 is " +
+                "the caller's decryption, and nothing in this library opens a socket.",
         ),
         ConformanceItem(
             number = 8,

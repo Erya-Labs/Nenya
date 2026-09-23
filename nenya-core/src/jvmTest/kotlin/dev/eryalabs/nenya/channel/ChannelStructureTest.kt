@@ -75,15 +75,33 @@ class ChannelStructureTest {
             "Acceptance\$NotAnAcceptance",
             "SignedTerms",
             "ChannelTerms",
+            // §10.1, §10.2 and §10.3.
+            "DeliveryCommitmentMessage",
+            "DeliveryCommitmentMessage\$Companion",
+            "DeliverableReleaseMessage",
+            "DeliverableReleaseMessage\$Companion",
+            "DeliveryTags",
+            "DeliveryTerms",
+            "DeliverableTags",
         )
 
         /**
          * Every place on the published surface where a `String` may be a parameter, pinned by name.
          *
          * A new one turns this red and forces a human to say why it is not a counterparty's claim
-         * arriving as a term. Each of these is either §7.2's seal pubkey — the one hostile value
-         * this package takes as a bare string, and the one §7.2 names — a diagnostic message, or a
-         * compiler-generated enum lookup.
+         * arriving as a term. There are five categories now, and each entry below says which it is
+         * and why:
+         *
+         * 1. **A key the caller resolved outside the message being judged** — §7.2's seal pubkey,
+         *    §7.6's provider pubkey, and that same checked key carried back on the answer;
+         * 2. **a diagnostic message**, which decides nothing;
+         * 3. **a compiler-generated enum lookup**, which nobody wrote;
+         * 4. **§10.1's blob URL**, which is a counterparty's value and deliberately not a term:
+         *    nothing here decides on it and nothing fetches it;
+         * 5. **§10.3's operand values**, which are strings precisely because §10.3 compares bytes.
+         *
+         * The assertion is set **equality** in both directions, so this list gets no weaker as it
+         * grows: a stale entry turns it red exactly as a new one does.
          */
         val STRING_PARAMETERS_PERMITTED: Set<String> = setOf(
             "AttributedRumor\$Companion.attribute", // §7.2's seal pubkey, 64 hex characters
@@ -100,6 +118,26 @@ class ChannelStructureTest {
             // that `AttributedRumor.attribute` above does not use either.
             "OrderProposal.accepts",
             "Acceptance\$Accepted.<init>",          // that same checked key, carried on the answer
+            // §10.1's `["url", …]`, the one value a delivery message publishes as a bare string.
+            // It *is* something a counterparty wrote, and it is deliberately not a term: nothing in
+            // this library decides anything on it, nothing fetches it (§12 item 10, STOP RULE 13),
+            // and §10.4's own answer to "were these the committed bytes" is the SHA-256 of whatever
+            // the caller downloaded against `x` — a blob from anywhere that hashes to `x` is the
+            // committed blob, wherever this string pointed. A richer type would be a type for
+            // "a URL", which would be a thing to be tempted to fetch; `DeliverableCommitment`
+            // refuses to hold one at all for exactly that reason, and this is the other half of
+            // that decision rather than a hole in it.
+            "DeliveryCommitmentMessage.<init>",
+            // §10.3's four operands, held as the **values** the two messages carried. Strings on
+            // purpose and in the one shape this list is not about: §10.3 says the release's value
+            // MUST be byte-identical to the commitment's, so holding anything richer would be
+            // holding something already normalised, which is the comparison §10.3 exists to
+            // prevent — `SignedTerms` is the same shape for §7.6 one rule over, and is off this
+            // list only because §7.6's operands are whole tag arrays. Nothing here is a claim this
+            // codec believes: an instance is only ever compared against another instance, both
+            // built by `decode` from tags T13 already attributed, and the class is `internal` so a
+            // Kotlin caller cannot mint one to compare against.
+            "DeliverableTags.<init>",
         )
 
         /**
@@ -137,8 +175,9 @@ class ChannelStructureTest {
             assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
             // The class files this package compiled to when it was written, pinned as a floor so a
             // partial output directory goes red instead of sweeping less than it claims. Raised
-            // from 18 by §7.5's and §7.6's types; a floor is only ever raised.
-            val pinned = 28
+            // from 18 by §7.5's and §7.6's types and from 28 by §10.1's and §10.3's; a floor is
+            // only ever raised.
+            val pinned = 37
             assertTrue(
                 files.size >= pinned,
                 "${directory.absolutePath} holds ${files.size} class file(s); at least $pinned were pinned",

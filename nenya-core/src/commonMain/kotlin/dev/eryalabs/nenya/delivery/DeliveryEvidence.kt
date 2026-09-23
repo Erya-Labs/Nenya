@@ -80,18 +80,30 @@ public enum class DeliveryCheck {
 
     /**
      * §10.3's binding: the release's `["order", ...]` tag names an open order of this
-     * implementation's own, in state `paid`. **Not performed here** — it needs the tag codec
-     * and the order state machine, neither of which exists yet. §10.3 is explicit that hash
-     * equality is a *check* and not the binding, so this one cannot be inferred from the two
-     * that are performed.
+     * implementation's own, in state `paid`. §10.3 is explicit that hash equality is a *check*
+     * and not the binding, so this one cannot be inferred from the two that are performed.
+     *
+     * **Not performed in this chain**, and it cannot be: a [DeliveryEvidence] is produced from a
+     * commitment and two byte arrays, and holds no `order` tag and no order to compare one
+     * against. It **is** performed by `DeliverableReleaseMessage.asOrderEvent` in the channel
+     * package, which takes the decoded `kind:15` and the open `Order` and makes both halves of
+     * the comparison — and which is the only way to build an `OrderEvent.DeliverableReleased`
+     * from a decoded release, so the event cannot exist without it. What that produces is
+     * recorded on the **order**, in `Order.deliveryChecksPerformed`; evidence produced here
+     * still MUST NOT be read as having performed it.
      */
     RELEASE_ORDER_BINDING,
 
     /**
      * §10.1: the commitment message MUST NOT contain `decryption-key` or `decryption-nonce`,
      * and an implementation MUST reject one that does — releasing the key at commitment time
-     * collapses the whole construction. **Not performed here**: it needs the tag codec, and
-     * [DeliverableCommitment] holds four typed values rather than a tag list.
+     * collapses the whole construction.
+     *
+     * **Not performed in this chain**, for the reason [RELEASE_ORDER_BINDING] is not:
+     * [DeliverableCommitment] holds four typed values rather than a tag list, so there is no tag
+     * here to refuse. It **is** performed by `DeliveryCommitmentMessage.decode`, which refuses
+     * either tag by name before it reads a value, and travels onto the order through
+     * `asOrderEvent`.
      */
     COMMITMENT_CARRIES_NO_KEY,
 

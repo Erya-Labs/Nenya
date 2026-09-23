@@ -116,6 +116,23 @@ public enum class TransitionRejection {
     RECEIPT_FOR_ANOTHER_ORDER,
 
     /**
+     * A `kind:15` release whose `["order", ...]` tag names a **different** order from this one.
+     *
+     * §10.3's binding, re-made here for the reason [RECEIPT_FOR_ANOTHER_ORDER] exists one row
+     * earlier: "Hash equality is a *check*, not the binding: an implementation handling two
+     * concurrent orders with the same provider routes on the `order` tag and then verifies the
+     * hashes." `DeliverableReleaseMessage.asOrderEvent` makes that comparison against the order it
+     * was handed — but the event it returns is an ordinary value a caller may then offer to any
+     * order, and two orders with the same provider can carry the same commitment, so every other
+     * check on this row would pass on a misrouted release. Without this one the order would record
+     * `DeliveryCheck.RELEASE_ORDER_BINDING` for a binding checked against a different thread.
+     *
+     * An event built from a bare `DeliverableRelease` carries no id, and is not refused here: it
+     * makes no claim about which order it is for, and it carries no performed check either.
+     */
+    RELEASE_FOR_ANOTHER_ORDER,
+
+    /**
      * Two receipts for the same payee. §8.6 is one invoice per payee, so a second receipt for a
      * role is not a duplicate to be collapsed: one of the two is for something else.
      */
@@ -498,10 +515,27 @@ public sealed interface Order {
      */
     public val paymentChecksNotPerformedHere: Set<PaymentCheck>
 
-    /** The §10 obligations this library performed on the evidence behind `settled`. */
+    /**
+     * The §10 obligations this library performed for this order, accumulated as it moved.
+     *
+     * Three transitions contribute and each contributes only what its own input could establish:
+     * `accepted → committed` adds what the `type=5` decoder checked over the commitment's tags
+     * (§10.1's key-absence rule), `paid → released` adds §10.3's binding where the `kind:15`
+     * decoder checked it, and `released → settled` adds the two hashes a `DeliveryEvidence` carries.
+     * An order whose commitment and release arrived as bare typed values adds nothing at the first
+     * two, because nobody checked — the events built that way have no parameter to say otherwise.
+     */
     public val deliveryChecksPerformed: Set<DeliveryCheck>
 
-    /** The §10 obligations behind `settled` this library did **not** perform (§17 item 7). */
+    /**
+     * The §10 obligations this library did **not** perform for this order (§17 item 7).
+     *
+     * Populated at `released → settled` from the evidence's own record, **minus** what
+     * [deliveryChecksPerformed] already holds: `DeliveryEvidence` reports what the verification
+     * chain did, and that chain has no tags and no order, so it honestly records §10.1's and
+     * §10.3's obligations as unperformed even where the decoders performed them. Leaving them in
+     * both sets would be one order saying two things at once.
+     */
     public val deliveryChecksNotPerformedHere: Set<DeliveryCheck>
 }
 
@@ -731,7 +765,17 @@ public class OrderMachine(
             if (event.from != Party.PROVIDER) {
                 wrongSender(order, "a type=5 delivery commitment is the provider's (§7.4, §10.1)")
             } else {
-                advance(order.with(state = OrderState.COMMITTED, commitment = event.commitment))
+                advance(
+                    order.with(
+                        state = OrderState.COMMITTED,
+                        commitment = event.commitment,
+                        // §17: what the `type=5` decoder checked over the tags travels with the
+                        // event, because a record of what was verified is honest only where it is
+                        // produced by the code that did the verifying. Empty for an event built
+                        // from a bare `DeliverableCommitment`, which is four values and no tags.
+                        deliveryChecksPerformed = order.deliveryChecksPerformed + event.checksPerformed,
+                    ),
+                )
             }
 
         is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
@@ -1156,6 +1200,19 @@ public class OrderMachine(
         if (event.from != Party.PROVIDER) {
             return wrongSender(order, "§11.2: the kind:15 release is the provider's (§7.4, §10.3)")
         }
+        // §10.3's binding, before a hash is compared and for the reason §10.3 gives: routing is on
+        // the `order` tag, and hash equality is a check rather than the binding. A release decoded
+        // from a message carries the tag it read; one assembled from four typed values carries no
+        // id and makes no claim, which is why `null` passes here and carries no check either.
+        if (event.order != null && event.order != order.id) {
+            return refuse(
+                order,
+                TransitionRejection.RELEASE_FOR_ANOTHER_ORDER,
+                "§10.3: a release whose `order` tag names another order MUST NOT advance this one. " +
+                    "Two orders with the same provider can carry the same commitment, so every " +
+                    "hash on this row would match a misrouted release",
+            )
+        }
         val commitment = order.commitment ?: return noCommitment(order)
         try {
             commitment.checkReleaseIdentity(event.release)
@@ -1176,6 +1233,9 @@ public class OrderMachine(
                 // nothing rather than a time, exactly as `paid` does: the deadline then falls back
                 // to `paidAt` and to `deliver_by`, and says it has none if neither exists.
                 releasedAt = (reading() as? ClockReading.At)?.unixSeconds,
+                // §10.3's binding, where the `kind:15` decoder made it. Accumulated rather than
+                // replaced: the commitment's own check was recorded two transitions ago.
+                deliveryChecksPerformed = order.deliveryChecksPerformed + event.checksPerformed,
             ),
         )
     }
@@ -1191,11 +1251,19 @@ public class OrderMachine(
                     "another commitment belongs to another order thread and settles nothing here",
             )
         }
+        // §17, and the union is the honest shape rather than the generous one. `DeliveryEvidence`
+        // records what the **verification chain** did, and that chain genuinely performs neither
+        // §10.1's key-absence rule nor §10.3's order binding — it holds a commitment and two byte
+        // arrays, and has no tags and no order. Where those checks *were* performed, they were
+        // performed by the `type=5` and `kind:15` decoders and recorded on this order as it passed
+        // through `committed` and `released`. Replacing the record here would drop them, and
+        // leaving them in the not-performed set beside them would have the same order saying both.
+        val performed = order.deliveryChecksPerformed + event.evidence.checksPerformed
         return advance(
             order.with(
                 state = OrderState.SETTLED,
-                deliveryChecksPerformed = event.evidence.checksPerformed,
-                deliveryChecksNotPerformedHere = event.evidence.checksNotPerformedHere,
+                deliveryChecksPerformed = performed,
+                deliveryChecksNotPerformedHere = event.evidence.checksNotPerformedHere - performed,
             ),
         )
     }

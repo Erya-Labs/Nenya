@@ -117,6 +117,86 @@ public enum class ChannelRejection {
     /** §7.6's decoder was handed a rumor that is not a `kind:16` `type=3`. See [NOT_A_PROPOSAL]. */
     NOT_A_STATUS_UPDATE,
 
+    /** §10.1's decoder was handed a rumor that is not a `kind:16` `type=5`. See [NOT_A_PROPOSAL]. */
+    NOT_A_DELIVERY_COMMITMENT,
+
+    /** §10.3's decoder was handed a rumor that is not a `kind:15`. See [NOT_A_PROPOSAL]. */
+    NOT_A_RELEASE,
+
+    /**
+     * §10.1: "The commitment message MUST NOT contain `decryption-key` or `decryption-nonce`. An
+     * implementation MUST reject a commitment that does."
+     *
+     * Its own constant rather than a generic forbidden-tag answer, because §10.1 states the
+     * *reason* — "releasing the key at commitment time collapses the whole construction" — and
+     * because §10.5 says what the construction is: `ox` binds the provider only because the key is
+     * not in the buyer's hands before payment. A commitment carrying the key is not a peer with one
+     * tag too many; it has already released the deliverable, and a caller told "malformed tag" would
+     * go looking for a spelling mistake. [ChannelException.tag] names which of the two arrived.
+     */
+    COMMITMENT_CARRIES_KEY,
+
+    /**
+     * §10.2: "`encryption-algorithm` MUST be `aes-gcm` in v1."
+     *
+     * Not [UNSUPPORTED], which §4.4 reserves for a well-formed NIP-99 form this version does not
+     * implement: §10.2 gives v1 exactly one value and no second one to fall back to, so a message
+     * naming another algorithm describes bytes for which this document has no rule at all.
+     */
+    UNSUPPORTED_ENCRYPTION_ALGORITHM,
+
+    /**
+     * §10.2's `decryption-key` or `decryption-nonce` decodes to the wrong length under **both**
+     * encodings — or under neither, being neither hex nor standard base64.
+     *
+     * §10.2 states the refusal itself: both MUST be emitted as lowercase hex, implementations SHOULD
+     * additionally accept standard base64 on read "because NIP-17 does not specify the encoding and
+     * other clients may emit it", and "an implementation MUST reject a value that decodes to the
+     * wrong length under both encodings". One constant for both tags and both encodings, with
+     * [ChannelException.tag] naming which value it was: the fix is the same in every case, and a
+     * vocabulary with four constants here would invite a caller to branch on an encoding this
+     * library deliberately does not tell it which of.
+     */
+    MALFORMED_KEY_MATERIAL,
+
+    /**
+     * §10.1's `size` is not §4.3's non-negative decimal integer.
+     *
+     * Read permissively on purpose — a leading zero is legal, exactly as it is on a timestamp — so
+     * this fires for a signed, floating-point, separator-bearing or non-numeric value, and for one
+     * that does not fit in 64 bits. §10.3's byte-identity of the two spellings is a **comparison**
+     * and is `DeliverableReleaseMessage.divergenceFrom`, never a parse rule.
+     */
+    MALFORMED_SIZE,
+
+    /** An `x` or `ox` value whose character count is not 64 (§10.1, §4.3). Never padded or truncated. */
+    HASH_WRONG_LENGTH,
+
+    /** An `x` or `ox` value carrying a character outside `0-9`, `a-f`, `A-F` (§10.1, §4.3). */
+    HASH_NOT_HEX,
+
+    /**
+     * §10.3's binding, from the id side: a `kind:15` whose `order` tag names an order other than the
+     * one it was offered against.
+     *
+     * §10.3: "Hash equality is a *check*, not the binding: an implementation handling two concurrent
+     * orders with the same provider routes on the `order` tag and then verifies the hashes." So this
+     * is refused before a hash is compared, and it is its own constant because a release for another
+     * order may be perfectly valid — for that order.
+     */
+    RELEASE_FOR_ANOTHER_ORDER,
+
+    /**
+     * §10.3's binding, from the state side: a release naming an order that is not in `paid`.
+     *
+     * §10.3: such a release "MUST NOT advance any state". Separate from [RELEASE_FOR_ANOTHER_ORDER]
+     * because the two have different causes and different responses — one is a message about
+     * somebody else's order, the other is a provider releasing before the buyer's payment verified,
+     * which is a thing to look at rather than a thing to route elsewhere. The state compared is this
+     * implementation's own view (§11), never a `status` token a counterparty asserted.
+     */
+    RELEASE_ORDER_NOT_PAID,
+
     /**
      * The `provider` key handed to [OrderProposal.accepts] is not §4.3's 64 hex characters.
      *
