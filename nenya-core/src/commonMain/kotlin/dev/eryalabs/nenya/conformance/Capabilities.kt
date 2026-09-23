@@ -252,6 +252,7 @@ public object Capabilities {
                 "dev.eryalabs.nenya.wire.EventId",
                 "dev.eryalabs.nenya.wire.CheckedEvent",
                 "dev.eryalabs.nenya.wire.WireLimits",
+                "dev.eryalabs.nenya.wire.EventJson",
                 "dev.eryalabs.nenya.tag.TagLimits",
             ),
             notPerformed = emptySet(),
@@ -260,17 +261,21 @@ public object Capabilities {
                 "reads an event that did not pass that check, because every decoder takes a CheckedEvent. §4.3's hex, " +
                 "timestamp, tag-shape, duplicate, unknown-tag and resource rules are all " +
                 "enforced, the fifth bound in the tag layer where the `image` vocabulary lives. " +
-                "One narrowing, stated rather than papered over: there is no JSON parser here " +
-                "and STOP RULE 11 forbids adding one, so turning a relay's bytes into a " +
-                "WireEvent is the embedding client's step. §4.1's rules are about a structure, " +
-                "and this library holds itself to all of them over the structure it is handed. " +
-                "That narrowing is visible in one behaviour and is stated rather than implied: " +
-                "the 64 KiB bound is measured over the canonical serialisation, which omits " +
-                "`id`, `sig` and the JSON object's field names, so it is a lower bound on the " +
-                "true serialised size and under-rejects by of the order of two hundred bytes. " +
-                "§4.3 requires a bound and requires reject-never-truncate; both hold. A client " +
-                "that needs the bound measured over the exact bytes a relay sent it should " +
-                "inject a correspondingly smaller WireLimits.",
+                "Both halves of this item are closed: EventJson.read turns a relay's bytes into " +
+                "a WireEvent under §7.1's object rules — strictly, bounded before it scans, with " +
+                "no JSON library, which STOP RULE 11's budget does not hold — and it hands back " +
+                "the claimed id as a claim, so CheckedEvent remains the only thing that has " +
+                "checked one. The earlier narrowing, that reading was the embedding client's " +
+                "step, no longer applies; the behaviour it was visible in does, and is stated " +
+                "rather than implied. The 64 KiB bound WireEvent enforces is measured over the " +
+                "canonical serialisation, which omits `id`, `sig` and the JSON object's field " +
+                "names, so it is a lower bound on the true serialised size and under-rejects by " +
+                "of the order of two hundred bytes; EventJson.read measures the same bound over " +
+                "the object form, which is the exact bytes, so the reading path does not " +
+                "under-reject at all. §4.3 requires a bound and requires reject-never-truncate; " +
+                "both hold on both paths. A client that needs WireEvent's own bound measured " +
+                "over the exact bytes a relay sent it should inject a correspondingly smaller " +
+                "WireLimits.",
         ),
         ConformanceItem(
             number = 2,

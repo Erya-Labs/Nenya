@@ -120,6 +120,11 @@ val vendoredTestFilePaths: List<String> = listOf(
     "nenya-core/src/commonTest/resources/vectors/nist-sha256/SHA256ShortMsg.rsp",
     "nenya-core/src/commonTest/resources/vectors/nist-sha256/SHA256Monte.rsp",
     "nenya-core/src/commonTest/resources/vectors/bolt11/11-payment-encoding.md",
+    // §18's gift-wrap row: NIP-59's worked rumor, seal and wrap, and NIP-17's two worked wraps.
+    // EventJsonTest parses them out of these two files and recomputes each id, which is the half of
+    // the envelope that needs no keys.
+    "spec/reference/nip59.md",
+    "spec/reference/nip17.md",
 )
 
 val generateVendoredTestFiles = tasks.register<GenerateVendoredTestFiles>("generateVendoredTestFiles") {

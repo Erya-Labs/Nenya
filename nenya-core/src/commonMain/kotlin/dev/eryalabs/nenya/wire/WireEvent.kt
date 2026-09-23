@@ -206,20 +206,20 @@ public class WireLimits(
  * this library (`Secp256k1Ops` answers `Unavailable`, and §17 permits that provided nothing is
  * reported as verified when it was not).
  *
- * ### There is no JSON parser here, and that is a stated narrowing
+ * ### Turning a relay's bytes into one of these is [EventJson]'s job
  *
- * This library **emits** the canonical form and **recomputes** an id over a structure the caller
- * supplies. It does not turn a relay's bytes into that structure: there is no JSON library
- * available to it, and a hostile-input-hardened JSON parser is a piece of work in its own right
- * rather than a subclause of this one. So §17 item 1's write half — computing the id per §4.1 —
- * is closed here, and its read half is the embedding client's, which is also why `RelayTransport`
- * deals in `String`.
+ * This class **is** the structure: it emits the canonical form and [EventId.of] recomputes an id
+ * over it. Reading §7.1's JSON object form into one — strictly, with §4.3's bounds and without a
+ * JSON library, which STOP RULE 11's budget does not hold — is [EventJson.read], written for this
+ * one fixed shape. So both halves of §17 item 1 are closed here, and the two forms share one
+ * escaping routine (`appendCanonicalString`) exactly as §7.1 requires.
  *
- * The consequence is worth stating plainly: an id recomputed from a structure the client parsed
- * proves that *this* structure hashes to that id. If the client's parser and the relay's
- * serialiser disagree about the bytes, the recomputation is faithful to the client's reading and
- * the mismatch surfaces as [WireRejection.ID_MISMATCH] — which is the safe direction, and is
- * exactly what §4.1's "reject before any other processing" asks for.
+ * A caller that parsed the bytes itself may still construct one directly, and the consequence is
+ * worth stating plainly: an id recomputed from a structure somebody else parsed proves that *this*
+ * structure hashes to that id. If that parser and the relay's serialiser disagree about the bytes,
+ * the recomputation is faithful to the parser's reading and the mismatch surfaces as
+ * [WireRejection.ID_MISMATCH] — which is the safe direction, and is exactly what §4.1's "reject
+ * before any other processing" asks for.
  *
  * ### What is validated here
  *
@@ -468,8 +468,17 @@ public class WireEvent(
  * the order §4.1 lists them, so this `when` reads against the specification's own list — 0x0A,
  * 0x22, 0x5C, 0x0D, 0x09, 0x08, 0x0C — and so that 0x0C, for which Kotlin has no escape of its
  * own, need not appear here as a raw control character in the source.
+ *
+ * `internal` so that [EventJson] emits §7.1's object form through this same routine. §7.1 asks for
+ * exactly that in as many words — "strings inside it MUST be escaped by §4.1's rules, so that an
+ * implementation has exactly one escaping routine and a rumor's `content` survives the round trip
+ * byte for byte" — and a second copy of rules 1–3 beside this one is how the array form and the
+ * object form come to disagree about an escape, which is an event id nobody else computes.
+ * `@JvmSynthetic` for the reason [encodeLowerHex] gives: `internal` alone would publish it as a
+ * static method on this file's JVM facade.
  */
-private fun StringBuilder.appendCanonicalString(value: String) {
+@JvmSynthetic
+internal fun StringBuilder.appendCanonicalString(value: String) {
     append('"')
     for (character in value) {
         when (val code = character.code) {

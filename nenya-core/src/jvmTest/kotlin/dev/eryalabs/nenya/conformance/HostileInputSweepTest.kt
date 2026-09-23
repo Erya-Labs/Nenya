@@ -16,6 +16,7 @@ import dev.eryalabs.nenya.tag.TagSet
 import dev.eryalabs.nenya.tag.TagWriter
 import dev.eryalabs.nenya.wire.CheckedEvent
 import dev.eryalabs.nenya.wire.EventId
+import dev.eryalabs.nenya.wire.EventJson
 import dev.eryalabs.nenya.wire.WireEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,6 +82,13 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
 
         /** An `https:` URL §5.3 accepts, so a hostile `dimensions` is actually reached. */
         const val WELL_FORMED_URL: String = "https://example.invalid/nenya.png"
+
+        /**
+         * The opening of `content`'s value in §7.1's object form, which `EventJson` writes in a
+         * fixed key order — so splicing a hostile string in immediately after it puts that string
+         * inside a JSON string, unescaped, which is where the scanner's interesting branches are.
+         */
+        const val CONTENT_OPENS: String = "\"content\":\""
 
         /**
          * The shapes an unhardened decoder produces, named so the failure message says which one
@@ -152,6 +160,47 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         },
         Target("CheckedEvent\$Companion.checkEventId", Needs.EVENT) { c ->
             c.strings.map { text -> { CheckedEvent.checkEventId(text, c.event!!); Unit } }
+        },
+        // §7.1's object form. `read` is the widest door in this library — it is the one function a
+        // relay's bytes reach before anything has been checked at all — so it gets two calls per
+        // hostile string rather than one.
+        //
+        // The bare string is the first, and on its own it would prove almost nothing: none of
+        // `Context.strings` begins with `{`, so all four die on the scanner's first branch as
+        // NOT_AN_OBJECT and the interior is never entered. The second call is what reaches it —
+        // the JSON this library itself emitted for this corpus entry, with the hostile string
+        // spliced in raw where `content`'s value belongs. Every one of those walks the whole
+        // well-formed prefix the bare call never touches — the `id` and `pubkey` strings, both
+        // number scans, the whole `tags` array — and then enters `readStringBody`.
+        //
+        // What it reaches there is stated exactly, because the corpus was measured rather than
+        // assumed: over `corpus(1300)` the four strings carry 388 raw characters below `0x20`
+        // between them, and **zero** backslashes, bare quotes or surrogates. So this target covers
+        // `readStringBody`'s control-character refusal and its ordinary-append path, and it does
+        // **not** reach `readEscape`, `readUnicodeEscape` or the early string-termination path at
+        // all. Those are covered by `EventJsonTest`'s own hostile corpus, which is built for them.
+        Target("EventJson.read", Needs.EVENT) { c ->
+            val emitted = runCatching {
+                EventJson.writeUnsigned(c.event!!, EventId.of(c.event))
+            }.getOrNull()
+            c.strings.flatMap { text ->
+                buildList<() -> Unit> {
+                    add { EventJson.read(text); Unit }
+                    if (emitted != null) {
+                        add { EventJson.read(emitted.replace(CONTENT_OPENS, CONTENT_OPENS + text)); Unit }
+                    }
+                }
+            }
+        },
+        Target("EventJson.writeUnsigned", Needs.EVENT) { c ->
+            listOf { EventJson.writeUnsigned(c.event!!, EventId.of(c.event)); Unit }
+        },
+        // The hostile string lands in the `sig` slot, which is the one parameter of the three a
+        // caller could hand a status-shaped value to.
+        Target("EventJson.writeSigned", Needs.EVENT) { c ->
+            c.strings.map { text ->
+                { EventJson.writeSigned(c.event!!, EventId.of(c.event), text); Unit }
+            }
         },
 
         // ---- tag ------------------------------------------------------------------------------
