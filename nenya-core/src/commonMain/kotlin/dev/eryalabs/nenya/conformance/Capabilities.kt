@@ -325,6 +325,12 @@ public object Capabilities {
                 "dev.eryalabs.nenya.channel.Attribution",
                 "dev.eryalabs.nenya.channel.RumorKind",
                 "dev.eryalabs.nenya.channel.OrderMessageKind",
+                "dev.eryalabs.nenya.envelope.GiftWrap",
+                "dev.eryalabs.nenya.envelope.SealedMessage",
+                "dev.eryalabs.nenya.envelope.OpenedMessage",
+                "dev.eryalabs.nenya.envelope.OutgoingWrap",
+                "dev.eryalabs.nenya.envelope.SignatureCheck",
+                "dev.eryalabs.nenya.envelope.EnvelopeLimits",
             ),
             notPerformed = setOf(
                 SeamCapability.NIP44_ENCRYPTION,
@@ -333,24 +339,40 @@ public object Capabilities {
             ),
             note = "Done: §7.2's pubkey-equality check, which §7.2 requires even of an " +
                 "implementation that cannot verify the seal's signature — a rumor whose claimed " +
-                "`pubkey` is not the seal's is discarded, no value is produced for it, and every " +
-                "message that survives is reported as authenticated-by-decryption only. " +
-                "Attribution now carries a second constant, SIGNATURE_VERIFIED, and the door to it " +
-                "is narrow rather than wide: this codec cannot return it at all — it is handed two " +
-                "keys and a rumor, never a seal or a verifier — and it is reachable only from " +
-                "GiftWrap.open, after the injected Secp256k1Ops answered VALID for the kind:13 " +
-                "seal's signature over the id that package recomputed. Never on the strength of the " +
-                "gift wrap's signature, whatever its verdict (§7.2). " +
+                "`pubkey` is not the seal's is discarded, no value is produced for it, and a " +
+                "message that survives without a verdict on the seal is reported as " +
+                "authenticated-by-decryption only. " +
+                "Attribution carries a second constant, SIGNATURE_VERIFIED, and the door to it " +
+                "is narrow rather than wide: the channel codec cannot return it at all — it is " +
+                "handed two keys and a rumor, never a seal or a verifier — and it is reachable " +
+                "only from GiftWrap.open, after the injected Secp256k1Ops answered VALID for the " +
+                "kind:13 seal's signature over the id that package recomputed. Never on the " +
+                "strength of the gift wrap's signature, whatever its verdict (§7.2). " +
                 "§7.4's envelope with it: the four rumor kinds and the six `type` values are held " +
                 "equal to §7.4's own tables parsed at test time, an unimplemented `type` lands in " +
                 "a sink rather than on the nearest known value, `type=4` is readable and " +
                 "unemittable, and the required-tag rule and its one `type=6` exception are both " +
-                "enforced. The gift wrap's ephemeral pubkey is unrepresentable: the entry point " +
-                "takes the seal's key and the rumor, and there is no parameter it could arrive " +
-                "in. Not done, and all three constants stay: §7.1's encryption is forbidden " +
-                "here, the **decryption was the caller's** — this library was handed a rumor and " +
-                "a pubkey and takes no position on where they came from — and §7.3's " +
-                "`kind:10050` publication needs a relay, which nothing here opens a socket to.",
+                "enforced. The gift wrap's throwaway pubkey stays unrepresentable across both " +
+                "packages, and what holds it there is pinned rather than argued: the channel " +
+                "codec's entry point has no parameter one could arrive in, and in the envelope " +
+                "package no published member is named after one and the members of the three §7.1 " +
+                "result types that hand back text are exactly two, both listed by name. " +
+                "ChannelStructureTest and EnvelopeStructureTest assert that by reflection rather " +
+                "than by review. The one honest edge: a wrap's own `pubkey` field is inside the " +
+                "bytes OutgoingWrap.json publishes, because §7.1 step 3 signs the wrap with that " +
+                "key and a relay has to receive it — reading it back out is a JSON parse a client " +
+                "writes on purpose, not a value the API hands over. " +
+                "And §7.1's two procedures are now here, which is what changed: GiftWrap.seal " +
+                "orchestrates rumor → seal → wrap twice, once to the recipient and once to the " +
+                "sender's own key, all or nothing; GiftWrap.open orchestrates wrap → seal → rumor " +
+                "in the step order §7.1 fixes, refusing with a named reason and reporting nothing " +
+                "below a failed step. " +
+                "Not done, and all three constants stay: sealing, wrapping and opening are " +
+                "*orchestrated* here and none of their cryptography is performed here — every " +
+                "encryption and decryption is the injected signer's and every signature verdict " +
+                "the injected Secp256k1Ops', so NIP44_ENCRYPTION and NIP44_DECRYPTION are still " +
+                "not performed by this library; and §7.3's `kind:10050` publication needs a relay, " +
+                "which nothing here opens a socket to.",
         ),
         ConformanceItem(
             number = 5,

@@ -146,6 +146,56 @@ class CapabilitySurfaceTest : PortableCapabilitySurfaceTest() {
         assertNull(evidenceProblem(item), "and the classes it names must be in the main output tree")
     }
 
+    /**
+     * The failure §7.1's envelope made cheap: item 4 gained `GiftWrap`, `SealedMessage` and
+     * `OpenedMessage` as evidence, and the tempting next edit is to call the item done.
+     *
+     * It is not done. Sealing, wrapping and opening are *orchestrated* in that package and none of
+     * their cryptography is performed by this library — the encryption and the decryption are the
+     * injected signer's, the signature verdicts the injected `Secp256k1Ops`', and §7.3's
+     * `kind:10050` publication needs a relay nothing here opens. So the three constants stay, and
+     * [ConformanceStatus.PERFORMED_HERE] beside them must be refused: an item claiming a section is
+     * performed here while still naming what it does not perform is the §17 over-claim with its own
+     * counter-evidence attached.
+     *
+     * Distinct from the control above, which empties the evidence classes: this one keeps item 4
+     * exactly as published and moves only the status, which is the edit a later task actually makes.
+     */
+    @Test
+    fun `item 4 claimed performed while the NIP-44 constants remain fails the evidence anchor`() {
+        val real = Capabilities.item(4) ?: fail("§17 item 4 is not published")
+        assertEquals(ConformanceStatus.PARTIAL, real.status)
+        assertTrue(
+            SeamCapability.NIP44_ENCRYPTION in real.notPerformed &&
+                SeamCapability.NIP44_DECRYPTION in real.notPerformed,
+            "this control is about the NIP-44 constants surviving the status change, so item 4 " +
+                "must carry them: it names ${real.notPerformed}",
+        )
+
+        val overclaimed = ConformanceItem(
+            number = real.number,
+            status = ConformanceStatus.PERFORMED_HERE,
+            specSections = real.specSections,
+            evidenceClasses = real.evidenceClasses,
+            notPerformed = real.notPerformed,
+            note = real.note,
+        )
+
+        val problem = evidenceProblem(overclaimed)
+        assertNotNull(
+            problem,
+            "claiming §7.1's envelope PERFORMED_HERE while NIP-44 encryption and decryption are " +
+                "still not performed must fail the evidence anchor",
+        )
+        assertTrue(
+            "NIP44_ENCRYPTION" in problem && "NIP44_DECRYPTION" in problem,
+            "the refusal must name the constants that contradict the claim: $problem",
+        )
+        // And the real item, with its real status, still passes — so the refusal above is the
+        // status change and not something wrong with item 4 as published.
+        assertNull(evidenceProblem(real), "§17 item 4 as published must satisfy the anchor")
+    }
+
     /** The other direction: an item claiming nothing was done while pointing at work that was. */
     @Test
     fun `an item claimed not performed while naming a class fails the evidence anchor`() {

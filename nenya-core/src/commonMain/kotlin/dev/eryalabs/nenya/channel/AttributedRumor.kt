@@ -24,8 +24,8 @@ import dev.eryalabs.nenya.wire.WireEvent
  *
  * ### What this package is, and the half of §7 it deliberately is not
  *
- * §7.1's sealing and §7.3's `kind:10050` publication both need machinery this library may not
- * build: NIP-44 encryption is a seam whose default answers `Unavailable`, and nothing here opens a
+ * §7.1's sealing and §7.3's `kind:10050` publication both need machinery **this package** does not
+ * have: NIP-44 encryption is a seam whose default answers `Unavailable`, and nothing here opens a
  * socket. §7.2's rule is a **string comparison** and §7.4's rules are **structure**, and §7.2 says
  * in so many words that the comparison is binding even on an implementation that can do nothing
  * else: "An implementation that cannot verify the seal's signature (no secp256k1; see §17) still
@@ -33,7 +33,13 @@ import dev.eryalabs.nenya.wire.WireEvent
  * authenticated-by-decryption only, never as signature-verified."
  *
  * So this package performs that half and says so, and **nothing here decrypts, encrypts, seals or
- * wraps**. A rumor is an unsigned event with an `id` and a `created_at` and no `sig` (§7.1 step 1),
+ * wraps**. "Here" is this package, and it is no longer the whole library: §7.1's envelope is
+ * `dev.eryalabs.nenya.envelope`, where `GiftWrap.seal` orchestrates rumor → seal → wrap twice and
+ * `GiftWrap.open` orchestrates the read back — still computing no cryptography of its own, because
+ * every encryption, decryption and signature on those paths is the injected signer's work and every
+ * signature verdict the injected `Secp256k1Ops`'. That package is the one caller of the `internal`
+ * path below, and `OpenedMessage` is where what it did and did not check is reported.
+ * A rumor is an unsigned event with an `id` and a `created_at` and no `sig` (§7.1 step 1),
  * which means T8's `checkEventId` applies to it unchanged — and that is why [attribute] takes a
  * [CheckedEvent] exactly as the listing and bid codecs do.
  *

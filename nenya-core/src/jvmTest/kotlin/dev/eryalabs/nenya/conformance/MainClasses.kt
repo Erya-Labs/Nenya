@@ -70,6 +70,11 @@ internal object MainClasses {
         "dev.eryalabs.nenya.channel" to 18,
         "dev.eryalabs.nenya.conformance" to 4,
         "dev.eryalabs.nenya.delivery" to 14,
+        // Added by the §7.1 envelope package, which did not exist at 6432814; pinned at the count
+        // it compiled to when §17 item 4 started naming its types as evidence, on the same terms as
+        // every entry above. `EnvelopeStructureTest` keeps its own copy of this floor, because that
+        // sweep is about one package and this map is read by a sweep over all of them.
+        "dev.eryalabs.nenya.envelope" to 18,
         "dev.eryalabs.nenya.listing" to 14,
         "dev.eryalabs.nenya.money" to 10,
         "dev.eryalabs.nenya.order" to 37,
