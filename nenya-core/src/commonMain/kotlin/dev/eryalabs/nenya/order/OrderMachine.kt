@@ -177,9 +177,16 @@ public enum class TransitionRejection {
     DEADLINE_NOT_PASSED,
 
     /**
-     * There is no deadline to compare against: terms carrying no `expiration` before `paid`, or
+     * There is no deadline to compare against: terms carrying no `expiration` before `paid`; or
      * — at `paid` — no `deliver_by` and no clock reading taken when the order became `paid`, so
-     * §11.2's release timeout has nothing to run from.
+     * §11.2's release timeout has nothing to run from; or — at `released` — no clock reading taken
+     * at release, none taken at `paid` **and** no `deliver_by`, so §11.2's verification deadline
+     * has nothing to run from either.
+     *
+     * §11.2 requires that last case to be surfaced to the user as *having no deadline* rather than
+     * as pending, which is why it is this constant and not [DEADLINE_NOT_PASSED]: the two look
+     * alike from the outside — the order did not move — and they are opposite facts. One says "not
+     * yet"; this one says "never, on the readings this library has".
      */
     NO_DEADLINE_TO_CHECK,
 
@@ -231,6 +238,25 @@ public enum class DisputeGround {
      * mechanism v1 has against §11.4's residual risk.
      */
     RELEASE_DEADLINE_PASSED,
+
+    /**
+     * §11.2 (revision `1.6`) — the injected clock passed the **verification deadline** with the
+     * buyer's own §10.4 verification neither succeeded nor failed.
+     *
+     * The deadline runs from the clock reading taken when the order entered `released`, or — where
+     * none was taken — from the reading taken at `paid`, or from `deliver_by`; plus this
+     * implementation's verification window. §11.2 makes that window local rather than a wire term,
+     * because at `released` the only outstanding act is the buyer's own computation.
+     *
+     * Distinct from [RELEASE_DEADLINE_PASSED], and the distinction is the point rather than
+     * bookkeeping: that one says the provider never released a key, and is the one mechanism v1
+     * has against §11.4's residual risk. This one says the key was released and the bytes never
+     * verified — because the blob was served at the wrong length or over the download bound (§10.4
+     * says neither is a hash mismatch), because the URL was dead, or because the buyer never
+     * looked. A client that showed a user the first message for the second case would be telling
+     * them their provider took the money and ran.
+     */
+    VERIFICATION_DEADLINE_PASSED,
 
     /** §10.4 step 1 — the served bytes did not hash to `x`. */
     SERVED_BYTES_HASH_MISMATCH,
@@ -422,6 +448,23 @@ public sealed interface Order {
      */
     public val paidAt: Long?
 
+    /**
+     * The injected clock's reading at the moment the order entered `released`, in unix seconds, or
+     * `null` if it had none to give — including a negative reading, refused as a broken clock
+     * exactly as [paidAt] refuses one. Never negative.
+     *
+     * Recorded for the same single purpose [paidAt] is, one state later: §11.2's verification
+     * deadline (revision `1.6`) runs from it, and a timeout needs something to run from. It is the
+     * **first** anchor that deadline tries, ahead of [paidAt] and ahead of `deliver_by`, because it
+     * is the only one of the three that measures what the deadline is actually about — how long
+     * the buyer has had the key. A release sent one second before `deliver_by` would otherwise be
+     * disputed one second later.
+     *
+     * **It is never printed** (§12 item 11), for the reason [paidAt] is not: a clock reading taken
+     * at a moment of this order's life is a correlation handle for anyone who later reads the log.
+     */
+    public val releasedAt: Long?
+
     /** Why the order is `disputed`, and `null` in every other state (§14 item 3). */
     public val disputeGround: DisputeGround?
 
@@ -497,10 +540,18 @@ public sealed interface Order {
  *   is a parameter with a default rather than a constant. Seven days is long enough not to fire
  *   on a provider who is merely slow and short enough that an abandoned order reaches a terminal
  *   state while the buyer still remembers it. Must be strictly positive.
+ * @param verificationTimeoutSeconds §11.2's verification window out of `released`, as a number of
+ *   seconds, applied to whichever anchor that row names first — the reading taken at release, then
+ *   [Order.paidAt], then `deliver_by`. **Local policy, not a wire value**, and §11.2 says so in
+ *   those words: at `released` the only outstanding act is the buyer's own computation of `x` and
+ *   `ox` (§10.4), so there is nothing for the two parties to agree in advance about and a fourth
+ *   wire term would reopen §7.5's and §7.6's byte-identical terms for no gain. Seven days, for the
+ *   reason [releaseTimeoutSeconds] is. Must be strictly positive.
  */
 public class OrderMachine(
     private val clock: NenyaClock = NenyaClock.FAIL_CLOSED,
     private val releaseTimeoutSeconds: Long = DEFAULT_RELEASE_TIMEOUT_SECONDS,
+    private val verificationTimeoutSeconds: Long = DEFAULT_VERIFICATION_TIMEOUT_SECONDS,
 ) {
 
     init {
@@ -510,6 +561,14 @@ public class OrderMachine(
                 "§11.2 requires an implementation with no `deliver_by` to apply and display a " +
                     "release timeout of its own; a zero or negative one is not a timeout, it " +
                     "disputes an order the moment it is paid",
+            )
+        }
+        if (verificationTimeoutSeconds <= 0L) {
+            throw OrderStateException(
+                OrderStateRejection.VERIFICATION_TIMEOUT_NOT_POSITIVE,
+                "§11.2 requires an implementation to apply and display a verification window of " +
+                    "its own out of `released`; a zero or negative one is not a window, it " +
+                    "disputes an order the moment the key reaches the buyer",
             )
         }
     }
@@ -528,6 +587,7 @@ public class OrderMachine(
         terms = proposal.terms,
         commitment = null,
         paidAt = null,
+        releasedAt = null,
         disputeGround = null,
         paymentChecksPerformed = emptySet(),
         paymentChecksNotPerformedHere = emptySet(),
@@ -561,6 +621,7 @@ public class OrderMachine(
         terms = terms,
         commitment = null,
         paidAt = null,
+        releasedAt = null,
         disputeGround = null,
         paymentChecksPerformed = emptySet(),
         paymentChecksNotPerformedHere = emptySet(),
@@ -723,8 +784,14 @@ public class OrderMachine(
             order.with(state = OrderState.DISPUTED, disputeGround = ground(event.failure)),
         )
 
+        is OrderEvent.ClockChecked -> verificationDeadline(order)
         is OrderEvent.StatusUpdate -> statusUpdate(order, event, acceptable = null)
-        else -> wrongState(order, "released", "the buyer's own §10.4 verification, succeeding or failing")
+        else -> wrongState(
+            order,
+            "released",
+            "the buyer's own §10.4 verification succeeding or failing, or the clock passing the " +
+                "verification deadline",
+        )
     }
 
     // ------------------------------------------------------------------ the individual triggers
@@ -866,6 +933,67 @@ public class OrderMachine(
                 order.with(
                     state = OrderState.DISPUTED,
                     disputeGround = DisputeGround.RELEASE_DEADLINE_PASSED,
+                ),
+            )
+        }
+    }
+
+    /**
+     * §11.2's second `released → disputed` row (revision `1.6`): the clock passing the
+     * **verification deadline** with the buyer's own §10.4 verification neither done nor failed.
+     *
+     * The anchor order is §11.2's own, and each step of it is a fact this library either has or
+     * does not: [Order.releasedAt] — how long the buyer has actually had the key — then
+     * [Order.paidAt], then `deliver_by` from the accepted terms. Where none of the three exists
+     * there is no deadline, and §11.2 requires that to be reported as *having none* rather than as
+     * pending, which is [TransitionRejection.NO_DEADLINE_TO_CHECK] and not
+     * [TransitionRejection.DEADLINE_NOT_PASSED]. Nothing is invented to fill the gap: §4.6 permits
+     * this library no time but the injected clock's.
+     *
+     * A `DeliveryVerified` arriving after the deadline but before any [OrderEvent.ClockChecked]
+     * still settles the order, exactly as a `kind:15` arriving after `deliver_by` still releases
+     * one. The deadline is not a state the order is in; it is a question this event asks, and the
+     * answer to "did the bytes verify" does not become "no" because nobody asked in time.
+     */
+    private fun verificationDeadline(order: Order): OrderOutcome {
+        val now = when (val clockNow = reading()) {
+            is ClockReading.At -> clockNow.unixSeconds
+            is ClockReading.Refused -> return clockRefusal(order, clockNow)
+        }
+        val anchor = order.releasedAt
+            ?: order.paidAt
+            ?: order.terms.deliverBy
+            ?: return refuse(
+                order,
+                TransitionRejection.NO_DEADLINE_TO_CHECK,
+                "the injected clock gave no reading when the order was released and none when it " +
+                    "became `paid`, and these terms carry no `deliver_by`, so §11.2's " +
+                    "verification deadline has nothing to run from. §11.2 requires this be shown " +
+                    "as having no deadline rather than as still pending",
+            )
+        // The same overflow the own-release timeout has, reached the same way: every anchor here
+        // is a `Long` the embedding client's clock or the counterparty's terms supplied, so a
+        // deadline beyond the last representable second is constructible. Plain `+` would wrap to
+        // a negative deadline every reading has already passed and dispute the order on the spot.
+        // `on` is total over every pair (§11.2), so this refuses rather than throwing.
+        val deadline = checkedDeadline(anchor, verificationTimeoutSeconds) ?: return refuse(
+            order,
+            TransitionRejection.DEADLINE_NOT_PASSED,
+            "§11.2's verification deadline lands beyond the last representable second, so no " +
+                "clock reading can reach it",
+        )
+        return if (now < deadline) {
+            refuse(
+                order,
+                TransitionRejection.DEADLINE_NOT_PASSED,
+                "the injected clock has not reached the verification deadline (§4.6, §11.2); a " +
+                    "counterparty's `created_at` is not consulted and never will be",
+            )
+        } else {
+            advance(
+                order.with(
+                    state = OrderState.DISPUTED,
+                    disputeGround = DisputeGround.VERIFICATION_DEADLINE_PASSED,
                 ),
             )
         }
@@ -1041,7 +1169,15 @@ public class OrderMachine(
                 ),
             )
         }
-        return advance(order.with(state = OrderState.RELEASED))
+        return advance(
+            order.with(
+                state = OrderState.RELEASED,
+                // §11.2's verification deadline runs from here. A broken or silent clock records
+                // nothing rather than a time, exactly as `paid` does: the deadline then falls back
+                // to `paidAt` and to `deliver_by`, and says it has none if neither exists.
+                releasedAt = (reading() as? ClockReading.At)?.unixSeconds,
+            ),
+        )
     }
 
     /** §11.2's `released → settled`: the buyer's own computation of `x` **and** `ox` both match. */
@@ -1144,6 +1280,21 @@ public class OrderMachine(
          * client and a test can both pin it. Seven days, as a number of seconds.
          */
         public const val DEFAULT_RELEASE_TIMEOUT_SECONDS: Long = 7L * 24L * 60L * 60L
+
+        /**
+         * §11.2's verification window, applied to whichever anchor the `released → disputed`
+         * deadline row names first.
+         *
+         * **Local policy, not a wire value**, exactly as [DEFAULT_RELEASE_TIMEOUT_SECONDS] is, and
+         * for a stronger reason: §11.2 states that this deadline is local *by design*, because the
+         * only act outstanding at `released` is the buyer's own. §11.2 fixes no number. A constant
+         * so it can be named in a UI — the row requires an implementation to **display** the
+         * window, not merely to apply it — and a parameter with a default so a client and a test
+         * can both pin it. Seven days, as a number of seconds: long enough for a buyer who was
+         * away from the client when the key arrived, short enough that an order whose blob never
+         * verified reaches a terminal state while both parties still remember it.
+         */
+        public const val DEFAULT_VERIFICATION_TIMEOUT_SECONDS: Long = 7L * 24L * 60L * 60L
     }
 }
 
@@ -1186,6 +1337,7 @@ private fun Order.with(
     state: OrderState = this.state,
     commitment: DeliverableCommitment? = this.commitment,
     paidAt: Long? = this.paidAt,
+    releasedAt: Long? = this.releasedAt,
     disputeGround: DisputeGround? = this.disputeGround,
     paymentChecksPerformed: Set<PaymentCheck> = this.paymentChecksPerformed,
     paymentChecksNotPerformedHere: Set<PaymentCheck> = this.paymentChecksNotPerformedHere,
@@ -1200,6 +1352,7 @@ private fun Order.with(
     terms = terms,
     commitment = commitment,
     paidAt = paidAt,
+    releasedAt = releasedAt,
     disputeGround = disputeGround,
     paymentChecksPerformed = paymentChecksPerformed,
     paymentChecksNotPerformedHere = paymentChecksNotPerformedHere,
@@ -1214,6 +1367,7 @@ private class OpenOrder(
     override val terms: OrderTerms,
     override val commitment: DeliverableCommitment?,
     override val paidAt: Long?,
+    override val releasedAt: Long?,
     override val disputeGround: DisputeGround?,
     override val paymentChecksPerformed: Set<PaymentCheck>,
     override val paymentChecksNotPerformedHere: Set<PaymentCheck>,
@@ -1223,8 +1377,8 @@ private class OpenOrder(
 
     /**
      * Names the state, the dispute ground and the two capability records — and no order id, no
-     * amount, no deadline, no hash and no clock reading (§12 item 11, and see
-     * [OrderTerms.toString]).
+     * amount, no deadline, no hash and no clock reading, [Order.paidAt] and [Order.releasedAt]
+     * included (§12 item 11, and see [OrderTerms.toString]).
      *
      * The order id is the addition worth naming: §12 item 11 lists it beside key material and
      * preimages, and it is a correlation handle for anyone who later learns it, so it is absent

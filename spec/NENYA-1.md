@@ -21,7 +21,7 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.5`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.6`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
 **Revision history**
@@ -34,6 +34,7 @@ nothing in it is deployed, and the identifiers it reserves are not registered.
 | `1.3` | 2026-09-16 | Text with no UTF-8 encoding (§4.1). A `content` or tag value containing an unpaired UTF-16 surrogate MUST now be **rejected**, never serialised with a substituted replacement character: platforms substitute differently (`?` on the JVM, U+FFFD in JavaScript), so substitution gave one event two ids. Stated in §4.1, cross-referenced from §4.3, and added to §18's event-id vectors. |
 | `1.4` | 2026-09-17 | Appendix C corrected against BOLT-11 itself, and completed as a reader specification. Three errors of fact repaired: BOLT-11 does **not** define invoices as all-lowercase (it prescribes uppercase for QR codes and its own example 13 is all uppercase), so refusing an uppercase invoice is stated as **Nenya's** rule and not as BOLT-11's (§4.3, Appendix C); a tagged field of the wrong length is **skipped** as unknown rather than rejecting the invoice, which is BOLT-11's own reader rule; and the payment secret (`s`) is now REQUIRED. Appendix C additionally states, rather than leaves to the reference implementation, the reader rules Nenya enforces, and states which BOLT-11 rules Nenya does **not** perform and MUST NOT report as performed. No tag meaning, fee arithmetic or state changes. |
 | `1.5` | 2026-09-19 | Four refusals stated where the document previously named a sender, or presumed a uniqueness, without saying what to do about anything else. §7.6: an implementation MUST know the provider's key independently of the proposal and MUST reject a `type=3` acceptance sealed by any other key, the buyer's included. §8.6: a `payee=provider` `type=2` MUST arrive under a seal whose pubkey is that same provider key, the counterpart to §8.7's rule for the fee side; a second `type=2` for an `(order, payee)` already accepted MUST be rejected rather than replacing the first; an invoice already accepted for one payee on an order MUST be rejected for any other payee on that order; and a `type=2` whose invoice has already expired at the moment it would be accepted MUST be rejected then rather than at settlement. No tag meaning, fee arithmetic or state changes. |
+| `1.6` | 2026-09-23 | A **verification deadline** out of `released`, stated as a second `released → disputed` row in §11.2. An order whose buyer never completes §10.4 previously sat in `released` for ever: a blob refused for its length or for the download bound is not a hash mismatch, so no trigger existed for it, and neither did one for a dead URL or a buyer who simply never looks. The deadline is **local** rather than a new wire term — the clock reading taken at release plus a window the implementation applies and displays, falling back to the reading taken at `paid` and then to `deliver_by` — and where none of the three was ever recorded the order reports that it has no deadline rather than that it is pending. §11.2's "there is no third deadline" paragraph is replaced accordingly; §10.4, §11.4 and §18 record the consequence. No tag meaning, fee arithmetic, evidence rule or state changes: a trigger is added to a `(from, to)` pair the table already carried. |
 
 Revision `1.1` changes no tag meaning, no fee arithmetic, no evidence rule and no state, so
 the `["nenya", "1"]` version tag is unchanged and revision `1.0` and revision `1.1` are wire
@@ -121,6 +122,26 @@ The third is the only one that refuses a flow somebody might have built: a provi
 re-sends its invoice, for instance because the first went unanswered, now has the second
 rejected rather than silently replacing the first. That is deliberate and §8.6 states the
 reasoning in place. An invoice that expires unpaid is not re-issued within the order.
+
+Revision `1.6` changes no tag meaning, no fee arithmetic, no evidence rule and no state, and
+the `["nenya", "1"]` version tag is unchanged. It adds no field, no tag, no message and no
+status token. The row it adds to §11.2 is a second **trigger** for the `released → disputed`
+pair that table already carried, so the set of legal `(from, to)` transitions is exactly
+revision `1.5`'s; what changes is that an order sitting in `released` now has a stated moment
+at which it leaves. The deadline itself is **not** a wire value: it is computed from readings
+of the implementation's own clock and a window the implementation chooses, so no sender emits
+it, nothing about it can be misparsed by a revision `1.5` reader, and two conformant
+implementations may pick different windows exactly as §11.2 already permits them to for an
+order with no `deliver_by`. A revision `1.5` implementation reading a `1.6` implementation's
+events sees the same events.
+
+The row deliberately claims less than "an order never stays in `released` indefinitely". Where
+no clock reading was taken when the order became `paid`, none was taken at release, and the
+accepted terms carry no `deliver_by`, there is nothing the deadline can run from and §4.6
+forbids substituting a time from anywhere else. That order does stay in `released` — and an
+implementation MUST tell its user that it has no deadline to check rather than showing it as
+pending, which is the same treatment §11.2 already gives a `proposed` order whose terms carry
+no `expiration`.
 
 Some decisions are still **not yet made**. They are marked `OPEN-n` inline and indexed in
 §16.2; the ones already closed are recorded with their rationale in §16.1. An OPEN item is a
@@ -1606,6 +1627,13 @@ The buyer MUST, in this order:
 Only after all three succeed may the order reach `settled`. An implementation MUST also
 bound the download (§4.3) and MUST refuse a blob whose length disagrees with `size`.
 
+A blob refused for its length, a blob refused by that bound, and a download that never
+completes are **not** hash mismatches. None of them says anything about whether the provider
+committed to the bytes they served, any of them may be followed by the same blob served
+correctly, and an implementation MUST NOT move the order to `disputed` for one on the spot.
+What such an order does instead is leave `released` at the **verification deadline** of
+§11.2's `released → disputed` row, along with the order whose buyer never looks at all.
+
 ### 10.5 What the commitment does and does not prove
 
 Because `ox` is published **before** the buyer pays and **before** the key exists in the
@@ -1699,6 +1727,7 @@ precisely the token where the conflation looks correct and passes a test. Theref
 | `paid` | `disputed` | the injected clock passes `deliver_by` from the accepted terms and no `kind:15` carrying a decrypting key has been received. If the accepted terms carry no `deliver_by`, an implementation MUST apply and display a release timeout of its own and MUST NOT leave the order in `paid` indefinitely |
 | `released` | `settled` | buyer's own computation of `x` **and** `ox` both match |
 | `released` | `disputed` | either hash mismatches, or the blob does not decrypt |
+| `released` | `disputed` | the injected clock passes the **verification deadline** with the buyer's own §10.4 verification neither succeeded nor failed. That deadline is the clock reading taken when the order entered `released`, plus a verification window the implementation applies and displays; where no reading was taken at release, the reading taken when the order entered `paid` plus that window; where neither reading was taken, `deliver_by` from the accepted terms plus that window. An implementation MUST move the order to `disputed` once that deadline has passed and MUST NOT leave it in `released` past it. Where no reading was taken at `paid` and none at release **and** the accepted terms carry no `deliver_by`, there is no deadline to check — as for a `proposed` order whose terms carry no `expiration` — and an implementation MUST surface that to the user as having no deadline rather than as pending |
 
 Every transition not listed is **illegal** and MUST be refused. An implementation SHOULD
 model the transition function as total — every (state, event) pair produces either a new
@@ -1711,15 +1740,30 @@ order id, so there is no order for it to advance — and a `kind:14` chat messag
 implementation MUST NOT treat either as an acceptance, a cancellation, or evidence of
 anything (§7.6, §9.1).
 
-Exactly two deadlines drive rows of this table, and they are distinct terms: the proposal's
-`expiration` drives `→ expired`, and `deliver_by` from the accepted terms drives
+Three deadlines drive rows of this table. The first two are **wire terms and distinct ones**:
+the proposal's `expiration` drives `→ expired`, and `deliver_by` from the accepted terms drives
 `paid → disputed`. Both are evaluated against the injected clock and never against a
 counterparty's `created_at` (§4.6). §7.5 requires `expiration` to fall strictly before
 `deliver_by`, so the two never invert — an order can never still be awaiting acceptance after
-the delivery deadline it would be judged against has already passed. There is no third
-deadline: revision `1.1` referred to a "release deadline" that was defined nowhere, which
-left the one transition protecting the buyer against the residual risk of §11.4 untestable
-and invented per implementation.
+the delivery deadline it would be judged against has already passed.
+
+The third is the **verification deadline** of the second `released → disputed` row, and it is
+**local rather than a wire term**. The asymmetry is deliberate. `expiration` and `deliver_by`
+bound an act the *counterparty* owes, so both parties have to agree in advance on the moment
+that act is judged at, and a term on the wire is the only way to agree. At `released` the only
+outstanding act is the buyer's **own** computation of `x` and `ox` (§10.4): nothing the provider
+does can hasten it or delay it, the provider's view of the order needs no opinion about when it
+happened, and a fourth term would reopen §7.5's and §7.6's byte-identical terms for a risk §11.4
+does not describe. So an implementation applies and displays a window of its own here, exactly
+as it already must where the accepted terms carry no `deliver_by`, and two implementations
+picking different windows are both conformant.
+
+Revision `1.1` referred to a "release deadline" that was defined nowhere, which left the one
+transition then protecting the buyer against the residual risk of §11.4 untestable and invented
+per implementation. Naming a deadline is therefore not sufficient: each of the three above says
+what it runs from, what an implementation MUST do once it has passed, and — for the third, which
+runs from readings that may never have been taken — what an implementation MUST report when
+there is nothing for it to run from at all.
 
 ### 11.3 Invariants worth testing directly
 
@@ -1756,7 +1800,10 @@ is why §11.2 binds it to `deliver_by` rather than to an unnamed timeout: an ord
 provider abandons after payment must reach a terminal, visible, comparable state at a moment
 both parties agreed to in advance, not at whichever timeout each client happened to choose.
 `disputed` resolves nothing (§14 item 3); what it does is stop the order pretending to be
-live.
+live. §11.2's verification deadline is the companion rule for the state after that one: it
+acts on no risk a provider controls — the key is already released by then — and exists so that
+an order whose blob never verified, because it was served at the wrong length, because the
+download never completed or because the buyer never looked, stops pretending to be live too.
 
 ---
 
@@ -2131,7 +2178,7 @@ externally-authored vectors rather than to the implementer's own understanding.
 | BOLT-11 parsing | the BOLT-11 Examples appendix |
 | Preimage verification | invoices with known preimages, **plus** negative controls: wrong preimage, 31-byte preimage, 33-byte preimage, uppercase hex, preimage of the wrong invoice |
 | Fee arithmetic | boundary cases at `bps = 0`, `bps = 10000`, the msat rounding example in §8.3, an overflow probe at the supply cap, and the non-zero-`bps`-but-zero-`fee_msat` case (`bps = 1`, `price_msat = 3000`) |
-| State machine | every legal transition, **and** an enumeration proving every unlisted pair is refused. Include as named cases: a fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe); an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe); a `type=1` with no `fee` tag opening at zero fee; a `type=6` and a `kind:14` each advancing nothing from every state |
+| State machine | every legal transition, **and** an enumeration proving every unlisted pair is refused. Include as named cases: a fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe); an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe); a `type=1` with no `fee` tag opening at zero fee; a `type=6` and a `kind:14` each advancing nothing from every state; an order in `released` whose served blob was refused for its length — which is no hash mismatch (§10.4) — reaching `disputed` at the verification deadline, probed one second before the deadline, at it exactly, and one second after; the same order under each fallback anchor in turn, with the candidate deadlines chosen so that anchoring on the wrong one would be visible; and an order with no clock reading at `paid`, none at release and no `deliver_by`, reporting that it has no deadline to check rather than that it is pending |
 
 Vectors that only prove the happy path prove very little. Every check above whose failure
 would cost a user money SHOULD have a negative control demonstrating that the check rejects

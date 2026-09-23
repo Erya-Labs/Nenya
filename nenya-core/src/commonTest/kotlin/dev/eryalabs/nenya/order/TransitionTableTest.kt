@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.order
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -25,6 +26,18 @@ import kotlin.test.fail
  * with itself.
  */
 class TransitionTableTest {
+
+    private companion object {
+
+        /**
+         * What tells §11.2's two `released → disputed` rows apart, in the specification's own
+         * words: one names the verification deadline and the other names a hash mismatch.
+         *
+         * A phrase and not a line number, so the control below survives every edit that moves
+         * the row and turns red for the one edit that removes the rule.
+         */
+        const val VERIFICATION_DEADLINE_MARK: String = "verification deadline"
+    }
 
     private val spec = Section11.transitions
 
@@ -68,22 +81,88 @@ class TransitionTableTest {
     /**
      * The headline. Both directions, over `(spec line, from, to)` triples, so the line
      * numbers a reviewer diffs by eye are inside the proof rather than beside it.
+     *
+     * The diff itself now lives in [Section11.compare], a function of
+     * `(specification text, psv lines)`, so that the stale-psv control below is measured by
+     * **this** comparison rather than by a second implementation of it. The refactor moved
+     * the arithmetic and removed no assertion: both directions are still reported by name
+     * and the set equality is still claimed.
      */
     @JsName("the_transcription_equals_section_11_2_triple_for_triple")
     @Test
     fun `the transcription equals section 11 2 triple for triple`() {
-        val transcribed = file.toSet()
-        val missing = (spec - transcribed).sortedBy { it.specLine }
-        val extra = (transcribed - spec).sortedBy { it.specLine }
-        assertTrue(
-            missing.isEmpty() && extra.isEmpty(),
-            buildString {
-                append("the transcribed §11.2 table and ${Section11.specPath()} disagree.")
-                if (missing.isNotEmpty()) append("\n  in the specification, not transcribed: $missing")
-                if (extra.isNotEmpty()) append("\n  transcribed, not in the specification: $extra")
-            },
+        val comparison =
+            Section11.compare(Section11.specificationLines(), Section11.transcribedLines())
+
+        assertTrue(comparison.agrees, comparison.report(Section11.specPath()))
+        assertEquals(spec, comparison.transcribed.toSet())
+    }
+
+    /**
+     * The stale-psv control: a psv as it would read if this revision's new §11.2 line had
+     * never been added is caught by the same comparison the test above runs.
+     *
+     * Without it, "the suite would go red if somebody edited the specification and forgot the
+     * psv" is a claim about a test rather than a demonstration of one — and it is the claim
+     * the Definition of done's transcription rule rests on.
+     *
+     * ### Everything here is derived from the live files, so no later revision can turn it red
+     *
+     * Nothing below is a pinned line number, a count, or a copy of either file. The inserted
+     * row is found by its `(from, to)` pair **and** by the text of the specification line it
+     * transcribes — there are two `released → disputed` rows now, and only one of them is the
+     * verification deadline's. The stale psv is then built from the live one: that row removed,
+     * and every row below it shifted back a line, which is what the file said before the line
+     * existed. T29 and every later specification edit move these lines and the control moves
+     * with them.
+     *
+     * ### What is asserted, and what is deliberately not
+     *
+     * Two things. The comparison **fails**; and its failure **names** every row the shift made
+     * stale, computed here from the live psv rather than written down. The new row is last in
+     * §11.2's table today, so no row follows it and that set is empty until a later revision
+     * adds one below — which is why the assertion is made over the union with the removed row,
+     * the one the failure certainly names today. Asserting the exact failure set would be
+     * asserting a count, which is the thing this file refuses to do everywhere else.
+     */
+    @JsName("a_psv_missing_this_revision_s_new_line_fails_the_same_comparison")
+    @Test
+    fun `a psv missing this revision's new line fails the same comparison`() {
+        val specification = Section11.specificationLines()
+        val live = Section11.transcribed()
+
+        // Found by pair and by text, never by line number: §11.2 carries two `released →
+        // disputed` rows and `single` is what proves the text tells them apart.
+        val inserted = live.single {
+            it.from == "released" &&
+                it.to == "disputed" &&
+                VERIFICATION_DEADLINE_MARK in Section11.specLine(it.specLine)
+        }
+        val staleRows = live
+            .filter { it != inserted }
+            .map { if (it.specLine > inserted.specLine) it.copy(specLine = it.specLine - 1) else it }
+        val stale = Section11.compare(specification, staleRows.map { it.toString() })
+
+        assertFalse(
+            stale.agrees,
+            "a psv missing §11.2's verification-deadline line, with every line below it " +
+                "renumbered, must not agree with the specification that has it",
         )
-        assertEquals(spec, transcribed)
+        val shifted = live
+            .filter { it.specLine > inserted.specLine }
+            .map { it.copy(specLine = it.specLine - 1) }
+        assertTrue(
+            stale.named.containsAll(shifted + inserted),
+            "the failure must name every row the shift made stale, and the removed row. It " +
+                "named ${stale.named}; the rows the shift touched were $shifted and the " +
+                "removed row was $inserted",
+        )
+
+        assertTrue(
+            Section11.compare(specification, Section11.transcribedLines()).agrees,
+            "and the live psv passes against that same specification text, so the failure " +
+                "above is the staleness and not the comparison",
+        )
     }
 
     /**

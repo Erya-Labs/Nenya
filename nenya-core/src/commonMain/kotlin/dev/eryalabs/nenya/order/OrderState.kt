@@ -41,6 +41,18 @@ public enum class OrderStateRejection {
     RELEASE_TIMEOUT_NOT_POSITIVE,
 
     /**
+     * An [OrderMachine] was built with a zero or negative verification timeout.
+     *
+     * §11.2's `released → disputed` deadline row requires an implementation to apply and display a
+     * verification window of its own — the deadline is local, not a wire term, precisely because
+     * the only outstanding act at `released` is the buyer's own computation (§10.4). A non-positive
+     * window disputes an order the instant the key is released, before any buyer could have
+     * downloaded a byte, which is the same failure [RELEASE_TIMEOUT_NOT_POSITIVE] names one state
+     * earlier and is refused in the same place, at construction.
+     */
+    VERIFICATION_TIMEOUT_NOT_POSITIVE,
+
+    /**
      * A timestamp that §4.3 fixes as non-negative unix seconds was negative: an [OrderTerms]
      * `expiration` or `deliver_by`, or a rumor's `created_at`.
      *

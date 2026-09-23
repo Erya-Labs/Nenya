@@ -10,8 +10,11 @@
 # not one-to-one: some name several destinations in a single `/`-separated destination cell,
 # so "row by row" and "transition by transition" are different counts. Several lines below
 # therefore share a spec line number, which is correct and is what the cross-check expects.
-# No number is written down here on purpose — a count in a comment is a claim nothing
-# verifies, and it would go stale silently the day §11.2 gained another such row.
+# The converse now holds too: two lines below carry the **same** (from, to) pair on different
+# spec lines, because §11.2 states two triggers for `released → disputed` on two rows. Neither
+# shape is a duplicate, and the cross-check compares (spec line, from, to) triples for exactly
+# that reason. No number is written down here on purpose — a count in a comment is a claim
+# nothing verifies, and it would go stale silently the day §11.2 gained another such row.
 #
 # The `—` in the first column is §11.2's genesis row, which has no from-state: an order
 # comes into existence at `proposed`. It is the only non-state token permitted in either
@@ -27,28 +30,32 @@
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
 #
-# Regenerated for revision `1.5`, whose edits to §0, §7.6 and §8.6 inserted 100 lines above
-# §11.2's row block — six hunks, the last of them ending at line 1338, and none of them
-# inside the block, which is unchanged character for character. Every line number below is
-# therefore its revision `1.4` value plus 100, and the (from, to) column pair is
-# byte-identical to the one that stood before: revision `1.5` changes no transition.
+# Regenerated for revision `1.6`, which added decision E's verification deadline. Two kinds of
+# edit moved these lines. §0's history row and compatibility paragraphs, and §10.4's new
+# paragraph, inserted 28 lines above §11.2's row block and none inside it, so every line that
+# stood before is its revision `1.5` value plus 28. Inside the block, one line was **added**:
+# the second `released → disputed` row, last in the table, at line 1730. The (from, to) column
+# pair is therefore unchanged as a **set** — revision `1.6` states a new trigger for a pair the
+# table already carried and no new pair — and `TransitionTotalityTest`'s pair equality is
+# untouched by this regeneration.
 
-1688 | — | proposed
-1689 | proposed | accepted
-1690 | proposed | cancelled
-1691 | proposed | expired
-1692 | accepted | committed
-1693 | accepted | cancelled
-1693 | accepted | expired
-1694 | committed | awaiting_payment
-1695 | committed | cancelled
-1695 | committed | expired
-1695 | committed | disputed
-1696 | awaiting_payment | paid
-1697 | awaiting_payment | cancelled
-1697 | awaiting_payment | expired
-1697 | awaiting_payment | disputed
-1698 | paid | released
-1699 | paid | disputed
-1700 | released | settled
-1701 | released | disputed
+1716 | — | proposed
+1717 | proposed | accepted
+1718 | proposed | cancelled
+1719 | proposed | expired
+1720 | accepted | committed
+1721 | accepted | cancelled
+1721 | accepted | expired
+1722 | committed | awaiting_payment
+1723 | committed | cancelled
+1723 | committed | expired
+1723 | committed | disputed
+1724 | awaiting_payment | paid
+1725 | awaiting_payment | cancelled
+1725 | awaiting_payment | expired
+1725 | awaiting_payment | disputed
+1726 | paid | released
+1727 | paid | disputed
+1728 | released | settled
+1729 | released | disputed
+1730 | released | disputed

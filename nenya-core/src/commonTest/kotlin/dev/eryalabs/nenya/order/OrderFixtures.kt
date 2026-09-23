@@ -86,8 +86,27 @@ internal object OrderFixtures {
     /** A clock reading before both deadlines: nothing has expired. */
     const val BEFORE_DEADLINES: Long = EXPIRATION - 3_600L
 
-    /** A clock reading after both deadlines: everything a deadline can fire on, has. */
-    const val AFTER_DEADLINES: Long = DELIVER_BY + 3_600L
+    /**
+     * A clock reading after **every** deadline this library evaluates: everything a deadline can
+     * fire on, has.
+     *
+     * Revision `1.6` added a third, and this constant moved with it. `expiration` and `deliver_by`
+     * are the two wire terms; §11.2's verification deadline out of `released` is local, runs from
+     * the reading taken at release — [BEFORE_DEADLINES] on every fixture chain, since
+     * [machineBeforeDeadlines] builds them — and lands a verification window later. At the old
+     * value, `DELIVER_BY + 3600`, the cross-product in `TransitionTotalityTest` reached `released`
+     * with `ClockChecked` and was refused `DEADLINE_NOT_PASSED`, so the one edge revision `1.6`
+     * adds would have been the one edge **that proof** never exercised — `(released, disputed)` is
+     * produced by `DeliveryRefused` too, so its set equality holds either way. `VerificationDeadlineTest`
+     * covers the edge directly and is what turns red if the branch is deleted; this constant is what
+     * puts it inside the totality proof as well. Both windows are added rather than the larger of
+     * the two, so no reading of "after both deadlines" is left standing on an inequality between
+     * two constants that a later task may change independently.
+     */
+    const val AFTER_DEADLINES: Long = DELIVER_BY +
+        OrderMachine.DEFAULT_RELEASE_TIMEOUT_SECONDS +
+        OrderMachine.DEFAULT_VERIFICATION_TIMEOUT_SECONDS +
+        3_600L
 
     /** §8.3's own worked rate: 250 bps is 2.5%, and on this price the fee is non-zero. */
     const val FEE_BASIS_POINTS: Int = 250

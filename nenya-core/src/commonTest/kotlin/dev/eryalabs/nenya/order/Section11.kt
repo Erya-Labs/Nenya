@@ -27,6 +27,61 @@ internal object Section11 {
     /** §11.2's genesis row has no from-state: an order comes into existence at `proposed`. */
     internal const val GENESIS: String = "—"
 
+    /**
+     * What one triple-for-triple comparison of a transcription against a specification found.
+     *
+     * The comparison used to be written inline in `TransitionTableTest` over the two live files.
+     * It is one function of `(specification text, psv lines)` so that a control can feed it a psv
+     * it built — a stale one, say — and be measured by **the** comparison rather than by a second
+     * implementation of it that could drift into agreeing with whatever it was handed.
+     */
+    internal data class Comparison(
+        /** Every triple §11.2 states, as parsed from the specification text it was given. */
+        val spec: Set<Transition>,
+        /** Every triple the psv lines carried, in file order, so a duplicate stays visible. */
+        val transcribed: List<Transition>,
+        /** In the specification and not transcribed, by ascending specification line. */
+        val missing: List<Transition>,
+        /** Transcribed and in no such line of the specification, by ascending line. */
+        val extra: List<Transition>,
+    ) {
+
+        /** Whether the two agree exactly — the assertion `TransitionTableTest` makes. */
+        val agrees: Boolean get() = missing.isEmpty() && extra.isEmpty()
+
+        /** Everything the failure names, which is what a control asserts over. */
+        val named: Set<Transition> get() = (missing + extra).toSet()
+
+        /** The failure message, authored here so the test and any control report identically. */
+        fun report(specPath: String): String = buildString {
+            append("the transcribed §11.2 table and $specPath disagree.")
+            if (missing.isNotEmpty()) append("\n  in the specification, not transcribed: $missing")
+            if (extra.isNotEmpty()) append("\n  transcribed, not in the specification: $extra")
+        }
+    }
+
+    /**
+     * Parse both sides and diff them. Neither side is read from disk here: both arrive as text,
+     * which is what lets a control vary one of them.
+     */
+    internal fun compare(specificationLines: List<String>, psvLines: List<String>): Comparison {
+        val spec = parseTransitions(specificationLines)
+        val transcribed = parseTranscribed(psvLines, "the psv lines supplied")
+        val asSet = transcribed.toSet()
+        return Comparison(
+            spec = spec,
+            transcribed = transcribed,
+            missing = (spec - asSet).sortedBy { it.specLine },
+            extra = (asSet - spec).sortedBy { it.specLine },
+        )
+    }
+
+    /** The specification as the tests read it, for a caller that wants to vary the other side. */
+    internal fun specificationLines(): List<String> = specLines
+
+    /** The committed psv as the tests read it, line for line and comments included. */
+    internal fun transcribedLines(): List<String> = VendoredFile(TRANSITIONS_PATH).readLines()
+
     private const val TRANSITIONS_PATH: String = "nenya-core/src/commonTest/resources/spec/nenya-1-11.2-transitions.psv"
 
     private const val STATES_HEADING: String = "### 11.1 States"
@@ -42,7 +97,7 @@ internal object Section11 {
      * meaning cell marks it **Terminal**.
      */
     internal val states: Map<String, Boolean> by lazy {
-        val rows = tableRows(STATES_HEADING, expectedColumns = 2, expectedFirstHeaderCell = "State")
+        val rows = tableRows(specLines, STATES_HEADING, expectedColumns = 2, expectedFirstHeaderCell = "State")
         rows.associate { (_, cells) -> unquote(cells[0]) to ("Terminal" in cells[1]) }
             .also {
                 if (it.isEmpty()) {
@@ -79,8 +134,18 @@ internal object Section11 {
      * Every legal transition §11.2 states, pre-expanded so a row naming two or three
      * destinations yields two or three entries — all carrying that row's line number.
      */
-    internal val transitions: Set<Transition> by lazy {
-        val rows = tableRows(TRANSITIONS_HEADING, expectedColumns = 3, expectedFirstHeaderCell = "From")
+    internal val transitions: Set<Transition> by lazy { parseTransitions(specLines) }
+
+    /** The transcribed table, in file order, so duplicate lines remain visible. */
+    internal fun transcribed(): List<Transition> {
+        // A missing path fails inside VendoredFile, naming every file that was generated.
+        val file = VendoredFile(TRANSITIONS_PATH)
+        return parseTranscribed(file.readLines(), file.location)
+    }
+
+    /** §11.2's row block, expanded, out of the specification text it is given. */
+    private fun parseTransitions(lines: List<String>): Set<Transition> {
+        val rows = tableRows(lines, TRANSITIONS_HEADING, expectedColumns = 3, expectedFirstHeaderCell = "From")
         val expanded = rows.flatMap { (lineNumber, cells) ->
             val from = unquote(cells[0])
             cells[1].split("/").map { destination ->
@@ -94,31 +159,29 @@ internal object Section11 {
         if (expanded.isEmpty()) {
             fail("§11.2's row block parsed to zero transitions in ${specPath()}")
         }
-        expanded.toSet()
+        return expanded.toSet()
     }
 
-    /** The transcribed table, in file order, so duplicate lines remain visible. */
-    internal fun transcribed(): List<Transition> {
-        // A missing path fails inside VendoredFile, naming every file that was generated.
-        val file = VendoredFile(TRANSITIONS_PATH)
-        val rows = file.readLines()
+    /** The psv lines it is given, as triples, in the order they arrived. */
+    private fun parseTranscribed(psvLines: List<String>, location: String): List<Transition> {
+        val rows = psvLines
             .map { it.trim() }
             .filter { line -> line.isNotEmpty() && !line.startsWith("#") }
             .map { line ->
                 val parts = line.split("|").map { it.trim() }
                 if (parts.size != 3) {
                     fail(
-                        "every data line of ${file.location} is " +
+                        "every data line of $location is " +
                             "`<spec line> | <from> | <to>`; this one has ${parts.size} " +
                             "field(s): $line",
                     )
                 }
                 val lineNumber = parts[0].toIntOrNull()
-                    ?: fail("the first field of ${file.location} is a spec line number: $line")
+                    ?: fail("the first field of $location is a spec line number: $line")
                 Transition(lineNumber, parts[1], parts[2])
             }
         if (rows.isEmpty()) {
-            fail("${file.location} carries no data lines at all")
+            fail("$location carries no data lines at all")
         }
         return rows
     }
@@ -139,6 +202,7 @@ internal object Section11 {
      * into trimmed cells.
      */
     private fun tableRows(
+        specLines: List<String>,
         heading: String,
         expectedColumns: Int,
         expectedFirstHeaderCell: String,
