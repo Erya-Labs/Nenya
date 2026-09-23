@@ -34,6 +34,17 @@ public object NenyaKind {
     /** NIP-22 comment — a public bid, scoped to a listing coordinate (§6). */
     public const val PUBLIC_BID: Int = 1111
 
+    /** NIP-59 seal — the rumor, encrypted to one reader and signed by the sender's real key (§7.1). */
+    public const val SEAL: Int = 13
+
+    /**
+     * NIP-59 gift wrap — the seal, encrypted to the addressee and signed by a throwaway key (§7.1).
+     *
+     * §7.1 step 3: "The kind is `1059` and only `1059`; `21059` is defined elsewhere for another
+     * purpose and MUST NOT be used here."
+     */
+    public const val GIFT_WRAP: Int = 1059
+
     /** NIP-17 free-text chat inside an order thread (§7.4). Carries no terms and moves no state. */
     public const val CHAT: Int = 14
 

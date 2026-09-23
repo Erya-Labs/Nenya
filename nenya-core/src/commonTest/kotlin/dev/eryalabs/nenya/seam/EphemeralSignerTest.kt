@@ -35,7 +35,13 @@ class EphemeralSignerTest {
         /** A §4.1 canonical serialisation is opaque to these fakes; any distinctive text will do. */
         const val SERIALISATION: String = "[0,\"a\",1,1059,[],\"the fakes never parse this\"]"
 
-        /** The fakes this file exercises, by name. See [every fake in this file is exercised]. */
+        /**
+         * The fakes the exercise covers, by name. See [every fake in this file is exercised].
+         *
+         * The first eight are `SeamCryptoFakes.kt`'s; the rest are the misbehaving ones beside
+         * them in `SeamMisbehavingFakes.kt`, which §7.1's write path needs and which the same
+         * floor covers — see [exerciseEveryCryptoFake] for why they are one set and not two.
+         */
         val EXERCISED_BY_NAME: Set<String> = setOf(
             "FakeKey",
             "FakeCryptoSigner",
@@ -45,6 +51,18 @@ class EphemeralSignerTest {
             "FixedEphemeralSigners",
             "LyingEphemeralSigners",
             "AllOnesRandomness",
+            "Nip44PayloadSigner",
+            "Nip44PayloadEphemeralSigners",
+            "ScriptedEphemeralSigners",
+            "ShortPublicKeySigner",
+            "NoEncryptionSigner",
+            "EmptyCiphertextSigner",
+            "NonAsciiCiphertextSigner",
+            "OversizedCiphertextSigner",
+            "NoSignatureSigner",
+            "ShortSignatureSigner",
+            "LyingNip44PayloadSigner",
+            "LyingNip44PayloadEphemeralSigners",
         )
     }
 
@@ -496,8 +514,8 @@ class EphemeralSignerTest {
 }
 
 /**
- * Calls every fake in `SeamCryptoFakes.kt` at least once and returns the names of the objects it
- * actually called.
+ * Calls every fake in `SeamCryptoFakes.kt` **and** in `SeamMisbehavingFakes.kt` at least once, and
+ * returns the names of the objects it actually called.
  *
  * The names come from [runtimeSimpleName] over the **instances**, never from a list written out
  * beside them: a hand-written return value would name whatever its author last remembered, and
@@ -505,6 +523,11 @@ class EphemeralSignerTest {
  * reflective one in `SeamFakeCoverageTest`, so the two cannot drift — the JVM side asserts every
  * name here is a real class in the compiled test tree, and that every `EphemeralSigners`
  * implementation in that tree is among them.
+ *
+ * The misbehaving fakes beside T30's are folded in through [exerciseEveryMisbehavingFake] rather
+ * than given a second floor of their own, precisely because that reflective rule reads **one**
+ * function: a second set nobody unioned in would leave every fake in the second file outside the
+ * sweep, which is the shape of coverage claim this floor exists to refuse.
  */
 internal fun exerciseEveryCryptoFake(): Set<String> {
     val serialisation = "[0,\"a\",1,1059,[],\"coverage\"]"
@@ -538,5 +561,5 @@ internal fun exerciseEveryCryptoFake(): Set<String> {
     exercise(LyingEphemeralSigners()) { it.fresh().provided() }
     exercise(AllOnesRandomness()) { it.randomBytes(1).provided() }
 
-    return exercised
+    return exercised + exerciseEveryMisbehavingFake()
 }
