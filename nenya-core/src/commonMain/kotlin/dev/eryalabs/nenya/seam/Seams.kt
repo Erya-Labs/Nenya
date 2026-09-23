@@ -5,15 +5,18 @@ import dev.eryalabs.nenya.money.Msat
 /**
  * The marker every one of §3's seams carries.
  *
- * §3 names four things a Nenya implementation obtains from the client that embeds it — signer,
- * relay transport, wallet, clock and randomness — and says all of them MUST be treated as
- * untrusted with respect to state. [Secp256k1Ops] is a fifth, split out of the signer because
- * §17 lets an implementation omit BIP-340 verification while still signing through a NIP-55
- * signer app, and the two therefore fail independently.
+ * §3 names five things a Nenya implementation obtains from the client that embeds it — signer,
+ * one-time signer, relay transport, wallet, clock and randomness — and says all of them MUST be
+ * treated as untrusted with respect to state. Two of §3's rows become two interfaces each here:
+ * "clock and randomness" is [NenyaClock] and [Randomness], because a client can have an
+ * authoritative clock without a cryptographically secure source; and [Secp256k1Ops] is split out
+ * of the signer because §17 lets an implementation omit BIP-340 verification while still signing
+ * through a NIP-55 signer app, so the two fail independently. [EphemeralSigners] is §3's own
+ * second row rather than a split of the first — see its KDoc.
  *
  * ### Sealed on purpose
  *
- * §3's list is closed. A client implements [Signer] or [Wallet]; it does not invent a sixth seam
+ * §3's list is closed. A client implements [Signer] or [Wallet]; it does not invent an eighth seam
  * and expect this library to consult it. Sealing `Seam` says that in the type system, and gives
  * the test suite something to enumerate: the fail-closed sweep discovers every seam by asking
  * which interfaces in this package extend this one, so a seam added later without a fail-closed
@@ -57,12 +60,25 @@ public interface Signer : Seam {
     public fun publicKey(): SeamAnswer<String>
 
     /**
-     * A BIP-340 signature over [canonicalSerialisation], as 128 lowercase hex characters.
+     * A BIP-340 signature over the **SHA-256 of [canonicalSerialisation]**, as 128 lowercase hex
+     * characters.
      *
-     * @param canonicalSerialisation the NIP-01 canonical serialisation of §4.1 — the bytes
-     *   whose SHA-256 is the event id. Passed rather than an event object because this library
-     *   has no event type yet, and passing the exact bytes is what makes §3's "no claim about
-     *   what was signed" enforceable by the caller.
+     * §4.1 is explicit: "a signature on a nostr event is over the 32-byte event id and nothing
+     * else" — the raw 32 bytes the `id` field spells in hex, not the serialisation, and not a
+     * digest of it taken a second time. An implementer who read this KDoc's earlier wording, "a
+     * BIP-340 signature over [canonicalSerialisation]", and signed the serialisation itself would
+     * produce events every relay on the network considers forged.
+     *
+     * ### Why the parameter is still the serialisation and not the id
+     *
+     * A signer app is the party that shows the user what they are about to sign, and 32 bytes of
+     * hex are not something a human can consent to. Handing over the exact bytes also keeps §3's
+     * "no claim about *what* was signed" enforceable: the caller recomputes the id from the same
+     * serialisation it passed (§4.1 requires it to, before anything else), so the seam is never
+     * the source of the thing the signature is checked against.
+     *
+     * @param canonicalSerialisation the NIP-01 canonical serialisation of §4.1. The implementation
+     *   hashes it with SHA-256 and signs the resulting 32 bytes.
      */
     public fun signEvent(canonicalSerialisation: String): SeamAnswer<String>
 
@@ -85,6 +101,76 @@ public interface Signer : Seam {
 
         /** The fail-closed default: signs nothing, decrypts nothing, says so. */
         public val FAIL_CLOSED: Signer = FailClosedSigner
+    }
+}
+
+/**
+ * The one-time signer seam (§3, §7.1): a source of throwaway keypairs, one per gift wrap.
+ *
+ * §7.1 step 3 requires every `kind:1059` gift wrap be signed by "a freshly generated keypair, new
+ * for every single wrap", and step 4 requires the two copies of a message — one to the recipient,
+ * one to the sender's own key — use **different** throwaway keypairs, neither of them a key either
+ * party uses elsewhere. A wrap signed by a key that appears twice links the two wraps, which is
+ * the correlation the whole construction exists to remove.
+ *
+ * ### Why this is a seam of its own and not a method on [Signer]
+ *
+ * §3 gives it its own row for a reason this library feels directly: a NIP-55 signer app holds one
+ * user key and cannot mint throwaway keys at all, so the two abilities fail **independently**. A
+ * client with a perfectly good remote signer may have no way to satisfy this seam, and must be
+ * able to say so by leaving it at [FAIL_CLOSED] without also losing its ability to sign. This is
+ * the same reason [Secp256k1Ops] is split out of [Signer], and the split is what lets §17's
+ * capability surface report exactly which of the three is missing.
+ *
+ * ### Why a whole [Signer] and not a signing function
+ *
+ * A gift wrap is both **signed** and **NIP-44-encrypted** with the throwaway key (§3, §7.1): the
+ * same key must produce a BIP-340 signature over the wrap and a NIP-44 conversation key with the
+ * addressee. A seam returning only a signature could not do the second. The obvious alternative —
+ * this library draws 32 random bytes from [Randomness] and asks the client to sign and encrypt
+ * *with them* — is exactly the design §3 rules out in as many words ("no secret key crosses this
+ * boundary in either direction"), and §12 item 11 forbids besides; this package's own published
+ * surface is pinned against it, so a `fresh(secretKey: ByteArray)` would turn the suite red.
+ *
+ * ### Freshness is the client's contract, and this library does not claim to check it
+ *
+ * §3's table is blunt about what MUST NOT be accepted from this seam: **any claim that the keypair
+ * is fresh.** Freshness cannot be observed from outside — a seam handing out the same key every
+ * time is indistinguishable, call by call, from one that does not, and the only way to catch it
+ * would be to keep a store of every wrap key ever used, which is the sort of index §7.2 exists to
+ * discourage. So this library keeps no such store and reports no such check. What §7.1 does have
+ * it verify is narrower and purely local: that the key equals neither party's key, and that it
+ * differs between the two copies of one message. A client whose implementation returns a
+ * long-lived key has broken the contract stated here, and §13 says this library does not defend
+ * its user against the client embedding it.
+ */
+public interface EphemeralSigners : Seam {
+
+    /**
+     * A [Signer] over a keypair generated for this call alone, never handed out before and never
+     * again.
+     *
+     * The returned signer is used for exactly one gift wrap and then dropped. Its
+     * [Signer.publicKey] is the wrap's `pubkey`, its [Signer.signEvent] produces the wrap's `sig`,
+     * and its [Signer.nip44Encrypt] encrypts the seal to the addressee — all three with the same
+     * throwaway key, which is why this returns a whole signer.
+     *
+     * Every call MUST produce a new keypair. That is a promise the client makes and this library
+     * cannot verify; see this interface's note.
+     */
+    public fun fresh(): SeamAnswer<Signer>
+
+    public companion object {
+
+        /**
+         * The fail-closed default: mints no keypair, so no gift wrap can be built.
+         *
+         * Deliberately not "derive one from [Randomness]". A default that quietly produced a
+         * keypair here would be this library performing key generation — cryptography it has no
+         * dependency for and no human sign-off to add — and would report a capability it does not
+         * have.
+         */
+        public val FAIL_CLOSED: EphemeralSigners = FailClosedEphemeralSigners
     }
 }
 
@@ -390,9 +476,20 @@ public interface Secp256k1Ops : Seam {
     /**
      * BIP-340 Schnorr verification.
      *
+     * ### The contract this library relies on is a 32-byte event id, and only that
+     *
+     * BIP-340 itself is defined over arbitrary-length messages, and the vendored vectors exercise
+     * 0, 1, 17 and 100 bytes alongside the usual 32 — but every call this library will ever make
+     * passes an event id, because §4.1 says a nostr signature is over the 32 bytes the `id` field
+     * spells and nothing else. So an adapter MAY answer [SeamAnswer.Unavailable] for a [message]
+     * of any other length, and is conformant in doing so; it MUST NOT answer
+     * [SignatureVerdict.VALID] for one it did not actually verify. The earlier wording promised
+     * "a message of any length", which asked adapters for a generality no caller here needs and
+     * which a wrapper around an id-only signing API cannot honestly provide.
+     *
      * @param publicKeyXOnly the 32-byte x-only public key.
-     * @param message the message, of any length — BIP-340 is defined over arbitrary-length
-     *   messages and the vendored vectors exercise 0, 1, 17 and 100 bytes alongside the usual 32.
+     * @param message the message: a 32-byte event id on every path this library takes. An
+     *   implementation MAY answer [SeamAnswer.Unavailable] for any other length.
      * @param signature the 64-byte signature.
      */
     public fun verifySchnorr(
@@ -432,6 +529,14 @@ private object FailClosedSigner : Signer {
         SeamAnswer.unavailable(SeamCapability.NIP44_DECRYPTION)
 
     override fun toString(): String = "Signer.FAIL_CLOSED"
+}
+
+private object FailClosedEphemeralSigners : EphemeralSigners {
+
+    override fun fresh(): SeamAnswer<Signer> =
+        SeamAnswer.unavailable(SeamCapability.EPHEMERAL_SIGNER)
+
+    override fun toString(): String = "EphemeralSigners.FAIL_CLOSED"
 }
 
 private object FailClosedRelayTransport : RelayTransport {

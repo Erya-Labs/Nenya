@@ -34,6 +34,18 @@ public enum class SeamCapability(
     /** NIP-44 v2 decryption of a seal or a gift wrap (§3, §7.1). */
     NIP44_DECRYPTION("NIP-44 v2 decryption of a seal or a gift wrap"),
 
+    /**
+     * A signer over a freshly generated throwaway keypair, one per gift wrap (§3, §7.1).
+     *
+     * The capability is **minting the keypair**, not any claim about it. §3 says an
+     * implementation MUST NOT accept from that seam any claim that the keypair is fresh, and
+     * this library reports no such check: freshness is unobservable from outside the seam. So
+     * this constant staying in [dev.eryalabs.nenya.conformance.Capabilities]`.NOT_PERFORMED_HERE`
+     * says what it says everywhere else — the operation is the embedding client's — and never
+     * that a key was found stale.
+     */
+    EPHEMERAL_SIGNER("a signer over a freshly generated throwaway keypair"),
+
     /** Handing an event to a relay (§3). The relay's answer is a claim, never a fact. */
     RELAY_PUBLISH("publishing an event to a relay"),
 

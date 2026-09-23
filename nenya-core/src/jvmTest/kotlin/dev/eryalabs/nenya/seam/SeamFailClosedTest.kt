@@ -50,14 +50,18 @@ class SeamFailClosedTest : PortableSeamFailClosedTest() {
     private companion object {
 
         /**
-         * §3's table names four seams — signer, relay transport, wallet, clock and randomness —
-         * and [Secp256k1Ops] is a fifth, split out of the signer because §17 lets an
-         * implementation omit BIP-340 verification while still signing through a NIP-55 signer
-         * app. By name rather than by count, so a sweep pointed at the wrong classpath entry
-         * cannot pass on whatever it happened to find.
+         * §3's table names five seams — signer, one-time signer, relay transport, wallet, clock
+         * and randomness. Seven interfaces here, because two of those rows split: "clock and
+         * randomness" into [NenyaClock] and [Randomness], and [Secp256k1Ops] out of the signer,
+         * because §17 lets an implementation omit BIP-340 verification while still signing through
+         * a NIP-55 signer app. [EphemeralSigners] is **not** such a split — it is §3's own second
+         * row, and it is here because §7.1's gift wrap needs a throwaway keypair a NIP-55 signer
+         * app cannot mint. By name rather than by count, so a sweep pointed at the wrong classpath
+         * entry cannot pass on whatever it happened to find.
          */
         val EXPECTED_SEAMS: Set<String> = setOf(
             "Signer",
+            "EphemeralSigners",
             "RelayTransport",
             "Wallet",
             "NenyaClock",
@@ -151,6 +155,17 @@ class SeamFailClosedTest : PortableSeamFailClosedTest() {
             )
         }
 
+        /**
+         * The predicate the sweep judges every answer by, extracted so the negative control can
+         * be fed **this** function rather than a copy of it.
+         *
+         * Inlined as `entry.answer is SeamAnswer.Unavailable` in the loop below, a control could
+         * only ever re-state the check it was meant to falsify, and a sweep whose predicate had
+         * been loosened would take the control down with it silently. Nothing is removed by the
+         * extraction: the loop asserts on exactly this.
+         */
+        fun failsClosed(answer: Any?): Boolean = answer is SeamAnswer.Unavailable
+
         /** Every (seam, method) pair, invoked on the fail-closed default. */
         fun sweep(): List<SweptMethod> = seamInterfaces().flatMap { type ->
             val failClosed = failClosedOf(type)
@@ -193,12 +208,47 @@ class SeamFailClosedTest : PortableSeamFailClosedTest() {
         )
         for (entry in swept) {
             assertTrue(
-                entry.answer is SeamAnswer.Unavailable,
+                failsClosed(entry.answer),
                 "${entry.where} answered ${entry.answer}. Every default in this package must fail " +
                     "closed with an explicit unavailable — never a value, and never a negative " +
                     "verdict, which a caller cannot tell apart from 'checked, and it failed'.",
             )
         }
+    }
+
+    /**
+     * The negative control under the sweep: a seam that does **not** fail closed is caught by
+     * [failsClosed] — the sweep's own predicate, not a re-statement of it.
+     *
+     * `EphemeralSigners.FAIL_CLOSED` is a companion `val` and cannot be altered, so the control
+     * cannot mutate the real default and watch the sweep go red. It declares a probe
+     * implementation of the same interface instead, hands it to the same predicate the loop above
+     * judges every answer by, and asserts the predicate rejects it. Without this, "every default
+     * answers unavailable" would be equally true of a predicate rewritten to `true`.
+     */
+    @Test
+    fun `the sweep's own predicate rejects a seam that answers rather than failing closed`() {
+        val probe: EphemeralSigners = object : EphemeralSigners {
+            override fun fresh(): SeamAnswer<Signer> = SeamAnswer.Provided(FakeSigner())
+        }
+
+        val answered = probe.fresh()
+        val failedClosed = EphemeralSigners.FAIL_CLOSED.fresh()
+
+        assertFalse(
+            failsClosed(answered),
+            "the sweep's predicate accepted $answered, so 'every default fails closed' is a " +
+                "statement about nothing: a default rewritten to hand out a signer would pass it",
+        )
+        assertTrue(
+            failsClosed(failedClosed),
+            "and the same predicate must still accept the real default, or the control above is " +
+                "measuring a predicate that rejects everything",
+        )
+        assertEquals(
+            SeamCapability.EPHEMERAL_SIGNER,
+            (failedClosed as SeamAnswer.Unavailable).capability,
+        )
     }
 
     @Test
@@ -234,8 +284,8 @@ class SeamFailClosedTest : PortableSeamFailClosedTest() {
      *
      * The bijection test below is invariant under a permutation: swapping the capabilities reported
      * by `Signer.publicKey` and `Signer.signEvent` keeps the reported set equal to
-     * `SeamCapability.entries` with no duplicates, and stays green. Only two of the thirteen
-     * constants were otherwise pinned to their method. This pins all thirteen.
+     * `SeamCapability.entries` with no duplicates, and stays green. Only two of the constants were
+     * otherwise pinned to their method. This pins all fourteen.
      */
     @Test
     fun `each capability is reported by the specific method it names`() {
@@ -244,6 +294,7 @@ class SeamFailClosedTest : PortableSeamFailClosedTest() {
             "Signer.signEvent" to SeamCapability.EVENT_SIGNATURE,
             "Signer.nip44Encrypt" to SeamCapability.NIP44_ENCRYPTION,
             "Signer.nip44Decrypt" to SeamCapability.NIP44_DECRYPTION,
+            "EphemeralSigners.fresh" to SeamCapability.EPHEMERAL_SIGNER,
             "RelayTransport.publish" to SeamCapability.RELAY_PUBLISH,
             "RelayTransport.request" to SeamCapability.RELAY_REQUEST,
             "Wallet.payInvoice" to SeamCapability.WALLET_PAYMENT,
@@ -320,8 +371,9 @@ class SeamFailClosedTest : PortableSeamFailClosedTest() {
         val swept = sweep()
         // Every *rendering* a byte parameter could reach a log in, not just the canonical one. A
         // sweep looking only for the hex form misses `contentToString()`, which shares no substring
-        // with it — and `Secp256k1Ops.verifySchnorr`'s `message` is a §4.1 canonical serialisation,
-        // which carries an `["order", ...]` tag. Found by a reviewer's surviving mutation.
+        // with it — and `Secp256k1Ops.verifySchnorr`'s `message` is a §4.1 **event id**, the 32
+        // bytes §12 item 11's rule about identifiers is written over. Found by a reviewer's
+        // surviving mutation.
         val bytes = SeamFixtures.bytes(32, stream = 32L)
         val renderings = listOf(
             MARKER,

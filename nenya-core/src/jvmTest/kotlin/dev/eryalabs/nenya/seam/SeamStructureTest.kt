@@ -32,6 +32,7 @@ class SeamStructureTest {
         val EXPECTED_BY_NAME: Set<String> = setOf(
             "Seam",
             "Signer",
+            "EphemeralSigners",
             "RelayTransport",
             "Wallet",
             "NenyaClock",
@@ -231,7 +232,7 @@ class SeamStructureTest {
             .filter { !it.isInterface && Seam::class.java.isAssignableFrom(it) }
 
         assertTrue(
-            implementations.size >= 6,
+            implementations.size >= 7,
             "found only ${implementations.map { it.simpleName }} — one fail-closed default per seam " +
                 "is the minimum, so this sweep is looking at the wrong place",
         )
