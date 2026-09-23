@@ -30,32 +30,33 @@
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
 #
-# Regenerated for revision `1.6`, which added decision E's verification deadline. Two kinds of
-# edit moved these lines. §0's history row and compatibility paragraphs, and §10.4's new
-# paragraph, inserted 28 lines above §11.2's row block and none inside it, so every line that
-# stood before is its revision `1.5` value plus 28. Inside the block, one line was **added**:
-# the second `released → disputed` row, last in the table, at line 1730. The (from, to) column
-# pair is therefore unchanged as a **set** — revision `1.6` states a new trigger for a pair the
-# table already carried and no new pair — and `TransitionTotalityTest`'s pair equality is
-# untouched by this regeneration.
+# Regenerated for revision `1.7`, the gift-wrap envelope revision, which edits §0, §3, §4.1,
+# §4.3, §7.1, §7.2 and §18 and does not touch §11.2 at all. Every edit but §18's sits above
+# §11.2's row block and none sits inside it: §0's history row and compatibility paragraphs,
+# §3's seam row and its explanatory paragraph, §4.1's signature paragraph, §4.3's envelope
+# bounds, §7.1's two procedures and §7.2's two attribution bullets together inserted 165
+# lines above the block, so every line below is its revision `1.6` value plus 165. No line
+# was added, removed or reworded inside the block, so this regeneration changes the first
+# column only: the set of (from, to) pairs is **identical** to revision `1.6`'s, and
+# `TransitionTotalityTest`'s pair equality is untouched.
 
-1716 | — | proposed
-1717 | proposed | accepted
-1718 | proposed | cancelled
-1719 | proposed | expired
-1720 | accepted | committed
-1721 | accepted | cancelled
-1721 | accepted | expired
-1722 | committed | awaiting_payment
-1723 | committed | cancelled
-1723 | committed | expired
-1723 | committed | disputed
-1724 | awaiting_payment | paid
-1725 | awaiting_payment | cancelled
-1725 | awaiting_payment | expired
-1725 | awaiting_payment | disputed
-1726 | paid | released
-1727 | paid | disputed
-1728 | released | settled
-1729 | released | disputed
-1730 | released | disputed
+1881 | — | proposed
+1882 | proposed | accepted
+1883 | proposed | cancelled
+1884 | proposed | expired
+1885 | accepted | committed
+1886 | accepted | cancelled
+1886 | accepted | expired
+1887 | committed | awaiting_payment
+1888 | committed | cancelled
+1888 | committed | expired
+1888 | committed | disputed
+1889 | awaiting_payment | paid
+1890 | awaiting_payment | cancelled
+1890 | awaiting_payment | expired
+1890 | awaiting_payment | disputed
+1891 | paid | released
+1892 | paid | disputed
+1893 | released | settled
+1894 | released | disputed
+1895 | released | disputed

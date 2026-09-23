@@ -21,7 +21,7 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.6`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.7`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
 **Revision history**
@@ -35,6 +35,7 @@ nothing in it is deployed, and the identifiers it reserves are not registered.
 | `1.4` | 2026-09-17 | Appendix C corrected against BOLT-11 itself, and completed as a reader specification. Three errors of fact repaired: BOLT-11 does **not** define invoices as all-lowercase (it prescribes uppercase for QR codes and its own example 13 is all uppercase), so refusing an uppercase invoice is stated as **Nenya's** rule and not as BOLT-11's (§4.3, Appendix C); a tagged field of the wrong length is **skipped** as unknown rather than rejecting the invoice, which is BOLT-11's own reader rule; and the payment secret (`s`) is now REQUIRED. Appendix C additionally states, rather than leaves to the reference implementation, the reader rules Nenya enforces, and states which BOLT-11 rules Nenya does **not** perform and MUST NOT report as performed. No tag meaning, fee arithmetic or state changes. |
 | `1.5` | 2026-09-19 | Four refusals stated where the document previously named a sender, or presumed a uniqueness, without saying what to do about anything else. §7.6: an implementation MUST know the provider's key independently of the proposal and MUST reject a `type=3` acceptance sealed by any other key, the buyer's included. §8.6: a `payee=provider` `type=2` MUST arrive under a seal whose pubkey is that same provider key, the counterpart to §8.7's rule for the fee side; a second `type=2` for an `(order, payee)` already accepted MUST be rejected rather than replacing the first; an invoice already accepted for one payee on an order MUST be rejected for any other payee on that order; and a `type=2` whose invoice has already expired at the moment it would be accepted MUST be rejected then rather than at settlement. No tag meaning, fee arithmetic or state changes. |
 | `1.6` | 2026-09-23 | A **verification deadline** out of `released`, stated as a second `released → disputed` row in §11.2. An order whose buyer never completes §10.4 previously sat in `released` for ever: a blob refused for its length or for the download bound is not a hash mismatch, so no trigger existed for it, and neither did one for a dead URL or a buyer who simply never looks. The deadline is **local** rather than a new wire term — the clock reading taken at release plus a window the implementation applies and displays, falling back to the reading taken at `paid` and then to `deliver_by` — and where none of the three was ever recorded the order reports that it has no deadline rather than that it is pending. §11.2's "there is no third deadline" paragraph is replaced accordingly; §10.4, §11.4 and §18 record the consequence. No tag meaning, fee arithmetic, evidence rule or state changes: a trigger is added to a `(from, to)` pair the table already carried. |
+| `1.7` | 2026-09-23 | The gift-wrap envelope, written down as a procedure an implementer can follow, and the bounds that make it representable. §4.3's default bounds **refused real gift wraps**: NIP-44 pads a plaintext to a power-of-two-derived size, so a rumor's JSON grows twice on the way out, and a wrap's `content` passed the 16 KiB default once the rumor's JSON exceeded 7 168 bytes — a conformant implementation had to refuse to open a 10 KB chat message. A `kind:13` seal and a `kind:1059` wrap are therefore bounded by NIP-44 instead: decrypted plaintext at most 65 535 bytes, wrap `content` at most 87 472 characters, rumor JSON at most 40 960 bytes on write. The plaintext limit follows the official NIP-44 vectors and every deployed application rather than the extended-length text a later NIP-44 revision added (§4.3). §7.1 is restated as a numbered write procedure and a numbered read procedure, with six refusals it previously left unstated; §3 gains the one-time signer seam the wrap needs; §4.1 states what a nostr signature is over; §7.2 says when a message MAY be reported as signature-verified; §18 records what the gift wrap can be checked against offline. No tag meaning, fee arithmetic, evidence rule or state changes. |
 
 Revision `1.1` changes no tag meaning, no fee arithmetic, no evidence rule and no state, so
 the `["nenya", "1"]` version tag is unchanged and revision `1.0` and revision `1.1` are wire
@@ -142,6 +143,41 @@ forbids substituting a time from anywhere else. That order does stay in `release
 implementation MUST tell its user that it has no deadline to check rather than showing it as
 pending, which is the same treatment §11.2 already gives a `proposed` order whose terms carry
 no `expiration`.
+
+Revision `1.7` changes no tag meaning, no fee arithmetic, no evidence rule and no state, and
+the `["nenya", "1"]` version tag is unchanged. It adds no field, no tag, no message and no
+status token. Everything it does is confined to the envelope every private message already
+travelled in, and three of its consequences are worth naming rather than leaving to be
+discovered.
+
+- **A bound is raised, and it is raised because the old one was unusable.** §4.3's 16 KiB
+  default for `content` is right for an ordinary event and wrong for a `kind:1059`, whose `content`
+  is a base64 NIP-44 payload over a *second* NIP-44 payload. Each layer prefixes a version
+  byte, a 32-byte nonce and a 2-byte length, pads the plaintext to a power-of-two-derived size
+  and appends a 32-byte MAC, and base64 then costs a further third — so a rumor of 7 169 bytes
+  of JSON produced a wrap an implementation obeying §4.3 had to refuse. Raising the bound for
+  these two kinds refuses nothing that was accepted before; it accepts wraps that every
+  deployed NIP-17 client already emits. The **rumor** keeps §4.3's ordinary defaults, so the
+  content a user actually writes is bounded exactly as it was.
+- **The rumor bound is a write-side rule.** An implementation MUST NOT *emit* a rumor whose
+  JSON exceeds 40 960 bytes, because anything from 40 961 upwards pads to a seal whose JSON
+  exceeds NIP-44's plaintext limit and therefore cannot be wrapped at all. Stating it as a
+  refusal on write turns an unrepresentable message into an error at the sender rather than a
+  wrap the recipient cannot open.
+- **Six refusals §7.1 previously left unstated are now MUSTs**: a duplicate key in event JSON,
+  a rumor carrying a `sig` key, a seal with non-empty `tags`, a wrap of any kind other than
+  `1059`, a wrap whose single `p` tag is not the reader's own key, and the rumor size bound
+  above. Each refuses input the old text never permitted — NIP-59 already required an unsigned
+  inner event and an empty-tagged seal — so an implementation conformant with revision `1.6`
+  emits nothing revision `1.7` rejects. Per Appendix B that is a **tightening** and not a
+  version change.
+
+Revision `1.7` follows the same interoperability precedent §4.1 set for canonical JSON
+escaping and revision `1.4` set for Appendix C. NIP-44's vendored text now describes an
+extended six-byte length prefix; its own published vectors do not, listing 65 536 among the
+plaintext lengths encryption MUST refuse, and no deployed application emits the extended form.
+Where the letter of a document and every working implementation disagree, interoperability
+wins: §4.3 follows the vectors.
 
 Some decisions are still **not yet made**. They are marked `OPEN-n` inline and indexed in
 §16.2; the ones already closed are recorded with their rationale in §16.1. An OPEN item is a
@@ -263,15 +299,25 @@ RFC 2119.
 
 ## 3. Roles and the seams between them
 
-A Nenya implementation is a library embedded in a client. It obtains four things from that
-client and MUST treat all four as untrusted with respect to state:
+A Nenya implementation is a library embedded in a client. It obtains five things from that
+client and MUST treat all five as untrusted with respect to state:
 
 | Seam | Supplies | What Nenya MUST NOT accept from it |
 |---|---|---|
 | Signer | public key, event signatures, NIP-44 encrypt/decrypt | any claim about *what* was signed, beyond the bytes returned |
+| One-time signer | a signer over a **freshly generated** keypair, used for exactly one gift wrap | any claim that the keypair is fresh. Freshness cannot be observed from outside the seam — it is the client's contract to keep, and §17 forbids reporting it as checked. What an implementation does verify itself is narrower, and is exactly what §7.1 states: that the key equals neither party's key, and that it differs between the two copies |
 | Relay transport | events in, events out | any claim that an event is valid, current, or complete |
 | Wallet | "pay this invoice", invoices for the user's own funds | any claim that a payment succeeded (see §9) |
 | Clock and randomness | current time, random bytes | nothing structural; but every deadline MUST be evaluated against this clock, never against a counterparty's `created_at` (§4.6) |
+
+The one-time signer is a seam of its own and not a mode of the signer above, because a
+`kind:1059` gift wrap is both **signed** and **NIP-44-encrypted** with the throwaway key
+(§7.1): the same key must produce a BIP-340 signature and a NIP-44 conversation key with the
+addressee. A seam that returned only a signature could not do the second, and one that
+returned the secret key could do both at the cost of the property this table exists to
+protect. **No secret key crosses this boundary in either direction.** The implementation
+asks the seam for the throwaway public key, for a signature, and for an encryption; it never
+sees, stores or logs the secret behind them (§12, §14).
 
 This is not defensive style. It is the reason the payment-evidence rule and the signed fee
 term exist: both are cases where the natural, convenient design is to believe an injected
@@ -359,6 +405,15 @@ Implementations MUST compute the id themselves and MUST reject any received even
 `id` does not match its recomputed value, **before any other processing**. Signatures are
 BIP-340 Schnorr over secp256k1.
 
+**A signature on a nostr event is over the 32-byte event id and nothing else.** The `sig`
+field is a BIP-340 signature whose message is the raw 32 bytes the `id` field spells in hex,
+not the canonical serialisation, not a hash of the serialisation taken a second time, and not
+any other digest. This is NIP-01's rule and it is restated here because it is the step at
+which the id check above becomes load-bearing: an implementation that verifies a signature
+against an id it has not recomputed has verified that somebody signed *a* 32-byte string, and
+learned nothing about the event carrying it. Recompute the id, reject on mismatch, and only
+then verify.
+
 Event-id computation is a pure function of the event and is the cheapest complete integrity
 check available. Signature verification requires secp256k1 and MAY be delegated to the
 embedding client; an implementation that cannot verify signatures MUST say so in its
@@ -442,6 +497,33 @@ be configurable, with defaults no larger than: 64 KiB serialised event, 512 tags
 1024 bytes per tag value, 16 KiB `content`, 64 `image` tags. A relay that returns a
 100 MiB "event" is not a hypothetical, and an unbounded parser is a denial of service in
 the buyer's client.
+
+**The defaults above govern ordinary events and the rumor. A `kind:13` seal and a
+`kind:1059` gift wrap are bounded by NIP-44 instead.** The defaults are not merely
+conservative for these two kinds, they are unusable: a wrap's `content` is base64 over a
+NIP-44 payload whose plaintext is the seal's JSON, which itself carries base64 over a NIP-44
+payload whose plaintext is the rumor's JSON, and NIP-44 pads each plaintext to a
+power-of-two-derived size. Under that 16 KiB default a wrap carrying a rumor of more than
+7 168 bytes of JSON had to be refused — a conformant implementation could not open a 10 KB
+chat message. That is what the bounds below replace, and the refusal they replace is no longer
+required of anybody. So, for these two kinds and only these two:
+
+- a **decrypted NIP-44 plaintext** is at least 1 and at most 65 535 bytes, which is what
+  NIP-44's published vectors require (they list 65 536 among the plaintext lengths encryption
+  MUST refuse) and what every deployed application implements. A later NIP-44 revision
+  describes a six-byte extended-length prefix; the vendored vectors predate it, nothing emits
+  it, and NENYA-1 follows the vectors — the same interoperability precedent §4.1 sets for
+  canonical JSON escaping and revision `1.4` sets for Appendix C;
+- a `kind:1059` wrap's `content` is at most 87 472 base64 characters, which is exactly the
+  encoding of the largest NIP-44 payload the bound above permits;
+- a **rumor's JSON is at most 40 960 bytes on write**. This is a bound on emitting, not on
+  reading: anything from 40 961 bytes upwards pads to a seal whose own JSON exceeds 65 535
+  bytes and therefore cannot be wrapped at all, so a sender that exceeds it produces a message
+  nobody can open. An implementation MUST refuse to emit one rather than wrap it.
+
+Every other default above still applies to a seal and a wrap — the tag count, the tag value
+length, and the whole-event bound an implementation sets for them. Nothing here relaxes a
+bound on a rumor, which is an ordinary event and keeps the ordinary defaults.
 
 ### 4.4 Money
 
@@ -859,21 +941,93 @@ relay.
 
 ### 7.1 Envelope
 
-Per NIP-17 and NIP-59:
+Per NIP-17 and NIP-59. The envelope is stated here as two numbered procedures, because the
+order of the steps is load-bearing in both directions and because several of the refusals
+below were previously implied by NIP-59 without being written down as rules a reader can
+check.
 
-1. Build an **unsigned rumor**: a normal event object with `id` and `created_at` present
-   and **no** `sig`.
-2. **Seal** it: NIP-44-encrypt the rumor into the `content` of a `kind:13`, with empty
-   `tags`, signed by the sender's real key.
-3. **Gift wrap** it: NIP-44-encrypt the seal into the `content` of a `kind:1059`, signed by
-   a **freshly generated random keypair, new for every single message**, tagged
-   `["p", "<recipient-pubkey>", "<relay-url>"]`.
-4. Send one gift wrap to the recipient and one to the sender's own key, so the sender can
-   reconstruct their own thread.
+**The payload at every layer is the JSON *object* form of the event** — `{"id":…,"pubkey":…,
+"created_at":…,"kind":…,"tags":…,"content":…,"sig":…}` — not §4.1's array serialisation, which
+exists only to be hashed. Strings inside it MUST be escaped by §4.1's rules, so that an
+implementation has exactly one escaping routine and a rumor's `content` survives the round
+trip byte for byte. An object carrying the **same key twice** MUST be rejected, at every
+layer: "first wins" and "last wins" are both defensible, which is exactly the problem (§4.3).
 
-`created_at` on both the seal and the wrap MUST be randomised up to two days into the past,
-drawn from the injected randomness source. An implementation that uses the true time on a
-seal reintroduces the timing correlation the whole construction exists to remove.
+**The write procedure.**
+
+1. Build an **unsigned rumor**: a normal event object with `id` and `created_at` present and
+   **no** `sig` key at all. The rumor's `created_at` is the **true** time — it is the only
+   timestamp in the envelope that is not randomised, and it is what orders the thread for the
+   two parties who can read it. The rumor's JSON MUST NOT exceed 40 960 bytes (§4.3); an
+   implementation MUST refuse to emit a larger one rather than produce a message nobody can
+   open.
+2. **Seal** it: NIP-44-encrypt the rumor's JSON into the `content` of a `kind:13`, with
+   `tags` **empty**, signed by the sender's real key.
+3. **Gift wrap** it: NIP-44-encrypt the seal's JSON into the `content` of a `kind:1059`,
+   signed by a **freshly generated keypair, new for every single wrap**, carrying exactly one
+   `["p", "<recipient-pubkey>", "<relay-url>"]` tag. The kind is `1059` and only `1059`;
+   `21059` is defined elsewhere for another purpose and MUST NOT be used here.
+4. Produce **two** copies: one addressed to the recipient and one addressed to the sender's
+   own key, so the sender can reconstruct their own thread. Each copy gets **its own seal**,
+   NIP-44-encrypted to that copy's addressee — a seal is encrypted to exactly one reader, so
+   the two copies cannot share one. The throwaway keypair MUST differ between the two copies,
+   and MUST equal neither party's key; a wrap signed by a key either party uses elsewhere
+   links the two.
+5. `created_at` on **each seal and each wrap** — four values in total, drawn independently —
+   MUST be randomised into the past, uniformly in `[now − 172 800, now]`, from the injected
+   randomness source (§3). No such value may lie in the future, and no implementation may
+   substitute the true time for one: a seal carrying the true time reintroduces exactly the
+   timing correlation the construction exists to remove.
+
+**The read procedure.** The steps MUST be applied **in this order**, and a rejection at any step
+stops the read: nothing below a failed step is attempted, and no part of the message is reported.
+Steps 1 to 3 cost no cryptography, which is why they come first — a wrap addressed to somebody
+else is discarded before a single decryption is attempted.
+
+1. **Id.** Recompute the wrap's `id` and reject on mismatch (§4.1).
+2. **Kind.** Reject any kind other than `1059`.
+3. **Recipient.** The wrap MUST carry exactly one `p` tag, and its value MUST be the reader's
+   own public key. Reject otherwise — **before** any decryption.
+4. **Wrap signature.** An implementation that verifies BIP-340 signatures MUST verify this one
+   against the wrap's `pubkey`, which is the throwaway key, and MUST reject the wrap if it does
+   not verify. Per §7.2 the verdict establishes no identity whatsoever; it establishes only that
+   the wrap reached the reader unaltered.
+5. **Decrypt** the wrap's `content` to the seal's JSON.
+6. **Seal.** Parse it, recompute its `id`, reject any kind other than `13`, and reject a seal
+   whose `tags` are **not empty**. An implementation that verifies BIP-340 signatures MUST verify
+   the seal's signature against the seal's `pubkey` and MUST reject the seal if it does not
+   verify.
+7. **Decrypt** the seal's `content` to the rumor's JSON.
+8. **Rumor.** Parse it and reject a rumor carrying a `sig` key **with any value at all**,
+   including an empty string or `null`: NIP-59 requires the inner event to be unsigned, and a
+   `sig` present is either a sender that does not understand the construction or an attempt to
+   have the rumor treated as independently signed. Recompute the rumor's `id` and reject on
+   mismatch.
+9. **§7.2.** Apply the attribution rule, which is what makes anything in the rumor binding.
+
+**Steps 4 and 6 are conditional on secp256k1, and deliberately so.** §17 permits an
+implementation to delegate or omit BIP-340 verification, and §7.2 requires such an
+implementation to perform the pubkey-equality check and report the message as
+authenticated-by-decryption only. So an implementation that cannot verify signatures MUST
+continue past steps 4 and 6 rather than discarding the message — NIP-44 decryption already
+authenticates the ciphertext, and a reader that dropped every message for want of a verifier it
+never claimed to have would be unable to receive anything at all. What is forbidden is verifying
+and ignoring the answer: an implementation that *does* verify MUST reject on a bad signature, and
+MUST NOT report a message as signature-verified on a verdict it did not obtain (§7.2, §17).
+
+**No timestamp anywhere in this envelope is grounds for rejection.** §4.6 already says an
+implementation MUST NOT reject a gift wrap or seal on timestamp grounds, and it is restated
+here because step 5 of the write procedure deliberately produces timestamps up to two days
+old: a reader that applied an ordinary freshness tolerance to them would discard conformant
+messages, and one that ordered a thread by them would order it by noise.
+
+**Two refusals are Nenya's own, and are stated as permissions rather than imposed.** An
+implementation MAY reject event JSON carrying an unknown **top-level** key — the seven NIP-01
+fields are the whole object, and an eighth is either a different protocol or an attempt to
+smuggle a value past a parser that ignores it — and MAY reject a message whose recipient
+equals its sender other than as the sender's own copy from step 4. Both are refusals Nenya
+applies to itself; neither is a MUST on another implementation, and neither affects what any
+conformant sender emits.
 
 ### 7.2 Attribution — the rule that makes a sealed term binding
 
@@ -897,6 +1051,17 @@ Consequently:
 - An implementation that cannot verify the seal's signature (no secp256k1; see §17) still
   MUST perform the pubkey-equality check, and MUST report messages in that mode as
   authenticated-by-decryption only, never as signature-verified.
+- An implementation that **did** verify the seal's signature, and found it valid over the
+  seal's recomputed id (§4.1), MAY report the message as signature-verified. That is a
+  permission and not an obligation: authenticated-by-decryption is always a truthful report,
+  and §17's rule against reporting an unverified thing as verified is the only one that binds.
+  An implementation that verifies the signature for some messages and not others MUST
+  distinguish them, because a single label covering both claims the stronger property for the
+  weaker case.
+- **The gift wrap's signature never affects attribution, whatever its verdict.** It is a
+  signature by the throwaway key over the wrap, so a valid one says only that the wrap reached
+  the reader unaltered. It attributes nothing, it does not corroborate the seal, and an
+  implementation MUST NOT report a message as signature-verified on the strength of it.
 
 ### 7.3 DM relay lists — `kind:10050`
 
@@ -2174,7 +2339,7 @@ externally-authored vectors rather than to the implementer's own understanding.
 | Event id serialisation | NIP-01 examples plus hand-built cases covering all seven shortcut escapes, at least one `\u00XX` control character (§4.1), a `0x7f` DEL emitted verbatim, non-BMP characters, empty tags, and empty content; plus negative controls for text with no UTF-8 encoding — a lone high surrogate, a lone low surrogate and a reversed pair, each rejected (§4.1) rather than hashed. Ids for the hand-built cases SHOULD be cross-checked against `nostr-tools` and `go-nostr` rather than against the implementer's own reading of NIP-01 |
 | Schnorr signatures | the BIP-340 CSV (19 cases), including the invalid ones |
 | NIP-44 encryption | `nip44.vectors.json` (128 cases), SHA-256 `269ed0f69e4c192512cc779e78c555090cebc7c785b609e338a62afc3ce25040` |
-| Gift wrap round trip | the two worked gift wraps in NIP-17's Examples section |
+| Gift wrap round trip | the two worked gift wraps in NIP-17's Examples section, plus NIP-59's worked seal and rumor. **What can be checked with no cryptography at all** — and therefore offline, by an implementation that delegates secp256k1 and NIP-44 to its embedding client — is that all four parse as event JSON under §7.1's object rules and that each one's `id` recomputes from §4.1's serialisation. That is the half of the envelope this document defines; decrypting them needs keys the examples do not publish. Note that NIP-59's worked **wrap** carries a trailing comma and is not strict JSON: it is a documentation example, not a vector, and a parser that accepts it is a parser that accepts malformed input from a relay. Use NIP-17's two for the wrap layer. Bound checks — 65 535-byte plaintext, 87 472-character wrap `content`, 40 960-byte rumor JSON (§4.3) — are derivable from NIP-44's own `calc_padded_len` vectors and need no keys either |
 | BOLT-11 parsing | the BOLT-11 Examples appendix |
 | Preimage verification | invoices with known preimages, **plus** negative controls: wrong preimage, 31-byte preimage, 33-byte preimage, uppercase hex, preimage of the wrong invoice |
 | Fee arithmetic | boundary cases at `bps = 0`, `bps = 10000`, the msat rounding example in §8.3, an overflow probe at the supply cap, and the non-zero-`bps`-but-zero-`fee_msat` case (`bps = 1`, `price_msat = 3000`) |
