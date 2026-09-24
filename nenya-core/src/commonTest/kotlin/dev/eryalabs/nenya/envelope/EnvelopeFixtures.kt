@@ -9,6 +9,7 @@ import dev.eryalabs.nenya.seam.Nip44PayloadSigner
 import dev.eryalabs.nenya.seam.RecordingRandomness
 import dev.eryalabs.nenya.seam.Secp256k1Ops
 import dev.eryalabs.nenya.seam.Signer
+import dev.eryalabs.nenya.seam.decrypted
 import dev.eryalabs.nenya.seam.provided
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
@@ -257,12 +258,12 @@ internal object EnvelopeFixtures {
         val wrapChecked = CheckedEvent.checkEventId(wrap.claimedIdHex, wrap.event, WRAP_LIMITS)
         assertEquals(NenyaKind.GIFT_WRAP, wrap.event.kind, "§7.1 step 3: the kind is 1059 and only 1059")
 
-        val sealJson = reader.nip44Decrypt(wrap.event.pubkey, wrap.event.content).provided()
+        val sealJson = reader.nip44Decrypt(wrap.event.pubkey, wrap.event.content).decrypted()
         val seal = EventJson.read(sealJson, SEAL_LIMITS)
         val sealChecked = CheckedEvent.checkEventId(seal.claimedIdHex, seal.event, SEAL_LIMITS)
         assertEquals(NenyaKind.SEAL, seal.event.kind, "§7.1 step 2: the seal is a kind:13")
 
-        val rumorJson = reader.nip44Decrypt(seal.event.pubkey, seal.event.content).provided()
+        val rumorJson = reader.nip44Decrypt(seal.event.pubkey, seal.event.content).decrypted()
         val rumor = EventJson.read(rumorJson)
         val rumorChecked = CheckedEvent.checkEventId(rumor.claimedIdHex, rumor.event)
         assertTrue(
@@ -297,7 +298,7 @@ internal object EnvelopeFixtures {
      */
     fun envelopeTimestamps(wrapJson: String, reader: FakeCryptoSigner): Pair<Long, Long> {
         val wrap = EventJson.read(wrapJson, WRAP_LIMITS)
-        val sealJson = reader.nip44Decrypt(wrap.event.pubkey, wrap.event.content).provided()
+        val sealJson = reader.nip44Decrypt(wrap.event.pubkey, wrap.event.content).decrypted()
         val seal = EventJson.read(sealJson, SEAL_LIMITS)
         assertEquals(NenyaKind.SEAL, seal.event.kind)
         return wrap.event.createdAt to seal.event.createdAt

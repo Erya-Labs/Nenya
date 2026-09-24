@@ -5,7 +5,8 @@ import dev.eryalabs.nenya.platform.runtimeSimpleName
 import dev.eryalabs.nenya.utf8Bytes
 
 /**
- * The seam fakes §7.1's write path has to be proved against, beside T30's honest ones.
+ * The seam fakes §7.1's write path has to be proved against, beside T30's honest ones — and, since
+ * T35, the two the **read** path needs for the same reason.
  *
  * T30 built the fakes that behave: a signer that signs and encrypts, a verifier that agrees with
  * it, a source of throwaway keypairs. Those reach the refusals that are about **structure** — a
@@ -115,9 +116,12 @@ internal open class Nip44PayloadSigner(key: FakeKey) : FakeCryptoSigner(key) {
             is SeamAnswer.Unavailable -> answer
         }
 
-    override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> {
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> {
         // A payload that is not base64 is still handed to the delegate, as a string it will refuse,
-        // so the call is counted and the answer is the seam's own Unavailable rather than one
+        // so the call is counted and the answer is the seam's own refusal rather than one
         // manufactured here.
         val bytes = TestBase64.decode(payload)
         val asHex = if (bytes == null) NOT_A_PAYLOAD else SeamFixtures.lowerHex(bytes)
@@ -304,11 +308,16 @@ internal class OversizedPlaintextSigner(
 
     private var answered = 0
 
-    override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> {
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> {
         // Through the honest path first, so a payload that genuinely does not authenticate is still
-        // refused as Unavailable and the call is still counted.
+        // refused — as Nip44Decryption.Refused, a check performed — and the call is still counted.
+        // Only a decryption that actually succeeded is counted against `honestDecryptions`: a
+        // refusal that advanced the counter would silently change which layer gets oversized.
         val answer = super.nip44Decrypt(counterpartyPublicKeyHex, payload)
-        if (answer is SeamAnswer.Unavailable) return answer
+        if ((answer as? SeamAnswer.Provided)?.value !is Nip44Decryption.Decrypted) return answer
         answered++
         if (answered <= honestDecryptions) return answer
         val out = StringBuilder(chars + PLAINTEXT_BLOCK)
@@ -317,7 +326,7 @@ internal class OversizedPlaintextSigner(
             out.append(TestBase64.encode(block))
             block = sha256(block)
         }
-        return SeamAnswer.Provided(out.substring(0, chars))
+        return SeamAnswer.Provided(Nip44Decryption.Decrypted(out.substring(0, chars)))
     }
 
     private companion object {
@@ -328,6 +337,101 @@ internal class OversizedPlaintextSigner(
         /** One SHA-256 digest in base64. */
         const val PLAINTEXT_BLOCK: Int = 44
     }
+}
+
+/**
+ * Reaches `COULD_NOT_DECRYPT_WRAP`: a signer with **no NIP-44 decryption capability at all**.
+ *
+ * T35 split a decryption the signer tried and refused ([Nip44Decryption.Refused]) from one it never
+ * attempted ([SeamAnswer.Unavailable]), and every other signer in this tree now answers the first.
+ * Without this fake `COULD_NOT_DECRYPT_WRAP` and `COULD_NOT_DECRYPT_SEAL` would be constants
+ * nothing could produce, and `GiftWrapOpenTest`'s floor — which reads the read-side constants off
+ * the enum — would be the thing that noticed.
+ *
+ * `Signer.FAIL_CLOSED` cannot stand in for it: that signer's `publicKey()` is `Unavailable` too, so
+ * `GiftWrap.open` refuses at step 3 with `READER_PUBLIC_KEY_UNAVAILABLE` and never attempts a
+ * decryption. This one reports its key and signs honestly, so the read reaches step 5 and the
+ * refusal is the decryption's own.
+ */
+internal class DecryptUnavailableSigner(key: FakeKey) : Nip44PayloadSigner(key) {
+
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> = SeamAnswer.unavailable(SeamCapability.NIP44_DECRYPTION)
+
+    override fun toString(): String = "DecryptUnavailableSigner(stream=${key.stream})"
+}
+
+/**
+ * Reaches `COULD_NOT_DECRYPT_SEAL`: a signer that decrypts the **wrap** and has no capability for
+ * the **seal**.
+ *
+ * §7.1's read procedure decrypts twice under two different counterparties — the wrap's throwaway
+ * key at step 5 and the seal's claimed key at step 7 — and a signer may hold one conversation and
+ * not the other. [DecryptUnavailableSigner] refuses both, so it can only ever reach step 5; this one
+ * gets the read as far as step 7 and declines there, which is the only way `COULD_NOT_DECRYPT_SEAL`
+ * is reachable at all.
+ *
+ * Selective by **counterparty** rather than by call number, for [KeySelectiveSecp256k1Ops]' reason:
+ * a fake answering "on the first call only" would pin today's call order alongside the property
+ * under test. The wrap's key is what §7.1 actually distinguishes the two decryptions by, so it is
+ * taken as a parameter — the seam has no other way to know which of its two conversations is the
+ * wrap's.
+ *
+ * @param wrapPublicKeyHex the throwaway key the wrap carries, in lowercase hex. Every decryption
+ *   for that counterparty is honest; every other one answers [SeamAnswer.Unavailable].
+ */
+internal class SealDecryptUnavailableSigner(
+    key: FakeKey,
+    private val wrapPublicKeyHex: String,
+) : Nip44PayloadSigner(key) {
+
+    /** How many decryptions were actually performed, so a test can pin it at exactly one. */
+    var honestDecryptions: Int = 0
+        private set
+
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> {
+        if (counterpartyPublicKeyHex != wrapPublicKeyHex) {
+            return SeamAnswer.unavailable(SeamCapability.NIP44_DECRYPTION)
+        }
+        honestDecryptions++
+        return super.nip44Decrypt(counterpartyPublicKeyHex, payload)
+    }
+
+    override fun toString(): String = "SealDecryptUnavailableSigner(stream=${key.stream})"
+}
+
+/**
+ * The seam behaviour T35 **removed**, preserved as a fixture: a MAC failure reported as
+ * `Unavailable`.
+ *
+ * It is not a fake of a plausible client so much as the negative control under the whole split. A
+ * test asserting "a tampered payload yields `WRAP_DECRYPTION_REFUSED`" is satisfied by a library
+ * that simply renamed its old constant; feeding the same tampered payload to this signer must
+ * produce `COULD_NOT_DECRYPT_WRAP` instead, which is only possible if `GiftWrap.open` is reading
+ * the signer's answer rather than deciding the reason for itself.
+ *
+ * Every other answer is [Nip44PayloadSigner]'s, including a successful decryption, so the one thing
+ * it changes is the one thing under test.
+ */
+internal class MacFailureAsUnavailableSigner(key: FakeKey) : Nip44PayloadSigner(key) {
+
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> {
+        val answer = super.nip44Decrypt(counterpartyPublicKeyHex, payload)
+        if ((answer as? SeamAnswer.Provided)?.value === Nip44Decryption.Refused) {
+            return SeamAnswer.unavailable(SeamCapability.NIP44_DECRYPTION)
+        }
+        return answer
+    }
+
+    override fun toString(): String = "MacFailureAsUnavailableSigner(stream=${key.stream})"
 }
 
 /** Reaches `SIGNATURE_UNAVAILABLE`: a signer that encrypts perfectly well and signs nothing. */
@@ -422,8 +526,8 @@ internal fun exerciseEveryMisbehavingFake(): Set<String> {
     }
     val payloadSigner = exercise(Nip44PayloadSigner(key)) {
         val payload = it.nip44Encrypt(counterparty.hex, COVERAGE).provided()
-        check(Nip44PayloadSigner(counterparty).nip44Decrypt(key.hex, payload).provided() == COVERAGE)
-        it.nip44Decrypt(key.hex, "not base64 at all").unavailable()
+        check(Nip44PayloadSigner(counterparty).nip44Decrypt(key.hex, payload).decrypted() == COVERAGE)
+        it.nip44Decrypt(key.hex, "not base64 at all").refused()
     }
     exercise(Nip44PayloadEphemeralSigners(firstStream = COVERAGE_EPHEMERAL)) { it.fresh().provided() }
     exercise(ScriptedEphemeralSigners(listOf(payloadSigner))) {
@@ -443,11 +547,29 @@ internal fun exerciseEveryMisbehavingFake(): Set<String> {
     }
     exercise(OversizedPlaintextSigner(key, honestDecryptions = 1)) {
         val payload = Nip44PayloadSigner(counterparty).nip44Encrypt(key.hex, COVERAGE).provided()
-        check(it.nip44Decrypt(counterparty.hex, payload).provided() == COVERAGE) {
+        check(it.nip44Decrypt(counterparty.hex, payload).decrypted() == COVERAGE) {
             "the first decryption must be honest, or the rumor bound could never be reached"
         }
-        check(it.nip44Decrypt(counterparty.hex, payload).provided().length > PLAINTEXT_FLOOR)
-        it.nip44Decrypt(counterparty.hex, "not base64 at all").unavailable()
+        check(it.nip44Decrypt(counterparty.hex, payload).decrypted().length > PLAINTEXT_FLOOR)
+        it.nip44Decrypt(counterparty.hex, "not base64 at all").refused()
+    }
+    exercise(DecryptUnavailableSigner(key)) {
+        check(it.publicKey().provided() == key.hex) { "it must still report a key, or open() stops at step 3" }
+        it.signEvent(serialisation).provided()
+        check(it.nip44Decrypt(counterparty.hex, COVERAGE).unavailable().capability == NIP44)
+    }
+    exercise(SealDecryptUnavailableSigner(key, wrapPublicKeyHex = counterparty.hex)) {
+        val payload = Nip44PayloadSigner(counterparty).nip44Encrypt(key.hex, COVERAGE).provided()
+        check(it.nip44Decrypt(counterparty.hex, payload).decrypted() == COVERAGE) { "the wrap's key" }
+        check(it.nip44Decrypt(key.hex, payload).unavailable().capability == NIP44) { "any other key" }
+        check(it.honestDecryptions == 1) { "exactly the one decryption it is capable of" }
+    }
+    exercise(MacFailureAsUnavailableSigner(key)) {
+        val payload = Nip44PayloadSigner(counterparty).nip44Encrypt(key.hex, COVERAGE).provided()
+        check(it.nip44Decrypt(counterparty.hex, payload).decrypted() == COVERAGE) { "honest otherwise" }
+        check(it.nip44Decrypt(counterparty.hex, "not base64 at all").unavailable().capability == NIP44) {
+            "the whole point of this fake: a refusal reported as a check that never ran"
+        }
     }
     exercise(NoSignatureSigner(key)) { it.signEvent(serialisation).unavailable() }
     exercise(ShortSignatureSigner(key)) {
@@ -461,6 +583,9 @@ internal fun exerciseEveryMisbehavingFake(): Set<String> {
 
 /** Any distinctive plaintext; none of these fakes parses it. */
 private const val COVERAGE: String = "coverage"
+
+/** The one capability the two decryption-shy fakes above decline, named once. */
+private val NIP44: SeamCapability = SeamCapability.NIP44_DECRYPTION
 
 /** Key ranges of their own, so this coverage pass cannot collide with a test's own fixtures. */
 private const val COVERAGE_EPHEMERAL: Long = 4_000_000L

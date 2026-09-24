@@ -19,7 +19,7 @@ import dev.eryalabs.nenya.utf8Bytes
  *
  * They model "only the two key holders can decrypt" **against an adversary that goes through the
  * same fakes**: a test that hands [FakeCryptoSigner.nip44Decrypt] the wrong counterparty key, or a
- * payload whose bytes have been disturbed, gets [SeamAnswer.Unavailable] and that is a real
+ * payload whose bytes have been disturbed, gets [Nip44Decryption.Refused] and that is a real
  * result about the code under test. They prove nothing against an adversary with the conversation
  * key itself, because [FakeCrypto.conversationKey] is a pure function of two public keys and
  * anything at all can compute it. **A test MUST NOT forge under a conversation key directly** —
@@ -128,9 +128,10 @@ internal object FakeCrypto {
      * The plaintext, or `null` when the payload is malformed or its MAC does not match.
      *
      * `null` rather than a throw, and never a partially-decrypted string: the caller turns it into
-     * [SeamAnswer.Unavailable], which is what a real NIP-44 implementation answers when
-     * authentication fails and what §17 requires be distinguishable from "decrypted, and the
-     * contents were rubbish".
+     * [Nip44Decryption.Refused] — a decryption **performed** and refused, which is what a real
+     * NIP-44 implementation answers when authentication fails and what §17 requires be
+     * distinguishable both from "decrypted, and the contents were rubbish" and from "there is no
+     * decryption capability here at all".
      */
     fun decrypt(conversationKey: ByteArray, payload: String): String? {
         val raw = hexToBytes(payload) ?: return null
@@ -255,16 +256,25 @@ internal open class FakeCryptoSigner(val key: FakeKey) : Signer {
         )
     }
 
-    override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> {
+    /**
+     * Decrypts, or reports a decryption it **performed and refused**.
+     *
+     * Never [SeamAnswer.Unavailable], and that is T35's correction rather than a detail: this fake
+     * holds a key and does the work, so every failure it can have is a payload it authenticated and
+     * rejected. Answering `Unavailable` — which it did until T35 — reported a check that ran as a
+     * check that did not run, which is §17's rule broken in the direction nobody watches. A signer
+     * that genuinely cannot decrypt is [DecryptUnavailableSigner], and that is a different fake.
+     */
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> {
         decryptCalls++
         val plaintext = FakeCrypto.decrypt(
             FakeCrypto.conversationKey(signingKey.hex, counterpartyPublicKeyHex),
             payload,
-        ) ?: return SeamAnswer.Unavailable(
-            SeamCapability.NIP44_DECRYPTION,
-            "the payload did not authenticate under the conversation key with that counterparty",
-        )
-        return SeamAnswer.Provided(plaintext)
+        ) ?: return SeamAnswer.Provided(Nip44Decryption.Refused)
+        return SeamAnswer.Provided(Nip44Decryption.Decrypted(plaintext))
     }
 
     /** Names the stream of the key it reports, never the key. */

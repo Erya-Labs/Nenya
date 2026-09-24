@@ -81,6 +81,46 @@ internal fun SeamAnswer<*>.unavailable(): SeamAnswer.Unavailable = when (this) {
 }
 
 /**
+ * The plaintext a signer decrypted, or a loud failure.
+ *
+ * Three ways to fail and each one names itself, because after T35 there are three answers to a
+ * NIP-44 decryption and a test that treated two of them alike would be the thing T35 exists to
+ * stop: [SeamAnswer.Unavailable] is "not attempted" and [Nip44Decryption.Refused] is "attempted and
+ * refused", and §17 requires they never be confused.
+ */
+internal fun SeamAnswer<Nip44Decryption>.decrypted(): String = when (this) {
+    is SeamAnswer.Unavailable -> kotlin.test.fail(
+        "expected a decrypted payload; the signer answered it did not attempt the decryption ($this)",
+    )
+    is SeamAnswer.Provided -> when (val decryption = value) {
+        is Nip44Decryption.Decrypted -> decryption.plaintext
+        Nip44Decryption.Refused -> kotlin.test.fail(
+            "expected a decrypted payload; the signer performed the decryption and refused it",
+        )
+    }
+}
+
+/**
+ * The refusal a signer answered a NIP-44 payload with — **performed, and failed**.
+ *
+ * The counterpart of [unavailable] for this seam, and the distinction the assertion is about: a
+ * test written against `Unavailable` would go green for a signer that swallowed a MAC failure and
+ * reported the check as not performed, which is the §17 over-claim in the direction nobody watches.
+ */
+internal fun SeamAnswer<Nip44Decryption>.refused(): Nip44Decryption = when (this) {
+    is SeamAnswer.Unavailable -> kotlin.test.fail(
+        "expected the signer to report a decryption it performed and refused; it reported the " +
+            "decryption as not attempted at all ($this), which §17 forbids for a check that ran",
+    )
+    is SeamAnswer.Provided -> when (val decryption = value) {
+        Nip44Decryption.Refused -> decryption
+        is Nip44Decryption.Decrypted -> kotlin.test.fail(
+            "expected a refusal; the signer decrypted the payload",
+        )
+    }
+}
+
+/**
  * A wallet that reports every payment settled, every invoice paid and every balance sufficient
  * — and yields no `dev.eryalabs.nenya.payment.VerifiedPayment` at all.
  *
@@ -204,25 +244,102 @@ internal class FakeSigner : Signer {
     override fun nip44Encrypt(counterpartyPublicKeyHex: String, plaintext: String): SeamAnswer<String> =
         SeamAnswer.Provided(plaintext)
 
-    override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> =
-        SeamAnswer.Provided(payload)
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> = SeamAnswer.Provided(Nip44Decryption.Decrypted(payload))
 }
 
 /**
- * A relay transport that accepts everything and hands back what it was given. Opens no socket —
- * nothing in this repository may, and a test that would is wrong even when it passes.
+ * A relay transport whose relays all accept, and which hands back what it was given. Opens no
+ * socket — nothing in this repository may, and a test that would is wrong even when it passes.
+ *
+ * @param relays how the fan-out names its relays. Two by default, because the shape T35 gave this
+ *   seam is **per relay** and a fake with one relay could not tell a per-relay answer from a single
+ *   one; [DisagreeingRelayTransport] is the one whose relays differ.
  */
-internal class FakeRelayTransport : RelayTransport {
+internal class FakeRelayTransport(
+    private val relays: List<String> = listOf(FIRST_RELAY, SECOND_RELAY),
+) : RelayTransport {
 
     private val published = mutableListOf<String>()
 
-    override fun publish(serialisedEvent: String): SeamAnswer<RelayAcknowledgement> {
+    override fun publish(serialisedEvent: String): SeamAnswer<List<RelayClaim>> {
         published += serialisedEvent
-        return SeamAnswer.Provided(RelayAcknowledgement.CLAIMS_ACCEPTED)
+        return SeamAnswer.Provided(
+            relays.map { RelayClaim(it, RelayAcknowledgement.CLAIMS_ACCEPTED) },
+        )
     }
 
-    override fun request(serialisedFilter: String): SeamAnswer<List<String>> =
-        SeamAnswer.Provided(published.toList())
+    override fun request(serialisedFilter: String): SeamAnswer<List<RelayDelivery>> =
+        SeamAnswer.Provided(
+            relays.map {
+                RelayDelivery(
+                    RelayClaim(it, RelayAcknowledgement.CLAIMS_ACCEPTED),
+                    published.toList(),
+                    SubscriptionEnd.CLAIMS_ENDED,
+                )
+            },
+        )
+
+    internal companion object {
+
+        /**
+         * Two relay names, and neither is a URL that could be dialled by accident.
+         *
+         * STOP RULE 13: nothing in this repository opens a socket, and a fixture spelling
+         * `wss://relay.example` is one copy-paste away from being handed to something that would.
+         * The seam never parses this value, so a name that is plainly not an address costs nothing
+         * and says what it is.
+         */
+        const val FIRST_RELAY: String = "relay-one (a name, not an address; nothing here dials it)"
+
+        const val SECOND_RELAY: String = "relay-two (a name, not an address; nothing here dials it)"
+    }
+}
+
+/**
+ * The relays disagree, and every shape §5.5 wants apart from the others is on the list.
+ *
+ * One relay accepts, one rejects with NIP-01's `rate-limited`, one never answers, one closes with
+ * `auth-required` and one sends a bare `NOTICE`. That is the fan-out a single acknowledgement
+ * could not describe: before T35 all five came back as one constant, and "this relay did not accept
+ * the request" was indistinguishable from "accepted but not readable back".
+ *
+ * The subscription side disagrees too — the accepting relay claims it finished and the others do
+ * not — so a caller that read [SubscriptionEnd] off the wrong relay is caught.
+ */
+internal class DisagreeingRelayTransport : RelayTransport {
+
+    /** The claims this fake makes, in one place, so `publish` and `request` cannot drift. */
+    private val claims: List<RelayClaim> = listOf(
+        RelayClaim("accepting-relay", RelayAcknowledgement.CLAIMS_ACCEPTED),
+        RelayClaim("rejecting-relay", RelayAcknowledgement.CLAIMS_REJECTED, RelayCloseReason.RATE_LIMITED),
+        RelayClaim("silent-relay", RelayAcknowledgement.TIMED_OUT),
+        RelayClaim("closing-relay", RelayAcknowledgement.CLOSED, RelayCloseReason.AUTH_REQUIRED),
+        RelayClaim("chatty-relay", RelayAcknowledgement.NOTICE),
+    )
+
+    override fun publish(serialisedEvent: String): SeamAnswer<List<RelayClaim>> =
+        SeamAnswer.Provided(claims)
+
+    /**
+     * Only the accepting relay served anything, and only it claims the subscription ended.
+     *
+     * The event is the filter echoed back rather than anything this fake invents: §4.3 says every
+     * byte off a relay is hostile input, and a fake that manufactured a plausible event would
+     * invite a test to believe it.
+     */
+    override fun request(serialisedFilter: String): SeamAnswer<List<RelayDelivery>> =
+        SeamAnswer.Provided(
+            claims.map {
+                if (it.acknowledgement == RelayAcknowledgement.CLAIMS_ACCEPTED) {
+                    RelayDelivery(it, listOf(serialisedFilter), SubscriptionEnd.CLAIMS_ENDED)
+                } else {
+                    RelayDelivery(it, emptyList(), SubscriptionEnd.CLAIMS_INCOMPLETE)
+                }
+            },
+        )
 }
 
 /**

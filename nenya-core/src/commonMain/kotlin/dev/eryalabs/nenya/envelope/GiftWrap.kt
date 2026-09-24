@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.channel.ChannelException
 import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.seam.EphemeralSigners
 import dev.eryalabs.nenya.seam.NenyaClock
+import dev.eryalabs.nenya.seam.Nip44Decryption
 import dev.eryalabs.nenya.seam.Randomness
 import dev.eryalabs.nenya.seam.SeamAnswer
 import dev.eryalabs.nenya.seam.SeamCapability
@@ -356,8 +357,14 @@ public enum class EnvelopeRejection(
     WRAP_SIGNATURE_INVALID(EnvelopeSide.OPEN),
 
     /**
-     * §7.1 read step 5: the wrap's `content` did not decrypt under the reader's conversation with
-     * the wrap's `pubkey`.
+     * §7.1 read step 5: the reader's signer **did not attempt** the wrap's decryption — it answered
+     * [SeamAnswer.Unavailable] for [SeamCapability.NIP44_DECRYPTION].
+     *
+     * Not "the payload was bad": that is [WRAP_DECRYPTION_REFUSED], and the two are kept apart
+     * because §17 requires an implementation say what it actually performed. A client whose signer
+     * cannot do NIP-44 at all sees this for every message it ever receives, and the fix is to wire
+     * up a signer; a client seeing the other one has a signer that works and a relay serving
+     * forgeries. Reporting both as this constant told the first story about the second.
      *
      * The wrap's key is used here as a NIP-44 **counterparty** and nowhere else. §7.2 forbids
      * displaying it, indexing by it or using it "in any comparison", and deriving a conversation key
@@ -365,6 +372,26 @@ public enum class EnvelopeRejection(
      * off it — [OpenedMessage] has no accessor for it at all.
      */
     COULD_NOT_DECRYPT_WRAP(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 5: the reader's signer **performed** the wrap's decryption and refused the
+     * payload — `Provided(`[dev.eryalabs.nenya.seam.Nip44Decryption.Refused]`)`.
+     *
+     * NIP-44 v2 is authenticated encryption, so this is the answer to a `content` whose MAC does not
+     * match under the reader's conversation with the wrap's `pubkey`: a payload somebody altered in
+     * flight, or one addressed to a conversation this reader is not in.
+     *
+     * ### This distinction is not an oracle, and the earlier wording said it was
+     *
+     * An earlier draft of this file folded the two together on the grounds that telling them apart
+     * "would be an oracle for whether a given key is the addressee's". That argument does not hold:
+     * both answers are produced by the **reader's own** signer for the reader's own eyes, and a
+     * party that can read this refusal already holds the key it would be asking about. What the
+     * fold actually cost was §17's rule in the direction nobody checks — a check that ran and failed
+     * reported as a check that did not run. Nothing that was refused before is accepted now; only
+     * the reason is exact.
+     */
+    WRAP_DECRYPTION_REFUSED(EnvelopeSide.OPEN),
 
     /**
      * The decrypted seal is longer than [EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES], so it is not
@@ -419,15 +446,25 @@ public enum class EnvelopeRejection(
     SEAL_SIGNATURE_INVALID(EnvelopeSide.OPEN),
 
     /**
-     * §7.1 read step 7: the seal's `content` did not decrypt under the reader's conversation with
-     * the **seal's** `pubkey`.
+     * §7.1 read step 7: the reader's signer **did not attempt** the seal's decryption.
+     *
+     * The seal's half of [COULD_NOT_DECRYPT_WRAP], and reachable on its own: a signer may decrypt
+     * for one counterparty and not another, so a reader can get as far as the seal and be told
+     * there is no NIP-44 capability for the key the seal claims.
+     */
+    COULD_NOT_DECRYPT_SEAL(EnvelopeSide.OPEN),
+
+    /**
+     * §7.1 read step 7: the reader's signer **performed** the seal's decryption and refused the
+     * payload.
      *
      * This is what "authenticated by decryption" means, stated as a refusal: a seal that claims
      * somebody else's key does not decrypt under that key's conversation, so the claim fails here
      * even against a reader with no verifier at all. It is the reason §7.2's mode is worth
-     * reporting rather than merely tolerable.
+     * reporting rather than merely tolerable — and it is a **performed** check, which is why it is
+     * this constant and not [COULD_NOT_DECRYPT_SEAL]. See [WRAP_DECRYPTION_REFUSED].
      */
-    COULD_NOT_DECRYPT_SEAL(EnvelopeSide.OPEN),
+    SEAL_DECRYPTION_REFUSED(EnvelopeSide.OPEN),
 
     /**
      * The decrypted rumor is longer than [EnvelopeLimits.MAX_NIP44_PLAINTEXT_BYTES].
@@ -961,6 +998,7 @@ public object GiftWrap {
                 wrap.event.pubkey,
                 wrap.event.content,
                 EnvelopeRejection.COULD_NOT_DECRYPT_WRAP,
+                EnvelopeRejection.WRAP_DECRYPTION_REFUSED,
             )
             // Step 6.
             boundBeforeParsing(
@@ -1011,6 +1049,7 @@ public object GiftWrap {
                 seal.event.pubkey,
                 seal.event.content,
                 EnvelopeRejection.COULD_NOT_DECRYPT_SEAL,
+                EnvelopeRejection.SEAL_DECRYPTION_REFUSED,
             )
             // Step 8.
             boundBeforeParsing(
@@ -1259,19 +1298,30 @@ public object GiftWrap {
         private fun decrypt(
             counterpartyPublicKeyHex: String,
             payload: String,
-            reason: EnvelopeRejection,
+            notPerformed: EnvelopeRejection,
+            refused: EnvelopeRejection,
         ): String {
             val answer = me.nip44Decrypt(counterpartyPublicKeyHex, payload)
-            return when (answer) {
+            val decryption = when (answer) {
                 is SeamAnswer.Provided -> answer.value
                 is SeamAnswer.Unavailable -> throw refuse(
-                    reason,
+                    notPerformed,
                     "§7.1 decrypts at both layers through the injected signer and it answered " +
-                        "unavailable (${answer.capability.name}); NIP-44 answers exactly that when " +
-                        "a payload does not authenticate, which is the same refusal as a client " +
-                        "that cannot decrypt at all and is deliberately not distinguished here — " +
-                        "a reader that could tell the two apart would be an oracle for whether a " +
-                        "given key is the addressee's",
+                        "unavailable (${answer.capability.name}): the decryption was **not " +
+                        "attempted**, which §17 requires be reported as such rather than as a " +
+                        "negative result",
+                )
+            }
+            return when (decryption) {
+                is Nip44Decryption.Decrypted -> decryption.plaintext
+                Nip44Decryption.Refused -> throw refuse(
+                    refused,
+                    "§7.1 decrypts at both layers through the injected signer, and it performed " +
+                        "this decryption and refused the payload: NIP-44 v2 is authenticated " +
+                        "encryption, so a `content` whose MAC does not match under the reader's " +
+                        "conversation with the key this layer carries is refused rather than " +
+                        "decoded; §17 requires a check that ran and failed be distinguished from " +
+                        "one that did not run",
                 )
             }
         }
@@ -1653,8 +1703,10 @@ public object GiftWrap {
             return delegate.nip44Encrypt(counterpartyPublicKeyHex, plaintext)
         }
 
-        override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> =
-            throw reused("decrypt")
+        override fun nip44Decrypt(
+            counterpartyPublicKeyHex: String,
+            payload: String,
+        ): SeamAnswer<Nip44Decryption> = throw reused("decrypt")
 
         /** Names neither the key nor the delegate's own string form. */
         override fun toString(): String = "GiftWrap.OneShotSigner(used=$signed)"

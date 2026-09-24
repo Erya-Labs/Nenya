@@ -41,9 +41,11 @@ import dev.eryalabs.nenya.wire.appendCanonicalString
  *
  * `FakeCrypto`'s header forbids it in as many words: calling `FakeCrypto.encrypt` to manufacture a
  * payload a seam is then expected to reject would be a test of that file rather than of Nenya. Every
- * payload below is produced by a [Nip44PayloadSigner] holding a key of its own, and the one control
- * that needs a payload the reader cannot open uses [disturbed] — an honest payload with a byte
- * changed, which is the failure mode that file does model.
+ * payload below is produced by a [Nip44PayloadSigner] holding a key of its own, and the controls
+ * that need a payload the reader cannot open use [disturbed] — an honest payload with a byte
+ * changed, which is the failure mode that file does model. There are two of them, one per layer:
+ * [wrapWithRecomputedIdAndStaleSignature] disturbs the wrap's `content` and `sealJson`'s
+ * `disturbContent` disturbs the seal's, and each is refused by the decryption of its own layer.
  */
 internal class Envelope(
 
@@ -94,6 +96,12 @@ internal class Envelope(
      *   not hold, whose content therefore does not decrypt under that key's conversation.
      * @param signed `false` writes the seal with no `sig` key at all.
      * @param staleId keeps the `id` of the seal as it was **before** its content was changed.
+     * @param disturbContent changes one byte of the `content` **after** it was encrypted, and takes
+     *   the `id` and the `sig` over the changed event so every structural check still passes. The
+     *   only thing left that can catch it is §7.1 step 7's decryption, which is what makes it the
+     *   control for a seal payload the reader's signer performs and refuses. Distinct from
+     *   [claiming] a key the seal does not hold: that one also fails at step 7, but by way of a
+     *   conversation key the reader is not party to, and the two are different attacks.
      */
     fun sealJson(
         plaintext: String = rumorJson(),
@@ -105,8 +113,10 @@ internal class Envelope(
         createdAt: Long = SEAL_CREATED_AT,
         signed: Boolean = true,
         staleId: Boolean = false,
+        disturbContent: Boolean = false,
     ): String {
-        val content = by.nip44Encrypt(addressee, plaintext).provided()
+        val encrypted = by.nip44Encrypt(addressee, plaintext).provided()
+        val content = if (disturbContent) disturbed(encrypted) else encrypted
         val seal = WireEvent(claiming, createdAt, kind, tags, content)
         val idHex = if (staleId) idHexOf(changed(seal), SEAL_LIMITS) else idHexOf(seal, SEAL_LIMITS)
         val sig = if (signed) signatureOf(seal, by, SEAL_LIMITS) else null

@@ -19,15 +19,23 @@ import kotlin.test.assertTrue
  * `WalletPaymentClaim.toString()` already says `redacted`.
  *
  * That gap matters because the wrapper's KDoc claims the redaction is load-bearing precisely for
- * the values it *cannot* know the type of — and the sharpest of those is a bare [String].
- * [Signer.nip44Decrypt] returns `SeamAnswer<String>`, which is a decrypted private message; a
- * `String` has no redacting `toString`, so the wrapper is the only thing between a NIP-44
- * plaintext and a log line. §12 item 11 names decryption keys, preimages and order ids in one
- * sentence as values that MUST NOT appear in a log, a crash report, or the string representation
- * of anything the implementation exposes.
+ * the values it *cannot* know the type of — and the sharpest of those is a bare [String]. A
+ * `String` has no redacting `toString`, so the wrapper is the only thing between a NIP-44 plaintext
+ * and a log line. §12 item 11 names decryption keys, preimages and order ids in one sentence as
+ * values that MUST NOT appear in a log, a crash report, or the string representation of anything
+ * the implementation exposes.
  *
  * So every assertion below wraps a value that would leak on its own. A test whose subject
  * redacts itself cannot tell whether the wrapper does anything at all.
+ *
+ * ### Two layers, since T35, and each is tested against a bare `String`
+ *
+ * [Signer.nip44Decrypt] returns `SeamAnswer<Nip44Decryption>` rather than `SeamAnswer<String>`, so
+ * a decrypted private message is now behind two redacting `toString`s instead of one. That is
+ * belt and braces on purpose and neither is redundant: a caller that unwraps the [SeamAnswer] to
+ * branch on the three answers holds a [Nip44Decryption] and will print *that*, so the inner type
+ * has to redact too, and a caller that logs the answer whole must not be saved only by what it
+ * happens to be holding.
  */
 class SeamAnswerRedactionTest {
 
@@ -49,11 +57,41 @@ class SeamAnswerRedactionTest {
 
         assertFalse(
             answer.toString().contains(decryptedPlaintext),
-            "Signer.nip44Decrypt returns SeamAnswer<String> and that String is a decrypted private " +
-                "message. A String does not redact itself, so this wrapper is the only thing between " +
-                "a NIP-44 plaintext and a log line (§12 item 11).",
+            "a bare String does not redact itself, so this wrapper is the only thing between a " +
+                "NIP-44 plaintext and a log line (§12 item 11).",
         )
         assertTrue(answer.toString().contains("redacted"))
+    }
+
+    /**
+     * And the inner layer: [Nip44Decryption.Decrypted] redacts the plaintext it carries.
+     *
+     * The one a caller actually holds. `Signer.nip44Decrypt`'s answer has to be unwrapped to tell
+     * "decrypted" from "refused" from "not attempted", so the [SeamAnswer] wrapper's redaction
+     * protects nothing past that point — this is the `toString` a client prints while debugging why
+     * a gift wrap would not open, with the whole private rumor inside it.
+     *
+     * [Nip44Decryption.Refused] is asserted beside it for the opposite reason: it carries no detail
+     * at all, so there is nothing a signer could have echoed into it, and its `toString` must say
+     * only which case it is.
+     */
+    @JsName("a_decrypted_nip44_payload_is_not_printed_by_the_case_that_carries_it")
+    @Test
+    fun `a decrypted NIP-44 payload is not printed by the case that carries it`() {
+        val decrypted = Nip44Decryption.Decrypted(decryptedPlaintext)
+
+        assertFalse(
+            decrypted.toString().contains(decryptedPlaintext),
+            "§12 item 11: a decrypted private message MUST NOT appear in the string representation " +
+                "of anything this library exposes, and this is the type a caller unwraps to",
+        )
+        assertFalse(
+            decrypted.toString().contains(SeamFixtures.lowerHex(SeamFixtures.bytes(32, stream = 21L))),
+            "including the order id travelling inside it",
+        )
+        assertTrue(decrypted.toString().contains("redacted"))
+        assertEquals(decryptedPlaintext, decrypted.plaintext, "and the value is still reachable on purpose")
+        assertEquals("Nip44Decryption.Refused", Nip44Decryption.Refused.toString())
     }
 
     @JsName("the_order_id_inside_a_decrypted_plaintext_does_not_survive_the_wrapper_either")

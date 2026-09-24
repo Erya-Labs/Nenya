@@ -60,6 +60,9 @@ class EphemeralSignerTest {
             "NonAsciiCiphertextSigner",
             "OversizedCiphertextSigner",
             "OversizedPlaintextSigner",
+            "DecryptUnavailableSigner",
+            "SealDecryptUnavailableSigner",
+            "MacFailureAsUnavailableSigner",
             "NoSignatureSigner",
             "ShortSignatureSigner",
             "LyingNip44PayloadSigner",
@@ -274,14 +277,21 @@ class EphemeralSignerTest {
         val payload = sender.nip44Encrypt(recipient.key.hex, plaintext).provided()
 
         assertNotEquals(plaintext, payload, "an identity 'encryption' would pass every test below")
-        assertEquals(plaintext, recipient.nip44Decrypt(sender.key.hex, payload).provided())
+        assertEquals(plaintext, recipient.nip44Decrypt(sender.key.hex, payload).decrypted())
         assertEquals(1, sender.encryptCalls)
         assertEquals(1, recipient.decryptCalls)
     }
 
-    @JsName("decrypting_with_the_wrong_counterparty_answers_unavailable")
+    /**
+     * **Declared expectation change, T35, STOP RULE 1.** This test expected
+     * [SeamAnswer.Unavailable] until T35 and now expects [Nip44Decryption.Refused]: the stranger
+     * holds a key and performed the decryption, so §17 requires the answer say the check *ran* and
+     * failed rather than that it was never attempted. Nothing this fake accepted before is accepted
+     * now — only the reporting is exact.
+     */
+    @JsName("decrypting_with_the_wrong_counterparty_is_refused_as_a_check_that_ran")
     @Test
-    fun `decrypting with the wrong counterparty answers unavailable`() {
+    fun `decrypting with the wrong counterparty is refused as a check that ran`() {
         val sender = FakeCryptoSigner(FakeKey(stream = 10L))
         val recipient = FakeCryptoSigner(FakeKey(stream = 11L))
         val stranger = FakeCryptoSigner(FakeKey(stream = 12L))
@@ -289,18 +299,27 @@ class EphemeralSignerTest {
         val payload = sender.nip44Encrypt(recipient.key.hex, "for the recipient alone").provided()
 
         // The stranger holds its own fake, as FakeCrypto's header requires of an adversary.
-        val answer = stranger.nip44Decrypt(sender.key.hex, payload).unavailable()
+        val answer = stranger.nip44Decrypt(sender.key.hex, payload)
+        answer.refused()
 
-        assertEquals(SeamCapability.NIP44_DECRYPTION, answer.capability)
+        assertEquals(1, stranger.decryptCalls, "the refusal must be one the signer actually performed")
+        val logged = "$answer ${answer.refused()}"
         assertTrue(
-            payload !in answer.detail && "for the recipient alone" !in answer.detail,
+            payload !in logged && "for the recipient alone" !in logged,
             "the refusal must carry neither the payload nor the plaintext into a log (§12 item 11)",
         )
     }
 
-    @JsName("flipping_one_ciphertext_bit_answers_unavailable_rather_than_decoding_rubbish")
+    /**
+     * The other half of [decrypting with the wrong counterparty is refused as a check that ran]: the
+     * key is right and the **bytes** are wrong.
+     *
+     * **Declared expectation change, T35, STOP RULE 1** — [SeamAnswer.Unavailable] until T35, now
+     * [Nip44Decryption.Refused], for the reason given there.
+     */
+    @JsName("flipping_one_ciphertext_bit_is_refused_rather_than_decoding_rubbish")
     @Test
-    fun `flipping one ciphertext bit answers unavailable rather than decoding rubbish`() {
+    fun `flipping one ciphertext bit is refused rather than decoding rubbish`() {
         val sender = FakeCryptoSigner(FakeKey(stream = 10L))
         val recipient = FakeCryptoSigner(FakeKey(stream = 11L))
         val payload = sender.nip44Encrypt(recipient.key.hex, "authenticated, or refused").provided()
@@ -309,19 +328,18 @@ class EphemeralSignerTest {
         val disturbed = payload.dropLast(1) + if (payload.last() == '0') '1' else '0'
 
         assertNotEquals(payload, disturbed)
-        assertEquals(
-            SeamCapability.NIP44_DECRYPTION,
-            recipient.nip44Decrypt(sender.key.hex, disturbed).unavailable().capability,
-        )
+        recipient.nip44Decrypt(sender.key.hex, disturbed).refused()
     }
 
     /**
      * The other half of the payload. The test above disturbs the ciphertext; this disturbs the
      * **MAC**, which is the region a decryption that compared only part of it would ignore.
+     *
+     * **Declared expectation change, T35, STOP RULE 1** — same case, same reason as the two above.
      */
-    @JsName("flipping_one_mac_bit_answers_unavailable_too")
+    @JsName("flipping_one_mac_bit_is_refused_too")
     @Test
-    fun `flipping one MAC bit answers unavailable too`() {
+    fun `flipping one MAC bit is refused too`() {
         val sender = FakeCryptoSigner(FakeKey(stream = 10L))
         val recipient = FakeCryptoSigner(FakeKey(stream = 11L))
         val payload = sender.nip44Encrypt(recipient.key.hex, "authenticated, or refused").provided()
@@ -336,18 +354,26 @@ class EphemeralSignerTest {
             )
             assertNotEquals(payload, disturbed)
             assertEquals(
-                SeamCapability.NIP44_DECRYPTION,
-                recipient.nip44Decrypt(sender.key.hex, disturbed).unavailable().capability,
+                Nip44Decryption.Refused,
+                recipient.nip44Decrypt(sender.key.hex, disturbed).refused(),
                 "a payload whose MAC differs at hex character $index must not decrypt",
             )
         }
         // The floor: the undisturbed payload still opens, so the loop is measuring the MAC.
         assertEquals(
             "authenticated, or refused",
-            recipient.nip44Decrypt(sender.key.hex, payload).provided(),
+            recipient.nip44Decrypt(sender.key.hex, payload).decrypted(),
         )
     }
 
+    /**
+     * **Declared expectation change, T35, STOP RULE 1** — [SeamAnswer.Unavailable] until T35, now
+     * [Nip44Decryption.Refused]. Same case as the three above and the same single mechanism:
+     * [FakeCrypto.decrypt] answers `null` for a payload that is malformed **or** whose MAC does not
+     * match, and the signer turns every one of those into a decryption it performed and refused.
+     * A payload that is not hex is one this signer looked at and rejected, so reporting it as *not
+     * attempted* would be the same §17 over-claim in the same direction.
+     */
     @JsName("a_payload_that_is_not_hex_or_is_shorter_than_the_mac_is_refused_too")
     @Test
     fun `a payload that is not hex, or is shorter than the MAC, is refused too`() {
@@ -358,10 +384,40 @@ class EphemeralSignerTest {
         assertNull(FakeCrypto.decrypt(conversationKey, "not hex at all"))
         assertNull(FakeCrypto.decrypt(conversationKey, "abc"), "an odd number of hex digits")
         assertNull(FakeCrypto.decrypt(conversationKey, "00"), "shorter than the MAC")
+        recipient.nip44Decrypt(sender.key.hex, "not hex at all").refused()
+        assertEquals(1, recipient.decryptCalls, "and it was a call the signer actually made")
+    }
+
+    /**
+     * The fake that is **not** the one above: no NIP-44 decryption capability at all.
+     *
+     * T35's split has two sides and a suite that only ever saw the refusing one would not notice a
+     * seam that had stopped being able to say "not attempted" — which is the answer §17's capability
+     * surface is built on. [DecryptUnavailableSigner] and [SealDecryptUnavailableSigner] are the two
+     * fakes that still produce it, and each is what makes one of `GiftWrap.open`'s
+     * `COULD_NOT_DECRYPT_*` refusals reachable.
+     */
+    @JsName("the_two_decryption_shy_signers_report_not_attempted_rather_than_refused")
+    @Test
+    fun `the two decryption-shy signers report not attempted rather than refused`() {
+        val sender = Nip44PayloadSigner(FakeKey(stream = 10L))
+        val reader = FakeKey(stream = 11L)
+        val payload = sender.nip44Encrypt(reader.hex, "an honest payload").provided()
+
         assertEquals(
             SeamCapability.NIP44_DECRYPTION,
-            recipient.nip44Decrypt(sender.key.hex, "not hex at all").unavailable().capability,
+            DecryptUnavailableSigner(reader).nip44Decrypt(sender.key.hex, payload).unavailable().capability,
+            "it holds the key and could decrypt this payload; it reports that it did not try",
         )
+
+        val selective = SealDecryptUnavailableSigner(reader, wrapPublicKeyHex = sender.key.hex)
+        assertEquals("an honest payload", selective.nip44Decrypt(sender.key.hex, payload).decrypted())
+        assertEquals(
+            SeamCapability.NIP44_DECRYPTION,
+            selective.nip44Decrypt(FakeKey(stream = 12L).hex, payload).unavailable().capability,
+            "§7.1 step 7's counterparty is the seal's key, and this signer has no conversation with it",
+        )
+        assertEquals(1, selective.honestDecryptions, "exactly one decryption was performed")
     }
 
     // -----------------------------------------------------------------------------------------
@@ -551,7 +607,7 @@ internal fun exerciseEveryCryptoFake(): Set<String> {
         it.signEvent(serialisation).provided()
     }
     val payload = signer.nip44Encrypt(counterparty.hex, "coverage").provided()
-    FakeCryptoSigner(counterparty).nip44Decrypt(key.hex, payload).provided()
+    FakeCryptoSigner(counterparty).nip44Decrypt(key.hex, payload).decrypted()
 
     exercise(LyingCryptoSigner(key, counterparty)) { it.signEvent(serialisation).provided() }
     exercise(FakeSecp256k1Ops()) {

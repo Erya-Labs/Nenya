@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.seam
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The half of `SeamFailClosedTest` that is common Kotlin: the fakes in the test tree answer, so
@@ -25,8 +26,13 @@ abstract class PortableSeamFailClosedTest {
     fun `the fakes answer, so unavailable is a choice the defaults make rather than the only option`() {
         assertEquals("", FakeSigner().nip44Encrypt("", "").provided())
         assertEquals(
-            RelayAcknowledgement.CLAIMS_ACCEPTED,
-            FakeRelayTransport().publish("{}").provided(),
+            listOf(RelayAcknowledgement.CLAIMS_ACCEPTED, RelayAcknowledgement.CLAIMS_ACCEPTED),
+            FakeRelayTransport().publish("{}").provided().map { it.acknowledgement },
+        )
+        assertTrue(
+            FakeSigner().nip44Decrypt("", "").provided() is Nip44Decryption.Decrypted,
+            "a seam that could only ever answer `not attempted` would make every fail-closed " +
+                "assertion in the JVM sweep true of a type rather than of a default",
         )
         assertEquals(
             WalletPaymentState.CLAIMS_SETTLED,

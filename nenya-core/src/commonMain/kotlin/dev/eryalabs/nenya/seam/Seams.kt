@@ -38,6 +38,65 @@ import dev.eryalabs.nenya.money.Msat
 public sealed interface Seam
 
 /**
+ * What a signer did with a NIP-44 payload it was handed: it decrypted it, or it **tried and
+ * refused**.
+ *
+ * ### Why this is not folded into [SeamAnswer]
+ *
+ * [SeamAnswer] has two shapes, and before this type existed both of a decryption's two failures
+ * came back as the same one. A signer with no NIP-44 capability at all and a signer that computed
+ * the MAC over a forged payload and found it wrong both answered
+ * `Unavailable(`[SeamCapability.NIP44_DECRYPTION]`)` — "not performed". §17 forbids reporting an
+ * unverified thing as verified, and it forbids the mirror image just as plainly: **a check that ran
+ * and failed is not a check that did not run**. An implementation that reports a refused forgery as
+ * *not performed* understates what it did, and a caller reading its capability surface cannot tell
+ * a client that has not finished wiring up its signer from a counterparty sending rubbish.
+ *
+ * So the two are split along the line §17 draws. [SeamAnswer.Unavailable] keeps meaning **not
+ * attempted**; [Refused] means attempted and refused; [Decrypted] means attempted and succeeded.
+ * Nothing that was refused before is accepted now — the evidence demanded is unchanged and only its
+ * *reporting* is more exact.
+ */
+public sealed interface Nip44Decryption {
+
+    /**
+     * The payload authenticated and here is what was inside it.
+     *
+     * ### The plaintext is never printed
+     *
+     * [toString] says the case and nothing else. A decrypted NIP-44 payload inside a gift wrap is a
+     * private message — a seal, or a rumor carrying an order id, a coordinate and a counterparty's
+     * key — and §12 items 2 and 11 keep every one of those out of a log, a crash report and the
+     * string form of anything this library exposes. [SeamAnswer.Provided] redacts its value for the
+     * same reason; this redacts again one layer in, so unwrapping the answer does not unwrap the
+     * rule.
+     */
+    public class Decrypted(
+
+        /** What the payload carried. A private message — see this class's note before logging it. */
+        public val plaintext: String,
+    ) : Nip44Decryption {
+
+        override fun toString(): String = "Nip44Decryption.Decrypted(redacted)"
+    }
+
+    /**
+     * The signer performed the decryption and the payload did not authenticate.
+     *
+     * NIP-44 v2 is authenticated encryption: a payload whose MAC does not match under the
+     * conversation key is refused rather than decoded, and that refusal is a **result**. It carries
+     * no detail on purpose. A reason authored by an injected signer is text this library did not
+     * write and cannot promise is free of the ciphertext it was handed (§12 item 11), and there is
+     * nothing a caller could do differently for one flavour of MAC failure over another: the only
+     * two facts worth reporting are that the check ran and that it failed.
+     */
+    public object Refused : Nip44Decryption {
+
+        override fun toString(): String = "Nip44Decryption.Refused"
+    }
+}
+
+/**
  * The signer seam (§3): the user's public key, event signatures, NIP-44 encrypt and decrypt.
  *
  * §3 says signing is deliberately abstract — an in-process key, a NIP-55 Android signer app or a
@@ -94,8 +153,17 @@ public interface Signer : Seam {
      * A decrypted rumor is structurally valid at best. §7.2 is the rule that makes a sealed term
      * binding — the seal's pubkey and the rumor's pubkey MUST be equal — and this seam cannot
      * perform it, because it has no opinion about who sealed what.
+     *
+     * ### Three answers, because an implementation that conflates two of them over-claims
+     *
+     * An implementation MUST answer [SeamAnswer.Unavailable] when it did not attempt the decryption
+     * at all — no NIP-44 capability, no key for that counterparty — and
+     * `Provided(`[Nip44Decryption.Refused]`)` when it **did** attempt it and the payload did not
+     * authenticate. §17 requires the capability surface say what was actually performed, and
+     * reporting a refused forgery as not-performed is that rule broken in the direction nobody
+     * checks. See [Nip44Decryption].
      */
-    public fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String>
+    public fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<Nip44Decryption>
 
     public companion object {
 
@@ -175,12 +243,24 @@ public interface EphemeralSigners : Seam {
 }
 
 /**
- * What a relay said about an event it was handed. **Neither constant is evidence of anything.**
+ * What one relay said about one event, or about one subscription. **No constant is evidence of
+ * anything.**
  *
  * §3: an implementation MUST NOT accept from the relay transport "any claim that an event is
  * valid, current, or complete". A relay that says `OK` may have dropped the event a millisecond
- * later; a relay that says it rejected the event may have stored it. This enum exists so that a
- * caller reading it has to read the word "claims" while doing so.
+ * later; a relay that says it rejected the event may have stored it; a relay that said nothing at
+ * all may have stored it too. This enum exists so that a caller reading it has to read the word
+ * "claims" while doing so.
+ *
+ * ### Why silence is a constant here and not an absence
+ *
+ * The first three shapes below are ones a transport cannot express as "accepted" or "rejected" and
+ * which §5.5 wants apart from both. A relay that timed out, one that closed the subscription and
+ * one that sent a bare `NOTICE` have each failed to answer the question, and each fails it
+ * differently: the first may still be reachable, the second gave a reason class ([RelayCloseReason])
+ * the caller can act on, and the third is a human-readable aside NIP-01 attaches to no request at
+ * all. Collapsing the three into [CLAIMS_REJECTED] would tell a caller the relay refused the event
+ * when nothing of the sort was said.
  */
 public enum class RelayAcknowledgement {
 
@@ -189,15 +269,141 @@ public enum class RelayAcknowledgement {
 
     /** The relay said it refused the event. Also a claim. */
     CLAIMS_REJECTED,
+
+    /** No answer arrived inside the transport's own deadline. Not a refusal, and not an acceptance. */
+    TIMED_OUT,
+
+    /** The relay closed the subscription, or the connection under it. See [RelayClaim.closeReason]. */
+    CLOSED,
+
+    /** The relay sent a `NOTICE` and nothing that answers the request. Human-readable, and ignored. */
+    NOTICE,
+}
+
+/**
+ * NIP-01's machine-readable prefix on an `OK: false` or a `CLOSED`, as a **closed** set.
+ *
+ * NIP-01 fixes the prefixes a relay may put in front of its human-readable text, and a closed set is
+ * what makes them actionable: a client can retry a `RATE_LIMITED`, must authenticate for an
+ * `AUTH_REQUIRED`, and should not retry an `INVALID` at all. The free text after the prefix is
+ * deliberately **not** carried anywhere on this surface — it is a string a relay chose, and §12
+ * items 2 and 11 keep values a stranger controls out of anything this library exposes.
+ *
+ * Like every other constant here, none of this is evidence: a relay claiming `DUPLICATE` may never
+ * have seen the event.
+ */
+public enum class RelayCloseReason {
+
+    /** No reason class applies: the relay accepted, timed out, or offered no known prefix. */
+    NONE,
+
+    /** NIP-01 `duplicate`. */
+    DUPLICATE,
+
+    /** NIP-01 `pow`. */
+    POW,
+
+    /** NIP-01 `blocked`. */
+    BLOCKED,
+
+    /** NIP-01 `rate-limited`. */
+    RATE_LIMITED,
+
+    /** NIP-01 `invalid`. */
+    INVALID,
+
+    /** NIP-01 `restricted`. */
+    RESTRICTED,
+
+    /** NIP-01 `mute`. */
+    MUTE,
+
+    /** NIP-01 `error`. */
+    ERROR,
+
+    /** NIP-01 `auth-required`. */
+    AUTH_REQUIRED,
+
+    /** A prefix NIP-01 does not define. Reported as unknown rather than mapped onto a neighbour. */
+    UNRECOGNISED,
+}
+
+/**
+ * Whether a relay claims it finished sending what it had. **A claim, and never completeness.**
+ *
+ * An enum rather than a `Boolean` for the reason this whole package is built on: §9.1 and §3 are
+ * about a component being *believed*, and a bare `true` is the shape a caller branches on without
+ * reading a word of documentation. The seam package's published surface refuses a `Boolean`
+ * parameter outright, and the same argument applies to what it hands back.
+ */
+public enum class SubscriptionEnd {
+
+    /** The relay sent end-of-stored-events. It claims it has sent everything it holds. */
+    CLAIMS_ENDED,
+
+    /** No end-of-stored-events arrived: the relay closed, timed out, or is still sending. */
+    CLAIMS_INCOMPLETE,
+}
+
+/**
+ * One relay's answer, per relay.
+ *
+ * §5.5 wants "this relay did not accept the request" surfaced apart from "accepted but not readable
+ * back", and a single acknowledgement for the whole fan-out cannot say either: a client publishing
+ * to five relays and hearing `OK` from one, `rate-limited` from two and nothing from the rest is
+ * told, by one constant, something that is true of none of them. So a transport answers a list of
+ * these and the caller decides what a quorum is — this library takes no position on that, because
+ * §3 gives it no grounds to: none of these is evidence.
+ *
+ * @param relay the relay this claim came from, as the embedding client names it. Carried so two
+ *   relays disagreeing is expressible; never parsed, never validated and never contacted here.
+ * @param acknowledgement what that relay said, or the way in which it said nothing.
+ * @param closeReason NIP-01's machine-readable prefix when there was one, [RelayCloseReason.NONE]
+ *   otherwise.
+ */
+public class RelayClaim(
+    public val relay: String,
+    public val acknowledgement: RelayAcknowledgement,
+    public val closeReason: RelayCloseReason = RelayCloseReason.NONE,
+) {
+
+    /** Names the relay and what it claimed. There is no event and no filter in here to leak. */
+    override fun toString(): String =
+        "RelayClaim(relay=$relay, claims=$acknowledgement, closeReason=$closeReason)"
+}
+
+/**
+ * One relay's answer to a subscription: its [claim], what it sent, and whether it says it finished.
+ *
+ * The events are that relay's alone, which is the point. §4.6 forbids ordering an order thread by
+ * the `created_at` of what comes back and requires an implementation order by its own receipt
+ * sequence; keeping the fan-out's answers apart is what lets a caller notice that one relay served
+ * an event another did not, which is the disagreement §5.5 is about and which a merged list erases.
+ *
+ * Everything in [events] is hostile input (§4.3), including events the implementation believes it
+ * authored.
+ */
+public class RelayDelivery(
+    public val claim: RelayClaim,
+    public val events: List<String>,
+    public val subscription: SubscriptionEnd,
+) {
+
+    /** Names the relay, the claim and **how many** events — never one of them. */
+    override fun toString(): String =
+        "RelayDelivery(claim=$claim, events=${events.size}, subscription=$subscription)"
 }
 
 /**
  * The relay transport seam (§3): events out, events in.
  *
- * Deals in serialised events rather than parsed ones, because this library has no event codec
- * yet — the encoding round builds it. That is a narrowing stated rather than papered over, and
- * it has one useful side effect: a transport that cannot parse cannot *interpret*, so §3's rule
- * against accepting a relay's claim that an event is valid has nothing to attach itself to.
+ * Deals in **serialised** events rather than parsed ones, and that is a boundary this library keeps
+ * on purpose rather than a gap waiting to be filled. `dev.eryalabs.nenya.wire.EventJson` reads and
+ * writes §7.1's object form and `dev.eryalabs.nenya.envelope.GiftWrap` opens a gift wrap, so a codec
+ * does exist — but it is the *caller's* to apply, after the bytes have crossed this seam. A
+ * transport that cannot parse cannot *interpret*, so §3's rule against accepting a relay's claim
+ * that an event is valid has nothing here to attach itself to, and no relay's framing decisions
+ * reach the reader that recomputes an event id.
  *
  * Everything that comes back through this seam is hostile input (§4.3), including events the
  * implementation believes it authored.
@@ -208,21 +414,26 @@ public enum class RelayAcknowledgement {
 public interface RelayTransport : Seam {
 
     /**
-     * Hand a serialised event to the relays, returning what they claimed about it.
+     * Hand a serialised event to the relays, returning what **each** of them claimed about it.
+     *
+     * One [RelayClaim] per relay the transport tried, in whatever order it chooses. An empty list is
+     * a transport that tried no relay at all and is not an acceptance; [SeamAnswer.Unavailable] is a
+     * transport that was never wired up. Neither a full list nor an empty one is evidence (§3).
      *
      * @param serialisedEvent the JSON of a signed nostr event.
      */
-    public fun publish(serialisedEvent: String): SeamAnswer<RelayAcknowledgement>
+    public fun publish(serialisedEvent: String): SeamAnswer<List<RelayClaim>>
 
     /**
-     * Ask for events matching a serialised NIP-01 filter, returning the serialised events.
+     * Ask for events matching a serialised NIP-01 filter, returning what **each** relay sent.
      *
-     * The list is not a claim of completeness, and §4.6 forbids ordering an order thread by the
+     * One [RelayDelivery] per relay. No list is a claim of completeness — [SubscriptionEnd] carries
+     * only what the relay *said* about that — and §4.6 forbids ordering an order thread by the
      * `created_at` of what comes back: an implementation MUST order by its own receipt sequence.
      *
      * @param serialisedFilter the JSON of a NIP-01 filter.
      */
-    public fun request(serialisedFilter: String): SeamAnswer<List<String>>
+    public fun request(serialisedFilter: String): SeamAnswer<List<RelayDelivery>>
 
     public companion object {
 
@@ -311,10 +522,12 @@ public interface Wallet : Seam {
     /**
      * Pay a BOLT-11 invoice.
      *
-     * @param invoice the BOLT-11 string, opaque to this library — there is no parser yet, so it
-     *   is neither validated nor interpreted here (§9.2 checks 1, 4 and 5 are the encoding
-     *   round's). §12 items 1 and 2 apply to it: an invoice string MUST NOT reach a public
-     *   event, and no order id, coordinate or counterparty pubkey may have reached its
+     * @param invoice the BOLT-11 string, opaque **at this seam**. `dev.eryalabs.nenya.settlement`
+     *   does parse BOLT-11 — Appendix C's reader, which §9.2 checks 3, 4 and 5 are run through —
+     *   and this seam deliberately does not: what the wallet is handed is the exact string the
+     *   payee sent, so the invoice this library checked and the invoice the wallet pays cannot
+     *   differ by a re-encoding. §12 items 1 and 2 apply to it: an invoice string MUST NOT reach a
+     *   public event, and no order id, coordinate or counterparty pubkey may have reached its
      *   description.
      */
     public fun payInvoice(invoice: String): SeamAnswer<WalletPaymentClaim>
@@ -525,8 +738,10 @@ private object FailClosedSigner : Signer {
     override fun nip44Encrypt(counterpartyPublicKeyHex: String, plaintext: String): SeamAnswer<String> =
         SeamAnswer.unavailable(SeamCapability.NIP44_ENCRYPTION)
 
-    override fun nip44Decrypt(counterpartyPublicKeyHex: String, payload: String): SeamAnswer<String> =
-        SeamAnswer.unavailable(SeamCapability.NIP44_DECRYPTION)
+    override fun nip44Decrypt(
+        counterpartyPublicKeyHex: String,
+        payload: String,
+    ): SeamAnswer<Nip44Decryption> = SeamAnswer.unavailable(SeamCapability.NIP44_DECRYPTION)
 
     override fun toString(): String = "Signer.FAIL_CLOSED"
 }
@@ -541,10 +756,10 @@ private object FailClosedEphemeralSigners : EphemeralSigners {
 
 private object FailClosedRelayTransport : RelayTransport {
 
-    override fun publish(serialisedEvent: String): SeamAnswer<RelayAcknowledgement> =
+    override fun publish(serialisedEvent: String): SeamAnswer<List<RelayClaim>> =
         SeamAnswer.unavailable(SeamCapability.RELAY_PUBLISH)
 
-    override fun request(serialisedFilter: String): SeamAnswer<List<String>> =
+    override fun request(serialisedFilter: String): SeamAnswer<List<RelayDelivery>> =
         SeamAnswer.unavailable(SeamCapability.RELAY_REQUEST)
 
     override fun toString(): String = "RelayTransport.FAIL_CLOSED"
