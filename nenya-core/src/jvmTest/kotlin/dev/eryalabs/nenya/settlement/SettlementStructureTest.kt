@@ -573,6 +573,13 @@ class SettlementStructureTest {
      * is: it is something **this implementation** computed from terms it accepted, not a figure a
      * message carried. `FeeSplit`'s own constructor is `internal`, so there is no route by which a
      * counterparty's number reaches one without passing through §8.3's arithmetic first.
+     *
+     * The pin walks the **generic** signature like every other inspection in this file, and unlike
+     * the predicate sweeps it needs no probe of its own: a whole-list equality cannot be
+     * erasure-blind in the direction that matters, because a `List<PaymentHash>` parameter erases
+     * to `List` and fails the pin outright rather than slipping past it. The expected side is built
+     * from `typeName` and never from `name`, because the two disagree for arrays — `[B` against
+     * `byte[]` — and `genericParameterTypes` reports the latter.
      */
     @Test
     fun `the verifier takes a receipt, the store and the split, and nothing that can assert`() {
@@ -581,11 +588,11 @@ class SettlementStructureTest {
 
         assertEquals(
             listOf(
-                PaymentReceipt::class.java,
-                PaymentRequestStore::class.java,
-                FeeSplit::class.java,
+                PaymentReceipt::class.java.typeName,
+                PaymentRequestStore::class.java.typeName,
+                FeeSplit::class.java.typeName,
             ),
-            verify.parameterTypes.toList(),
+            verify.genericParameterTypes.map { it.typeName },
             "anything else on this parameter list is something a counterparty could say",
         )
         assertEquals("$PACKAGE.Settlement", verify.genericReturnType.typeName)
@@ -661,6 +668,15 @@ class SettlementStructureTest {
      * check 6: `Order` is producible only by `OrderMachine`, so the state this reads is one this
      * library's own transition function reached. A `String` or an `OrderState` here would be a
      * caller's assertion about where the order is, which is §9.1's shape one rule over.
+     *
+     * The pin walks the **generic** signature, so the fourth operand is pinned as
+     * `java.util.List<FeeTermSighting>` and not as the bare `List` an erased read reports — which
+     * is strictly stronger, because the erased spelling is equally satisfied by a
+     * `List<PaymentHash>` handing check 3's operand in through the door §9.2 closes. Like the sister
+     * pin above it needs no probe: a whole-list equality cannot be erasure-blind in the dangerous
+     * direction, since the wrapped type shows up in the compared string rather than vanishing from
+     * it. The element assertion that follows is kept even though the pin now subsumes it, because
+     * the sentence it fails with is the one §8.4 needs a reader to see.
      */
     @Test
     fun `the fee-receipt verifier takes the order itself and §8_4's points, and nothing that can assert`() {
@@ -669,12 +685,12 @@ class SettlementStructureTest {
 
         assertEquals(
             listOf(
-                PaymentReceipt::class.java,
-                PaymentRequestStore::class.java,
-                Order::class.java,
-                List::class.java,
+                PaymentReceipt::class.java.typeName,
+                PaymentRequestStore::class.java.typeName,
+                Order::class.java.typeName,
+                "java.util.List<$PACKAGE.FeeTermSighting>",
             ),
-            verify.parameterTypes.toList(),
+            verify.genericParameterTypes.map { it.typeName },
             "anything else on this parameter list is something a counterparty could say",
         )
         assertEquals(

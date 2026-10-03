@@ -2,11 +2,14 @@ package dev.eryalabs.nenya.delivery
 
 import java.io.File
 import java.lang.reflect.Executable
+import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -33,6 +36,16 @@ import kotlin.test.fail
  *   implementation entirely absent.
  * - **Classes asserted by name.** A count is satisfied by whatever the wrong classpath entry
  *   happened to contain, which is exactly the failure the plural form exists to avoid.
+ * - **The generic form, never the erased one.** `parameterTypes` and `returnType` report the
+ *   type after erasure, so `fun x(flags: List<Boolean>)` satisfies "no published member accepts
+ *   a Boolean" and `fun x(): List<DeliveryEvidence>` satisfies "there is exactly one door into
+ *   each evidence type" while handing a caller the thing the rule forbids, wrapped in a
+ *   collection. Every type inspection below therefore reads `genericParameterTypes` /
+ *   `genericReturnType` and matches on `typeName`, which prints the parameterised form. Each
+ *   predicate sweep carries a probe class at the foot of this file that proves it: the probe is
+ *   fed to the sweep's **own** named predicate, because a control exercising a second copy of
+ *   the check would prove nothing about the first. Counting a constructor's arity with
+ *   `parameterTypes.size` is not a type inspection and is left as it is.
  */
 class DeliveryStructureTest {
 
@@ -105,6 +118,76 @@ class DeliveryStructureTest {
         }
 
         fun evidenceType(name: String): Class<*> = mainClasses().single { it.name == "$PACKAGE.$name" }
+
+        /** The two types §10.4's ordering is about, and the only two a published door may hand out. */
+        val EVIDENCE_TYPES: List<String> = listOf("ServedBytesVerified", "DeliveryEvidence")
+
+        /**
+         * The generic type names on [executable]'s parameter list — `java.util.List<java.lang.Boolean>`
+         * where `parameterTypes` would have said `java.util.List`.
+         */
+        fun parameterTypeNames(executable: Executable): List<String> =
+            executable.genericParameterTypes.map { it.typeName }
+
+        /** The generic type name [executable] returns, or `null` when it is a constructor. */
+        fun returnTypeName(executable: Executable): String? =
+            (executable as? Method)?.genericReturnType?.typeName
+
+        /**
+         * Whether [typeName] names [sought] itself or names it inside a generic's type arguments.
+         *
+         * A bare `contains` is wrong: `java.lang.StringBuilder` contains `java.lang.String`. So the
+         * match is on a whole type token — the character either side must not continue an identifier.
+         * A `Regex` would say the same thing and STOP RULE forbids one here.
+         */
+        fun namesType(typeName: String, sought: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = typeName.indexOf(sought, from)
+                if (at < 0) return false
+                val before = if (at == 0) ' ' else typeName[at - 1]
+                val afterAt = at + sought.length
+                val after = if (afterAt >= typeName.length) ' ' else typeName[afterAt]
+                if (!continuesIdentifier(before) && !continuesIdentifier(after)) return true
+                from = at + 1
+            }
+        }
+
+        private fun continuesIdentifier(c: Char): Boolean =
+            c.isLetterOrDigit() || c == '.' || c == '$' || c == '_'
+
+        /**
+         * The first parameter of [executable] that mentions a Boolean anywhere in its generic type,
+         * or `null` if none does. The sweep and its probe both call this, and nothing re-implements it.
+         *
+         * **Both spellings.** A bare Kotlin `Boolean` parameter erases to the JVM primitive, whose
+         * `typeName` is `boolean`; inside a generic it is boxed and reads `java.lang.Boolean`. A
+         * predicate checking only one of the two would be a fresh instance of the same defect.
+         *
+         * Parameters only, which is the rule as it was written: `equals(Any?): Boolean` returns one
+         * and is not a function that can be *told* whether a delivery happened.
+         */
+        fun booleanParameterIn(executable: Executable): String? =
+            parameterTypeNames(executable).firstOrNull {
+                namesType(it, "boolean") || namesType(it, "java.lang.Boolean")
+            }
+
+        /**
+         * The first parameter of [executable] that mentions a `String` anywhere in its generic type,
+         * or `null` if none does. Shared by the pinned-list sweep and its probe.
+         */
+        fun stringParameterIn(executable: Executable): String? =
+            parameterTypeNames(executable).firstOrNull { namesType(it, "java.lang.String") }
+
+        /**
+         * Which of [EVIDENCE_TYPES] [executable]'s return type names — directly or from inside a
+         * generic. `List<DeliveryEvidence>` is a door into [DeliveryEvidence] as surely as
+         * [DeliveryEvidence] is; the erased read this replaced saw only `java.util.List`.
+         */
+        fun evidenceTypesReturnedBy(executable: Executable): List<String> {
+            val returned = returnTypeName(executable) ?: return emptyList()
+            return EVIDENCE_TYPES.filter { namesType(returned, "$PACKAGE.$it") }
+        }
     }
 
     @Test
@@ -185,14 +268,14 @@ class DeliveryStructureTest {
         for (type in published) {
             for (executable in publishedExecutables(type)) {
                 inspected++
-                for (parameter in executable.parameterTypes) {
-                    assertFalse(
-                        parameter == java.lang.Boolean.TYPE || parameter == java.lang.Boolean::class.java,
-                        "${label(type, executable)} takes a Boolean. §11.3 invariant 4: `settled` is " +
-                            "reachable only after the buyer's own hash computation, and a function " +
-                            "that can be told the answer is not a computation",
-                    )
-                }
+                val offender = booleanParameterIn(executable)
+                assertNull(
+                    offender,
+                    "${label(type, executable)} takes a Boolean, as `$offender`. §11.3 invariant 4: " +
+                        "`settled` is reachable only after the buyer's own hash computation, and a " +
+                        "function that can be told the answer is not a computation — wrapping the " +
+                        "answer in a collection does not make it a computation either",
+                )
             }
         }
         assertTrue(inspected > 10, "the sweep inspected only $inspected members, which is not the package")
@@ -203,7 +286,7 @@ class DeliveryStructureTest {
         val found = mutableSetOf<String>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                if (executable.parameterTypes.any { it == String::class.java }) {
+                if (stringParameterIn(executable) != null) {
                     found += label(type, executable)
                 }
             }
@@ -212,38 +295,54 @@ class DeliveryStructureTest {
         assertEquals(
             STRING_PARAMETERS_PERMITTED,
             found,
-            "the set of published members taking a String must match the pinned list exactly. A new " +
-                "entry may be a status string arriving as evidence of delivery; a missing entry means " +
-                "the sweep stopped seeing the package.",
+            "the set of published members taking a String must match the pinned list exactly — and a " +
+                "`List<String>` or a `Map<String, ...>` is taking a String. A new entry may be a " +
+                "status string arriving as evidence of delivery; a missing entry means the sweep " +
+                "stopped seeing the package.",
         )
     }
 
+    /**
+     * A whole-list equality, so it carries no probe and none is missing: an exact pin cannot be
+     * erasure-blind in the dangerous direction, because a smuggled `List<PaymentHash>` parameter
+     * erases to `List` and fails the pin outright. It is read in the generic form anyway, so the
+     * expected side reads as what a human would write.
+     *
+     * The expected names are built with `typeName` rather than `name` on purpose:
+     * `ByteArray::class.java.name` is `"[B"` while its `typeName` is `"byte[]"`, and it is the
+     * latter that `genericParameterTypes` reports.
+     */
     @Test
     fun `the served-bytes verifier takes a commitment, bytes and a bound, and nothing that can assert`() {
         val companion = evidenceType("ServedBytesVerified\$Companion")
         val verify = companion.methods.single { it.name == "verifyServedBytes" }
 
         assertEquals(
-            listOf(DeliverableCommitment::class.java, ByteArray::class.java, java.lang.Long.TYPE),
-            verify.parameterTypes.toList(),
+            listOf(
+                DeliverableCommitment::class.java.typeName,
+                ByteArray::class.java.typeName,
+                java.lang.Long.TYPE.typeName,
+            ),
+            verify.genericParameterTypes.map { it.typeName },
             "§10.4 step 1 takes the commitment, the bytes and §4.3's bound; anything else on this " +
                 "parameter list is something a counterparty could say",
         )
-        assertEquals(ServedBytesVerified::class.java, verify.returnType)
+        assertEquals(ServedBytesVerified::class.java.typeName, verify.genericReturnType.typeName)
     }
 
+    /** A whole-list equality, so no probe. See the note on the served-bytes pin above. */
     @Test
     fun `the plaintext verifier can only be reached with a verified served-bytes value`() {
         val companion = evidenceType("DeliveryEvidence\$Companion")
         val verify = companion.methods.single { it.name == "verifyPlaintextBytes" }
 
         assertEquals(
-            listOf(ServedBytesVerified::class.java, ByteArray::class.java),
-            verify.parameterTypes.toList(),
+            listOf(ServedBytesVerified::class.java.typeName, ByteArray::class.java.typeName),
+            verify.genericParameterTypes.map { it.typeName },
             "§10.4's ordering is enforced by the type system: there is no way to reach the ox check " +
                 "without having passed the x check, and this parameter list is that enforcement",
         )
-        assertEquals(DeliveryEvidence::class.java, verify.returnType)
+        assertEquals(DeliveryEvidence::class.java.typeName, verify.genericReturnType.typeName)
     }
 
     /**
@@ -298,9 +397,7 @@ class DeliveryStructureTest {
         val doors = mutableMapOf<String, MutableList<String>>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                val returned = (executable as? java.lang.reflect.Method)?.returnType ?: continue
-                val name = returned.name.removePrefix("$PACKAGE.")
-                if (name == "ServedBytesVerified" || name == "DeliveryEvidence") {
+                for (name in evidenceTypesReturnedBy(executable)) {
                     doors.getOrPut(name) { mutableListOf() } += label(type, executable)
                 }
             }
@@ -313,7 +410,157 @@ class DeliveryStructureTest {
             ),
             doors,
             "a second published function returning one of these would be a second way to obtain " +
-                "delivery evidence, and §10.4's ordering is only as strong as the narrowest door",
+                "delivery evidence, and §10.4's ordering is only as strong as the narrowest door — " +
+                "a function returning List<DeliveryEvidence> is such a door, which is why this reads " +
+                "the generic return type and not the erased one",
         )
+    }
+
+    /**
+     * The control that proves the Boolean sweep above is not erasure-blind.
+     *
+     * Without it, "no published member accepts a Boolean" is satisfied by a predicate that never
+     * matches a `List<Boolean>` — which is precisely what the erased-type check it replaced was.
+     * The probe is fed to [booleanParameterIn], the sweep's own predicate; a control run against a
+     * second copy of the check would say nothing about the one the sweep runs.
+     */
+    @Test
+    fun `the Boolean sweep catches a Boolean hidden inside a generic type`() {
+        val probe = BooleanCollectionProbe::class.java
+
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                booleanParameterIn(method),
+                "BooleanCollectionProbe.$name hides a Boolean and the sweep missed it — " +
+                    "${method.genericParameterTypes.single().typeName} erases past an erased-type check",
+            )
+        }
+        assertNotNull(
+            booleanParameterIn(probe.methods.single { it.name == "direct" }),
+            "the converted sweep must still catch everything the erased one caught, a bare " +
+                "`boolean` parameter first of all",
+        )
+        assertNull(
+            booleanParameterIn(probe.methods.single { it.name == "permitted" }),
+            "the rule is about Booleans, not about generics; a sweep that rejected every " +
+                "parameterised parameter would pass its probe and forbid the wrong thing",
+        )
+    }
+
+    /**
+     * The control that proves the String sweep above is not erasure-blind.
+     *
+     * The pinned list is only as good as the predicate that populates it: a `List<String>`
+     * parameter that erases to `java.util.List` never reaches the list, so a status string could be
+     * smuggled onto the published surface inside a collection and the exact-set assertion would
+     * stay green. Fed to [stringParameterIn], the sweep's own predicate.
+     */
+    @Test
+    fun `the String sweep catches a String hidden inside a generic type`() {
+        val probe = StringCollectionProbe::class.java
+
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                stringParameterIn(method),
+                "StringCollectionProbe.$name hides a String and the sweep missed it — " +
+                    "${method.genericParameterTypes.single().typeName} erases past an erased-type check",
+            )
+        }
+        assertNotNull(
+            stringParameterIn(probe.methods.single { it.name == "direct" }),
+            "the converted sweep must still catch a bare String parameter, which is what the " +
+                "pinned list was written about",
+        )
+        assertNull(
+            stringParameterIn(probe.methods.single { it.name == "permitted" }),
+            "the rule is about Strings, not about generics; a `List<Long>` parameter is neither a " +
+                "status string nor a smuggled one",
+        )
+        assertNull(
+            stringParameterIn(probe.methods.single { it.name == "lookalike" }),
+            "`java.lang.StringBuilder` contains `java.lang.String` as a substring, so a `contains` " +
+                "match would pin a member that takes no String at all",
+        )
+    }
+
+    /**
+     * The control that proves the evidence-door sweep above is not erasure-blind.
+     *
+     * A published `fun x(): List<DeliveryEvidence>` is a second door into the evidence type and
+     * §10.4's ordering is only as strong as the narrowest one, yet it erases to `java.util.List`
+     * and the sweep this replaced would not have recorded it. Fed to [evidenceTypesReturnedBy].
+     */
+    @Test
+    fun `the evidence-door sweep catches an evidence type hidden inside a generic return`() {
+        val probe = EvidenceDoorProbe::class.java
+
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                evidenceTypesReturnedBy(method).isNotEmpty(),
+                "EvidenceDoorProbe.$name hands out evidence and the sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        assertEquals(
+            listOf("ServedBytesVerified"),
+            evidenceTypesReturnedBy(probe.methods.single { it.name == "direct" }),
+            "the converted sweep must still record the plain return the erased one recorded",
+        )
+        assertEquals(
+            emptyList<String>(),
+            evidenceTypesReturnedBy(probe.methods.single { it.name == "permitted" }),
+            "a door is a function that hands out evidence, not any function with a generic return",
+        )
+        val constructors = probe.declaredConstructors
+        assertTrue(constructors.isNotEmpty(), "the constructor leg of this control must inspect something")
+        for (constructor in constructors) {
+            assertEquals(
+                emptyList<String>(),
+                evidenceTypesReturnedBy(constructor),
+                "a constructor returns nothing and must not be read as a door; the erased sweep " +
+                    "skipped it with `as? Method` and so must this one",
+            )
+        }
+    }
+
+    /**
+     * A probe, not a fixture: three shapes STOP RULE 12 forbids and the erased check could not see,
+     * one it could, and one the rule permits. Members are found by reflection, so a probe that
+     * failed to compile into the test output cannot let its control pass vacuously.
+     */
+    @Suppress("unused")
+    private class BooleanCollectionProbe {
+        fun wrapped(flags: List<Boolean>): Int = flags.size
+        fun keyed(flags: Map<String, Boolean>): Int = flags.size
+        fun nested(flags: List<List<Boolean>>): Int = flags.size
+        fun direct(flag: Boolean): Int = if (flag) 1 else 0
+        fun permitted(sizes: List<Long>): Int = sizes.size
+    }
+
+    /**
+     * The same shapes for the pinned String list, plus `lookalike`, which is the reason the match
+     * is on a whole type token: `java.lang.StringBuilder` contains `java.lang.String`.
+     */
+    @Suppress("unused")
+    private class StringCollectionProbe {
+        fun wrapped(status: List<String>): Int = status.size
+        fun keyed(status: Map<String, Long>): Int = status.size
+        fun nested(status: List<List<String>>): Int = status.size
+        fun direct(status: String): Int = status.length
+        fun permitted(sizes: List<Long>): Int = sizes.size
+        fun lookalike(builder: StringBuilder): Int = builder.length
+    }
+
+    /** The same five shapes for §10.4's doors, stated over return types because the rule is. */
+    @Suppress("unused")
+    private class EvidenceDoorProbe {
+        fun wrapped(): List<DeliveryEvidence> = emptyList()
+        fun keyed(): Map<String, ServedBytesVerified> = emptyMap()
+        fun nested(): List<List<DeliveryEvidence>> = emptyList()
+        fun direct(verified: ServedBytesVerified): ServedBytesVerified = verified
+        fun permitted(): List<String> = emptyList()
     }
 }

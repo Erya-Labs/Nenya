@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.bid
 
+import dev.eryalabs.nenya.order.OrderEvent
+import dev.eryalabs.nenya.wire.EventId
 import java.io.File
 import java.lang.reflect.Constructor
 import java.lang.reflect.Executable
@@ -8,6 +10,8 @@ import java.lang.reflect.Modifier
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -29,6 +33,16 @@ import kotlin.test.fail
  *   absent.
  * - **Classes asserted by name.** A count is satisfied by whatever the wrong classpath entry
  *   happened to contain, which is exactly the failure the plural form exists to avoid.
+ * - **The generic types, never the erased ones.** `Method.parameterTypes` and `Method.returnType`
+ *   answer what the JVM kept, not what the source said: a published `fun x(): List<OrderEvent>`
+ *   erases to `List` and satisfies "no order type is reachable from this package" while handing a
+ *   caller exactly what §6 forbids, wrapped in a collection, and `fun x(flags: List<Boolean>)`
+ *   satisfies "nothing here accepts a Boolean" the same way. Every type inspection below therefore
+ *   reads `genericParameterTypes`/`genericReturnType` and matches on `typeName`, which prints the
+ *   parameterised form. Each of those sweeps is a **named predicate** in the companion object with
+ *   a probe test of its own below, feeding the sweep's own predicate a shape that erases past the
+ *   check it replaced — because a control that exercises a second copy of a check proves nothing
+ *   about the first.
  */
 class BidStructureTest {
 
@@ -56,6 +70,10 @@ class BidStructureTest {
          * A new one turns this red and forces a human to say why it is not a counterparty's status
          * string arriving as evidence of something. Each of these is either an event field the
          * decoder was handed, a diagnostic message, or a compiler-generated enum lookup.
+         *
+         * A `List<String>` or a `Map<String, *>` parameter counts as one of these places and lands
+         * on this list too: a status string smuggled in a collection is the same string, and the
+         * erased read this sweep used to do was blind to every one of them.
          */
         val STRING_PARAMETERS_PERMITTED: Set<String> = setOf(
             "Bid.<init>",           // the bidder pubkey, content, relay hints — event fields
@@ -85,8 +103,35 @@ class BidStructureTest {
             return files.map { Class.forName("$PACKAGE.${it.name.removeSuffix(".class")}", false, loader) }
         }
 
+        /**
+         * The published surface: public, not compiler-synthetic, and not written inside a method body.
+         *
+         * **`!isAnonymousClass && !isLocalClass`, never `enclosingMethod == null`.** They look like the
+         * same test and are not: an object expression in a property initialiser, a companion
+         * initialiser, an `init` block or a constructor reports `isAnonymousClass == true` while
+         * `getEnclosingMethod()` returns null, because the class file records the enclosing method
+         * index as zero. All four shapes are public, non-synthetic and can carry a `String`, so the
+         * one-liner admits exactly what this pair excludes while no test changes colour.
+         *
+         * The predicate is a **scope** test, not an authorship test: reflection cannot tell a
+         * `groupingBy` kotlinc inlined out of the standard library from an object expression an
+         * author published, and the class files are identical in every reachable respect. So what it
+         * removes is pinned by name in [COMPILER_WRITTEN_PERMITTED] and asserted by exact set
+         * equality, and the exclusion is sound only with that pin. Decision N in `loop/VISION.md`.
+         */
         fun publishedClasses(): List<Class<*>> =
-            mainClasses().filter { Modifier.isPublic(it.modifiers) && !it.isSynthetic }
+            mainClasses().filter {
+                Modifier.isPublic(it.modifiers) && !it.isSynthetic && !it.isAnonymousClass && !it.isLocalClass
+            }
+
+        /** What [publishedClasses] removes for being written inside a method body, pinned by name. */
+        val COMPILER_WRITTEN_PERMITTED: Set<String> = setOf(
+            // kotlinc copies the standard library's `groupingBy` into `asBidRejection` when it
+            // inlines it. The copy is JVM-public and carries no ACC_SYNTHETIC, so nothing but the
+            // predicate above keeps it off this package's published surface — and `asBidRejection`
+            // is itself `@JvmSynthetic internal`, so the author had already taken it off.
+            "BidRejectionKt\$asBidRejection\$\$inlined\$groupingBy\$1",
+        )
 
         /** Constructors and own public methods, minus everything a client cannot name. */
         fun publishedExecutables(type: Class<*>): List<Executable> =
@@ -100,6 +145,109 @@ class BidStructureTest {
             val member = if (executable is Constructor<*>) "<init>" else executable.name
             return "$simple.$member"
         }
+
+        /** [Bid] itself, spelled once, so the door sweep and its probe cannot disagree. */
+        val BID_TYPE: String = "$PACKAGE.Bid"
+
+        /** The one type T8's recomputation produces, and the only key to [Bid]'s constructor (§4.1). */
+        const val EVENT_ID_TYPE: String = "dev.eryalabs.nenya.wire.EventId"
+
+        /**
+         * The **generic** type names [executable]'s parameters carry.
+         *
+         * `parameterTypes` would answer the erased ones, and every parameter rule here is a rule
+         * about what a caller may hand this package: a `List<Boolean>` erases to `List`, so the
+         * erased array says "no member takes a Boolean" about a member that takes a pile of them.
+         */
+        fun parameterTypeNames(executable: Executable): List<String> =
+            executable.genericParameterTypes.map { it.typeName }
+
+        /** The generic type names [executable] mentions — parameters and return alike. */
+        fun mentionedTypeNames(executable: Executable): List<String> =
+            parameterTypeNames(executable) +
+                listOfNotNull((executable as? Method)?.genericReturnType).map { it.typeName }
+
+        /**
+         * Whether [typeName] names [sought] itself or names it inside a generic's type arguments.
+         *
+         * A bare `contains` is wrong twice over in this package: `java.lang.StringBuilder` contains
+         * `java.lang.String`, and `dev.eryalabs.nenya.bid.BidRejection` contains
+         * `dev.eryalabs.nenya.bid.Bid`. So the match is on a whole type token — the character either
+         * side must not continue an identifier. Both false positives are probed below.
+         *
+         * Written out here rather than borrowed from a sibling package's structure test, and that is
+         * the convention rather than duplication: this repository keeps one reflection helper per
+         * package on purpose, because a single shared one would be a sweep deciding at run time
+         * which package it is about.
+         */
+        fun namesType(typeName: String, sought: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = typeName.indexOf(sought, from)
+                if (at < 0) return false
+                val before = if (at == 0) ' ' else typeName[at - 1]
+                val afterAt = at + sought.length
+                val after = if (afterAt >= typeName.length) ' ' else typeName[afterAt]
+                if (!continuesIdentifier(before) && !continuesIdentifier(after)) return true
+                from = at + 1
+            }
+        }
+
+        private fun continuesIdentifier(c: Char): Boolean =
+            c.isLetterOrDigit() || c == '.' || c == '$' || c == '_'
+
+        /**
+         * The first parameter of [executable] that is, or hides, a Boolean — or `null`.
+         *
+         * **Both spellings, and that is not belt-and-braces.** A bare Kotlin `Boolean` parameter
+         * erases to the JVM primitive, whose `typeName` is `"boolean"`; the same type inside a
+         * generic is boxed and reads `java.lang.Boolean`. A converted predicate matching only one of
+         * the two would forbid less than the erased check it replaced, on one of the two shapes.
+         *
+         * **Parameters only.** The rule is "accepts a Boolean", and widening it to return types
+         * would be this sweep gaining a rule rather than losing a blind spot — [Bid.openEnded] is a
+         * published `Boolean` the specification asks for (§6's open-ended bid), and it is an answer
+         * this library computed, not one a counterparty handed it.
+         */
+        fun booleanParameterIn(executable: Executable): String? =
+            parameterTypeNames(executable).firstOrNull {
+                namesType(it, "boolean") || namesType(it, "java.lang.Boolean")
+            }
+
+        /** The first parameter of [executable] that is, or hides, a `String` — or `null`. */
+        fun stringParameterIn(executable: Executable): String? =
+            parameterTypeNames(executable).firstOrNull { namesType(it, "java.lang.String") }
+
+        /**
+         * The first type [executable] mentions that lives in the order package — or `null`.
+         *
+         * Matched on the package prefix, dot included, rather than on a whole token: the rule is
+         * about *every* type in `dev.eryalabs.nenya.order`, named or not yet written, and a
+         * hypothetical `dev.eryalabs.nenya.orderbook` is excluded by the trailing dot.
+         */
+        fun orderTypeIn(executable: Executable): String? =
+            mentionedTypeNames(executable).firstOrNull { it.contains("$ORDER_PACKAGE.") }
+
+        /**
+         * The return type of [executable] if it is, or hides, a [Bid] — or `null` (constructors too).
+         *
+         * A method returning `List<Bid>` is a door: §4.1's check is a claim about one event, and a
+         * caller handed a pile of bids has no way to ask which of them this library hashed.
+         */
+        fun bidReturnedBy(executable: Executable): String? =
+            (executable as? Method)?.genericReturnType?.typeName?.takeIf { namesType(it, BID_TYPE) }
+
+        /**
+         * The parameter of [executable] that **is** an [EventId] — or `null`.
+         *
+         * Exact equality rather than [namesType], and the strictness is the point: the polarity of
+         * this one is reversed, because it is the evidence a constructor must *demand* rather than a
+         * type it must not touch. A `List<EventId>` parameter is not an id T8 recomputed, and
+         * neither is a type variable bounded by `EventId` — which is exactly what the erased read
+         * could not tell apart, since `T : EventId` erases to `EventId` and satisfied it.
+         */
+        fun eventIdParameterIn(executable: Executable): String? =
+            parameterTypeNames(executable).firstOrNull { it == EVENT_ID_TYPE }
     }
 
     @Test
@@ -131,14 +279,13 @@ class BidStructureTest {
         for (type in published) {
             for (executable in publishedExecutables(type)) {
                 inspected++
-                for (parameter in executable.parameterTypes) {
-                    assertFalse(
-                        parameter == java.lang.Boolean.TYPE || parameter == java.lang.Boolean::class.java,
-                        "${label(type, executable)} takes a Boolean. A bid is decoded from an event " +
-                            "this library hashed for itself; a function that can be told the answer " +
-                            "is not a decoder, and a relay's say-so is not evidence of anything.",
-                    )
-                }
+                val hidden = booleanParameterIn(executable)
+                assertNull(
+                    hidden,
+                    "${label(type, executable)} takes a Boolean, as $hidden. A bid is decoded from " +
+                        "an event this library hashed for itself; a function that can be told the " +
+                        "answer is not a decoder, and a relay's say-so is not evidence of anything.",
+                )
             }
         }
         assertTrue(inspected > 10, "the sweep inspected only $inspected members, which is not the package")
@@ -149,7 +296,7 @@ class BidStructureTest {
         val found = mutableSetOf<String>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                if (executable.parameterTypes.any { it == String::class.java }) {
+                if (stringParameterIn(executable) != null) {
                     found += label(type, executable)
                 }
             }
@@ -161,6 +308,33 @@ class BidStructureTest {
             "the set of published members taking a String must match the pinned list exactly. A " +
                 "new entry may be a status string arriving as evidence; a missing entry means the " +
                 "sweep stopped seeing the package.",
+        )
+    }
+
+    /**
+     * What [publishedClasses] drops for being written inside a method body is exactly what is pinned.
+     *
+     * That filter is the one step in this sweep which **discards** a class rather than inspecting it,
+     * so unpinned it would be the single place a published `String` could disappear without anything
+     * going red. Three future events must land here instead of vanishing: an author publishing an
+     * object expression, a new inlined standard-library call inside a published function, and a
+     * compiler flag that turns every lambda into a class. Decision N in `loop/VISION.md`.
+     */
+    @Test
+    fun `the classes dropped for being compiler-written are exactly the pinned ones`() {
+        val dropped = mainClasses()
+            .filter { Modifier.isPublic(it.modifiers) && !it.isSynthetic }
+            .filter { it.isAnonymousClass || it.isLocalClass }
+            .map { it.name.removePrefix("$PACKAGE.") }
+            .toSet()
+
+        assertEquals(
+            COMPILER_WRITTEN_PERMITTED,
+            dropped,
+            "the classes this sweep drops for being written inside a method body must match the " +
+                "pinned list exactly. A new entry is a class to look at before it is dropped; a " +
+                "missing entry means the filter stopped dropping anything and every other " +
+                "assertion here is now inspecting a different surface than it was pinned against.",
         )
     }
 
@@ -194,22 +368,15 @@ class BidStructureTest {
                 )
             }
             for (executable in publishedExecutables(type)) {
-                // The **generic** types, not the erased ones. A published `fun x(): List<OrderEvent>`
-                // erases to `List` and would satisfy a `returnType` check while handing a caller a
-                // pile of order events — which is the whole thing §6 forbids, wrapped in a
-                // collection. `typeName` prints the parameterised form, so `contains` sees it.
-                val mentioned = (
-                    executable.genericParameterTypes.toList() +
-                        listOfNotNull((executable as? Method)?.genericReturnType)
-                    ).map { it.typeName }
-                for (other in mentioned) {
-                    assertFalse(
-                        other.contains("$ORDER_PACKAGE."),
-                        "${label(type, executable)} mentions $other; §6 forbids advancing any " +
-                            "order state on the basis of a bid, and a bid layer that can hand the " +
-                            "state machine a value is a bid layer that can",
-                    )
-                }
+                // The **generic** types, not the erased ones — see [orderTypeIn], and the probe
+                // below that proves the difference is real rather than asserted.
+                val mentioned = orderTypeIn(executable)
+                assertNull(
+                    mentioned,
+                    "${label(type, executable)} mentions $mentioned; §6 forbids advancing any " +
+                        "order state on the basis of a bid, and a bid layer that can hand the " +
+                        "state machine a value is a bid layer that can",
+                )
             }
         }
     }
@@ -247,32 +414,220 @@ class BidStructureTest {
      * The narrowest door, as T8 puts it: every published function returning a [Bid] is one an event
      * had to pass §4.1's id check to reach. A second one would be a second way to decode a bid this
      * library never hashed.
+     *
+     * A function returning `List<Bid>` is a second door too, and the erased read this used to do
+     * could not see one — which is why it now reads [bidReturnedBy].
      */
     @Test
     fun `the only published function returning a bid is decode`() {
         val doors = mutableListOf<String>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                val returned = (executable as? Method)?.returnType ?: continue
-                if (returned.name == "$PACKAGE.Bid") doors += label(type, executable)
+                if (bidReturnedBy(executable) != null) doors += label(type, executable)
             }
         }
 
         assertEquals(listOf("Bid\$Companion.decode"), doors)
     }
 
-    /** The published constructor [Bid] does carry is the internal one, which is not a door. */
+    /**
+     * The published constructor [Bid] does carry is the internal one, which is not a door.
+     *
+     * Read off the **generic** parameter list and compared for equality with [EVENT_ID_TYPE], which
+     * is stricter than the erased read it replaced rather than looser: `parameterTypes` reports the
+     * *erasure*, so a constructor declared `<T : EventId> Bid(id: T, ...)` answered `EventId` and
+     * satisfied this, although what it actually accepts is whatever a caller picks for `T`. A
+     * `List<EventId>` satisfies neither, and that is deliberate — §4.1's check is a fact about one
+     * event, and a constructor handed a list of ids has not been told which event this is.
+     */
     @Test
     fun `a bid cannot be built from values a caller chose`() {
         val type = publishedClasses().single { it.name == "$PACKAGE.Bid" }
 
         for (constructor in type.constructors) {
-            assertTrue(
-                constructor.parameterTypes.any { it.name == "dev.eryalabs.nenya.wire.EventId" },
+            assertNotNull(
+                eventIdParameterIn(constructor),
                 "Kotlin publishes an `internal` constructor to the JVM, so this one is reachable " +
                     "from Java — but only with an EventId, which only T8's recomputation produces. " +
-                    "A constructor taking loose values would be a bid nobody checked.",
+                    "A constructor taking loose values would be a bid nobody checked. This one " +
+                    "takes ${parameterTypeNames(constructor)}.",
             )
         }
+    }
+
+    /**
+     * The control that proves [booleanParameterIn] is not erasure-blind.
+     *
+     * Without it, "no published member takes a Boolean" is satisfied by a predicate that never
+     * matches a `List<Boolean>` — which is precisely what the erased-type check it replaced was.
+     * Fed to the sweep's **own** predicate, never to a second copy of it: a control exercising a
+     * re-implementation would prove nothing about the check that actually runs above.
+     */
+    @Test
+    fun `the Boolean sweep catches a Boolean hidden inside a generic type`() {
+        val probe = BooleanCollectionProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested", "arrayed")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                booleanParameterIn(method),
+                "BooleanCollectionProbe.$name hides a Boolean and the sweep missed it — " +
+                    "${parameterTypeNames(method)} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertNotNull(booleanParameterIn(probe.methods.single { it.name == "direct" }))
+        // Not merely "reject every generic".
+        assertNull(booleanParameterIn(probe.methods.single { it.name == "permitted" }))
+    }
+
+    /**
+     * A probe, not a fixture: four shapes the erased check waved through, one it caught, and one
+     * STOP RULE 12 permits.
+     */
+    @Suppress("unused")
+    private class BooleanCollectionProbe {
+        fun wrapped(flags: List<Boolean>): Int = flags.size
+        fun keyed(flags: Map<String, Boolean>): Int = flags.size
+        fun nested(flags: List<List<Boolean>>): Int = flags.size
+        fun arrayed(flags: Array<Boolean>): Int = flags.size
+        fun direct(flag: Boolean): Int = if (flag) 1 else 0
+        fun permitted(counts: List<Int>): Int = counts.size
+    }
+
+    /**
+     * The control that proves [stringParameterIn] is not erasure-blind, and not merely a `contains`.
+     *
+     * `similar` is the reason [namesType] exists rather than a substring test: `StringBuilder` is
+     * not a String, and a pinned list that grew an entry for it would be a human being sent to
+     * justify a member that never took a counterparty's status string at all.
+     */
+    @Test
+    fun `the String sweep catches a String hidden inside a generic type`() {
+        val probe = StringCollectionProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                stringParameterIn(method),
+                "StringCollectionProbe.$name hides a String and the sweep missed it — " +
+                    "${parameterTypeNames(method)} erases past an erased-type check",
+            )
+        }
+        assertNotNull(stringParameterIn(probe.methods.single { it.name == "direct" }))
+        assertNull(stringParameterIn(probe.methods.single { it.name == "permitted" }))
+        assertNull(stringParameterIn(probe.methods.single { it.name == "similar" }))
+    }
+
+    /** A probe, not a fixture: three hidden Strings, one plain one, and two that are not Strings. */
+    @Suppress("unused")
+    private class StringCollectionProbe {
+        fun wrapped(statuses: List<String>): Int = statuses.size
+        fun keyed(statuses: Map<String, Int>): Int = statuses.size
+        fun nested(statuses: List<List<String>>): Int = statuses.size
+        fun direct(status: String): Int = status.length
+        fun permitted(counts: List<Int>): Int = counts.size
+        fun similar(builder: StringBuilder): Int = builder.length
+    }
+
+    /**
+     * The control that proves [orderTypeIn] is not erasure-blind.
+     *
+     * This is the one T11 found: a published `fun x(): List<OrderEvent>` erases to `List`, so the
+     * sweep said §6 was honoured about a member handing a caller a pile of order events. `permitted`
+     * guards the other end, so that the rule is not silently "reject every generic".
+     */
+    @Test
+    fun `the order-package sweep catches an order type hidden inside a generic type`() {
+        val probe = OrderTypeCollectionProbe::class.java
+        for (name in listOf("wrapped", "keyed", "parameter", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                orderTypeIn(method),
+                "OrderTypeCollectionProbe.$name hides an order type and the sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        assertNotNull(orderTypeIn(probe.methods.single { it.name == "direct" }))
+        assertNull(orderTypeIn(probe.methods.single { it.name == "permitted" }))
+    }
+
+    /** A probe, not a fixture: four shapes §6 forbids, one it forbids plainly, and one it permits. */
+    @Suppress("unused")
+    private class OrderTypeCollectionProbe {
+        fun wrapped(): List<OrderEvent> = emptyList()
+        fun keyed(): Map<String, OrderEvent> = emptyMap()
+        fun parameter(events: Set<OrderEvent>): Int = events.size
+        fun nested(): List<List<OrderEvent>> = emptyList()
+        fun direct(event: OrderEvent): Int = event.hashCode()
+        fun permitted(): List<String> = emptyList()
+    }
+
+    /**
+     * The control that proves [bidReturnedBy] is not erasure-blind, and that it is about *returns*.
+     *
+     * `similar` is the second false positive [namesType] exists for: `BidRejection` begins with
+     * `Bid`, and a door sweep that counted every enum accessor as a way of obtaining a bid would be
+     * red against the package it is guarding on the day somebody read its message.
+     */
+    @Test
+    fun `the decode-door sweep catches a Bid hidden inside a generic type`() {
+        val probe = BidCollectionProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                bidReturnedBy(method),
+                "BidCollectionProbe.$name returns a Bid and the door sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        assertNotNull(bidReturnedBy(probe.methods.single { it.name == "direct" }))
+        assertNull(bidReturnedBy(probe.methods.single { it.name == "permitted" }))
+        assertNull(bidReturnedBy(probe.methods.single { it.name == "similar" }))
+        // The rule is about handing a bid out, not about being handed one: T8's door is the return.
+        assertNull(bidReturnedBy(probe.methods.single { it.name == "parameter" }))
+    }
+
+    /** A probe, not a fixture: three hidden doors, one plain one, and three things that are not. */
+    @Suppress("unused")
+    private class BidCollectionProbe {
+        fun wrapped(): List<Bid> = emptyList()
+        fun keyed(): Map<String, Bid> = emptyMap()
+        fun nested(): List<List<Bid>> = emptyList()
+        fun direct(): Bid? = null
+        fun permitted(): List<String> = emptyList()
+        fun similar(): List<BidRejection> = emptyList()
+        fun parameter(bid: Bid): Int = bid.hashCode()
+    }
+
+    /**
+     * The control that proves [eventIdParameterIn] demands an id rather than something shaped like
+     * one.
+     *
+     * The reversed polarity is why this probe reads the other way round: the three shapes it must
+     * **not** accept are the ways a constructor could look like it demanded T8's recomputed id
+     * without demanding it. `variable` is the erasure case — `T : EventId` erases to `EventId`, so
+     * the check this replaced accepted it while the constructor accepted whatever the caller chose.
+     */
+    @Test
+    fun `the EventId constructor check is not satisfied by a list of ids or a type variable`() {
+        val probe = EventIdCollectionProbe::class.java
+        // Caught by the old check too: a plain EventId parameter is the evidence the rule wants.
+        assertNotNull(eventIdParameterIn(probe.methods.single { it.name == "direct" }))
+        for (name in listOf("wrapped", "variable", "none")) {
+            val method = probe.methods.single { it.name == name }
+            assertNull(
+                eventIdParameterIn(method),
+                "EventIdCollectionProbe.$name was read as demanding an EventId, and it does not — " +
+                    "it takes ${parameterTypeNames(method)}",
+            )
+        }
+    }
+
+    /** A probe, not a fixture: the one shape the rule accepts, and three that only resemble it. */
+    @Suppress("unused")
+    private class EventIdCollectionProbe {
+        fun direct(id: EventId): Int = id.hashCode()
+        fun wrapped(ids: List<EventId>): Int = ids.size
+        fun <T : EventId> variable(id: T): Int = id.hashCode()
+        fun none(name: String): Int = name.length
     }
 }

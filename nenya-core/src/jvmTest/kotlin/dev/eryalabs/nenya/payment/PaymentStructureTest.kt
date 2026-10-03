@@ -6,6 +6,8 @@ import java.lang.reflect.Modifier
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -17,13 +19,40 @@ import kotlin.test.fail
  * it about whatever is in the package tomorrow, which is when somebody adds
  * `verify(..., walletSaysPaid: Boolean)` in a hurry.
  *
+ * ### Every type inspection here walks the generic signature
+ *
+ * This file is the shape the other packages' structural sweeps were copied from, and several of
+ * their KDocs say so by name, so the correction belongs here in full rather than as a line in each
+ * of them.
+ *
+ * A sweep that reads `Method.parameterTypes` or `Constructor.parameterTypes` sees the **erased**
+ * type. `List<Boolean>` erases to `List`, `Map<String, Boolean>` erases to `Map` — so the rule
+ * below, "no published constructor or method accepts a Boolean", was satisfied by
+ * `verify(..., walletSaysPaid: List<Boolean>)`, which is §9.1 undone by the addition of a pair of
+ * angle brackets. The same reading let a status string in as `List<String>` past the pinned list.
+ * Both scans therefore read `genericParameterTypes` and match on `typeName`, which prints the
+ * parameterised form `java.util.List<java.lang.Boolean>`, through [namesType] — a whole-token
+ * matcher, because a bare `contains` for `java.lang.String` also matches
+ * `java.lang.StringBuilder`. [BooleanEvidenceProbe] and [StringEvidenceProbe] are what prove the
+ * two predicates can fail: each is fed to the sweep's **own** named predicate, never to a second
+ * copy of the check, since a control exercising a copy proves nothing about the original.
+ *
+ * Two deliberate narrowings, stated so a later reader does not read them as oversights.
+ * **Parameters only, no return type** — both rules are about what a member *accepts*, and
+ * `PaymentHash.equals` returns `boolean` while `PaymentHash.toHex` returns `String`, so a sweep
+ * that also walked `genericReturnType` would be a different rule and a false one. Widening either
+ * to the return side is a change to the rule, not to the reflection. And **the pinned signature of
+ * [VerifiedPayment.Companion.verify] carries no probe**: an exact whole-list equality cannot be
+ * erasure-blind in the dangerous direction, because a `List<PaymentHash>` parameter erases to
+ * `List` and fails the pin outright.
+ *
  * ### `java.lang.reflect` only
  *
  * `kotlin-reflect` is not on any classpath and STOP RULE 11 forbids adding one. The two
  * failure modes differ and both are traps: `KClass.members` and `KClass.constructors` compile
  * and then throw `KotlinReflectionNotSupportedError` at run time, while `kotlin.reflect.full.*`
- * does not compile at all. So: `getConstructors()`, `getMethods()`, `getParameterTypes()`,
- * `Modifier`, and nothing else.
+ * does not compile at all. So: `getConstructors()`, `getMethods()`,
+ * `getGenericParameterTypes()`, `getGenericReturnType()`, `Modifier`, and nothing else.
  *
  * ### Why `getResources`, plural
  *
@@ -108,6 +137,80 @@ class PaymentStructureTest {
             val member = if (executable is java.lang.reflect.Constructor<*>) "<init>" else executable.name
             return "$simple.$member"
         }
+
+        /**
+         * The **generic** type names [executable] accepts, one per parameter.
+         *
+         * `typeName` prints the parameterised form — `java.util.List<java.lang.Boolean>` where the
+         * erased `Class` prints `interface java.util.List` — which is the whole point: the two
+         * rules below are about a type this package forbids, and a forbidden type wrapped in a
+         * collection is still handed to the caller.
+         *
+         * Parameters only. See this file's KDoc: the return side is a different rule, and a false
+         * one here, because `PaymentHash.equals` returns `boolean` and `toHex` returns `String`.
+         */
+        fun parametersOf(executable: Executable): List<String> =
+            executable.genericParameterTypes.map { it.typeName }
+
+        /**
+         * Both spellings of the type §9.1 forbids, derived from the two `Class` objects the erased
+         * check used to compare against so that the new predicate demonstrably covers the old one.
+         *
+         * A bare Kotlin `Boolean` parameter erases to the JVM primitive, whose `typeName` is
+         * `boolean`; inside a generic it is boxed and reads `java.lang.Boolean`. A converted
+         * predicate that checked only one of the two would be a regression in the other direction.
+         */
+        val BOOLEAN_TYPES: List<String> = listOf(
+            java.lang.Boolean.TYPE.typeName,
+            java.lang.Boolean::class.java.typeName,
+        )
+
+        /** `String` as it appears inside a `typeName`, bare or as a generic's type argument. */
+        val STRING_TYPE: String = String::class.java.typeName
+
+        /**
+         * The first parameter of [executable] that names a Boolean, in its generic form, or `null`.
+         *
+         * Returned rather than asserted so the sweep's failure message can print the shape it
+         * found, and so the probe below exercises *this* function rather than a copy of it.
+         */
+        fun booleanParameterIn(executable: Executable): String? =
+            parametersOf(executable).firstOrNull { parameter ->
+                BOOLEAN_TYPES.any { namesType(parameter, it) }
+            }
+
+        /** The first parameter of [executable] that names a String, in its generic form, or `null`. */
+        fun stringParameterIn(executable: Executable): String? =
+            parametersOf(executable).firstOrNull { namesType(it, STRING_TYPE) }
+
+        /**
+         * Whether [typeName] names [sought] itself or names it inside a generic's type arguments.
+         *
+         * A bare `contains` is wrong: `java.lang.StringBuilder` contains `java.lang.String`, and a
+         * sweep that flagged a `StringBuilder` parameter as a status string would be loosened by
+         * the first person who hit it. So the match is on a whole type token — the character
+         * either side must not continue an identifier. `java.util.List<java.lang.Boolean>` matches
+         * on `<` and `>`, `boolean[]` matches on `[`, and a bare type matches at either end.
+         *
+         * Plain string operations rather than a `Regex`: the reflection helper each package keeps
+         * is deliberately its own copy, and a shared one would be a single sweep deciding at run
+         * time which package it is about.
+         */
+        fun namesType(typeName: String, sought: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = typeName.indexOf(sought, from)
+                if (at < 0) return false
+                val before = if (at == 0) ' ' else typeName[at - 1]
+                val afterAt = at + sought.length
+                val after = if (afterAt >= typeName.length) ' ' else typeName[afterAt]
+                if (!continuesIdentifier(before) && !continuesIdentifier(after)) return true
+                from = at + 1
+            }
+        }
+
+        private fun continuesIdentifier(c: Char): Boolean =
+            c.isLetterOrDigit() || c == '.' || c == '$' || c == '_'
     }
 
     @Test
@@ -165,30 +268,76 @@ class PaymentStructureTest {
         }
     }
 
+    /**
+     * STOP RULE 12 and §9.1, read over the **generic** parameter list: `List<Boolean>` erases to
+     * `List`, so the erased form of this sweep passed over the exact shape it exists to forbid.
+     */
     @Test
     fun `no published constructor or method accepts a Boolean`() {
         var inspected = 0
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
                 inspected++
-                for (parameter in executable.parameterTypes) {
-                    assertFalse(
-                        parameter == java.lang.Boolean.TYPE || parameter == java.lang.Boolean::class.java,
-                        "${label(type, executable)} takes a Boolean. §9.1: a wallet's isPaid is not " +
-                            "evidence, and a function that can be told the answer is not a verifier",
-                    )
-                }
+                val offending = booleanParameterIn(executable)
+                assertNull(
+                    offending,
+                    "${label(type, executable)} takes a Boolean, as $offending. §9.1: a wallet's " +
+                        "isPaid is not evidence, and a function that can be told the answer is not " +
+                        "a verifier",
+                )
             }
         }
         assertTrue(inspected > 10, "the sweep inspected only $inspected members, which is not the package")
     }
 
+    /**
+     * The control that proves the sweep above is not erasure-blind.
+     *
+     * Without it, "no published member takes a Boolean" is satisfied by a predicate that never
+     * matches a `List<Boolean>` — which is precisely what the erased-type check it replaced was.
+     * The probe is fed to [booleanParameterIn], the sweep's own predicate, and not to a copy: a
+     * control exercising a second implementation of the check proves nothing about the first.
+     */
+    @Test
+    fun `the Boolean sweep catches a Boolean hidden inside a generic type`() {
+        val probe = BooleanEvidenceProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested", "arrayed")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                booleanParameterIn(method),
+                "BooleanEvidenceProbe.$name hides a Boolean and the sweep missed it — " +
+                    "${method.genericParameterTypes.single().typeName} erases past an erased-type check",
+            )
+        }
+        // Caught by the old erased check too: this is what shows the two controls differ.
+        assertNotNull(booleanParameterIn(probe.methods.single { it.name == "direct" }))
+        // Not merely "reject every generic".
+        assertNull(booleanParameterIn(probe.methods.single { it.name == "permitted" }))
+    }
+
+    /** A probe, not a fixture: four shapes §9.1 forbids, the bare one, and one it permits. */
+    @Suppress("unused")
+    private class BooleanEvidenceProbe {
+        fun wrapped(flags: List<Boolean>): Int = flags.size
+        fun keyed(byPayee: Map<String, Boolean>): Int = byPayee.size
+        fun nested(flags: List<List<Boolean>>): Int = flags.size
+        fun arrayed(flags: BooleanArray): Int = flags.size
+        fun direct(walletSaysPaid: Boolean): Int = if (walletSaysPaid) 1 else 0
+        fun permitted(hashes: List<PaymentHash>): Int = hashes.size
+    }
+
+    /**
+     * §9.1's other half, over the generic parameter list for the same reason as the Boolean rule:
+     * a counterparty's status token wrapped in a `List<String>` or keyed into a
+     * `Map<String, Int>` is still a status token, and the erased form of this scan admitted both
+     * without adding a line to the pinned list.
+     */
     @Test
     fun `every published String parameter is on the pinned list`() {
         val found = mutableSetOf<String>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                if (executable.parameterTypes.any { it == String::class.java }) {
+                if (stringParameterIn(executable) != null) {
                     found += label(type, executable)
                 }
             }
@@ -203,17 +352,71 @@ class PaymentStructureTest {
         )
     }
 
+    /**
+     * The control that proves the sweep above is not erasure-blind — and, separately, that it is
+     * not blind in the *other* direction either.
+     *
+     * A whole-token matcher is what makes both halves true at once. `contains` alone would flag
+     * `StringBuilder`, and the person who hit that would loosen the rule rather than the matcher;
+     * an erased `Class` comparison misses every `String` inside a generic. [StringEvidenceProbe]
+     * asserts both against [stringParameterIn] itself.
+     */
+    @Test
+    fun `the String sweep catches a String hidden inside a generic type, and no lookalike`() {
+        val probe = StringEvidenceProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                stringParameterIn(method),
+                "StringEvidenceProbe.$name hides a String and the sweep missed it — " +
+                    "${method.genericParameterTypes.single().typeName} erases past an erased-type check",
+            )
+        }
+        // Caught by the old erased check too: this is what shows the two controls differ.
+        assertNotNull(stringParameterIn(probe.methods.single { it.name == "direct" }))
+        // Not merely "reject every generic".
+        assertNull(stringParameterIn(probe.methods.single { it.name == "permitted" }))
+        // And not a bare `contains`: java.lang.StringBuilder is not a status string.
+        assertNull(stringParameterIn(probe.methods.single { it.name == "lookalike" }))
+    }
+
+    /** A probe, not a fixture: three hidden Strings, the bare one, and two the rule permits. */
+    @Suppress("unused")
+    private class StringEvidenceProbe {
+        fun wrapped(statuses: List<String>): Int = statuses.size
+        fun keyed(byStatus: Map<String, Int>): Int = byStatus.size
+        fun nested(statuses: List<List<String>>): Int = statuses.size
+        fun direct(status: String): Int = status.length
+        fun permitted(hashes: List<PaymentHash>): Int = hashes.size
+        fun lookalike(text: StringBuilder): Int = text.length
+    }
+
+    /**
+     * The one assertion here that carries **no probe**, and deliberately.
+     *
+     * An exact whole-list equality cannot be erasure-blind in the dangerous direction: a
+     * `List<PaymentHash>` parameter erases to `List` and fails the pin outright, so there is no
+     * hidden shape for a control to demonstrate. It is still written against the generic signature,
+     * because the expected side must be the same language as the actual one and because a future
+     * parameterised entry should read as what it is. The expected names come from
+     * `::class.java.typeName` rather than `.name`: for an array the two differ — `[B` against
+     * `byte[]` — and `genericParameterTypes` reports the latter.
+     */
     @Test
     fun `the verifier takes a preimage and a payment hash, and nothing that can assert`() {
         val companion = mainClasses().single { it.name == "$PACKAGE.VerifiedPayment\$Companion" }
         val verify = companion.methods.single { it.name == "verify" }
 
         assertEquals(
-            listOf(Payee::class.java, PaymentHash::class.java, Preimage::class.java),
-            verify.parameterTypes.toList(),
+            listOf(
+                Payee::class.java.typeName,
+                PaymentHash::class.java.typeName,
+                Preimage::class.java.typeName,
+            ),
+            verify.genericParameterTypes.map { it.typeName },
             "§9.2 check 3 takes a preimage and the hash to check it against; anything else on this " +
                 "parameter list is something a counterparty could say",
         )
-        assertEquals(VerifiedPayment::class.java, verify.returnType)
+        assertEquals(VerifiedPayment::class.java.typeName, verify.genericReturnType.typeName)
     }
 }

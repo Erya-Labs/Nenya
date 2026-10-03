@@ -12,6 +12,8 @@ import java.lang.reflect.Modifier
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -40,10 +42,32 @@ import kotlin.test.fail
  * T11's review found this sweep shape elsewhere in the repository reading the **erased**
  * `parameterTypes`/`returnType`, where a published `fun ids(): List<OrderId>` erases to `List` and
  * satisfies the assertion while handing a caller exactly the thing the rule forbids, wrapped in a
- * collection. Every type-inspecting assertion below goes through [mentions], which walks
- * `genericParameterTypes` and `genericReturnType` and matches on `typeName` — not just the first
- * one, which is the blind spot T11 found and T12 then wrote fresh into a seventh file. Counting a
- * constructor's arity with `parameterTypes.size` is not a type inspection and is untouched by this.
+ * collection. Every type-inspecting assertion below walks `genericParameterTypes` and
+ * `genericReturnType` and matches on `typeName` — not just the first one, which is the blind spot
+ * T11 found and T12 then wrote fresh into a seventh file. No read of the erased `parameterTypes`
+ * or `returnType` is left in this file at all.
+ *
+ * ### Reading the generic signature is not the same as seeing inside it
+ *
+ * T36's correction, and the reason this file changed a second time: a sweep can walk the generic
+ * signature and still be blind, because `java.util.List<java.lang.Boolean>` is not **equal** to
+ * `"java.lang.Boolean"` and does not **start with** `dev.eryalabs.nenya.channel.AttributedRumor`.
+ * Every predicate here therefore looks for the forbidden type *anywhere* in the printed name, and
+ * on a whole type token: through [namesType], through [namesTypeUnder] where a nested case counts
+ * too, or through the plain `contains` [orderIdMentions] keeps and explains for being the wider of
+ * the two. A forbidden type hidden one collection deep is caught by all three.
+ *
+ * Every such predicate is a **named function** in the companion below, and every one of them has a
+ * probe — a test-only class carrying the shapes the rule forbids, fed to *that same function*. A
+ * control that exercised a second copy of the check would prove nothing about the sweep, which is
+ * the exact failure mode T36 exists to close. The probes are one class per predicate for the same
+ * reason: one shared probe would make every control but one tautological.
+ *
+ * Two assertions deliberately keep exact `typeName` equality, and both say so where they stand:
+ * "every published `String` parameter is on the pinned list" and the `String`-accessor half of
+ * §7.6's answer. Their rule is about a `String` **itself** — `SignedTerms` and `divergentTerms`
+ * hold `List<String>` on purpose and are documented as a different shape — so widening either to
+ * the token match would not sharpen the rule, it would replace it (STOP RULE 4).
  */
 class ChannelStructureTest {
 
@@ -213,6 +237,100 @@ class ChannelStructureTest {
                 executable.genericParameterTypes.toList() +
                     listOfNotNull((executable as? Method)?.genericReturnType)
                 ).map { it.typeName }
+
+        /** The **generic** parameter type names of [executable], the return deliberately excluded. */
+        fun parameterMentions(executable: Executable): List<String> =
+            executable.genericParameterTypes.map { it.typeName }
+
+        /**
+         * Whether [typeName] names [sought] itself or names it inside a generic's type arguments.
+         *
+         * A bare `contains` is wrong: `java.lang.StringBuilder` contains `java.lang.String`. So the
+         * match is on a whole type token — the character either side must not continue an
+         * identifier. `SealPubkeyStringProbe.builder` is the control for that, fed to the real
+         * predicate rather than to this function directly.
+         *
+         * No `Regex`: STOP RULE 11's sibling rule for this round forbids one in a converted sweep,
+         * and a hand-written scan is what a reviewer can read without running it.
+         */
+        fun namesType(typeName: String, sought: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = typeName.indexOf(sought, from)
+                if (at < 0) return false
+                val before = if (at == 0) ' ' else typeName[at - 1]
+                val afterAt = at + sought.length
+                val after = if (afterAt >= typeName.length) ' ' else typeName[afterAt]
+                if (!continuesIdentifier(before) && !continuesIdentifier(after)) return true
+                from = at + 1
+            }
+        }
+
+        /**
+         * Whether [typeName] names a type whose own name **begins** with [prefix] — the type
+         * itself, a nested case of it, or one held inside a generic's type arguments.
+         *
+         * The left boundary is checked and the right is not, and that asymmetry is the rule: a
+         * `dev.eryalabs.nenya.channel.AttributedRumor$Bound` is the same door under another name,
+         * while a hypothetical `…ReattributedRumor` must not match on a suffix. [namesType] cannot
+         * express this, because `$` continues an identifier there on purpose.
+         */
+        fun namesTypeUnder(typeName: String, prefix: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = typeName.indexOf(prefix, from)
+                if (at < 0) return false
+                if (at == 0 || !continuesIdentifier(typeName[at - 1])) return true
+                from = at + 1
+            }
+        }
+
+        private fun continuesIdentifier(c: Char): Boolean =
+            c.isLetterOrDigit() || c == '.' || c == '$' || c == '_'
+
+        /** Everything [executable] mentions that §7.2 or §7.4 forbids it being named after. */
+        fun forbiddenNameMentions(executable: Executable): List<String> =
+            mentions(executable).filter { FORBIDDEN_NAMES.containsMatchIn(it) }
+
+        /**
+         * Everything [executable] mentions that names an [OrderId] — inside a collection as well.
+         *
+         * `contains` rather than [namesType] here, and on purpose: it is the *wider* of the two, so
+         * an `OrderIdRange` would be caught by it and this is the side of the trade §7.4 wants.
+         */
+        fun orderIdMentions(executable: Executable): List<String> =
+            mentions(executable).filter { OrderId::class.java.name in it }
+
+        /** The parameters of [executable] that name a `String`, a `List<String>` included. */
+        fun stringNamingParameters(executable: Executable): List<String> =
+            parameterMentions(executable).filter { namesType(it, String::class.java.name) }
+
+        /**
+         * The parameters of [executable] that name a `Boolean`.
+         *
+         * Both spellings, because they are the same rule: a bare Kotlin `Boolean` parameter erases
+         * to the JVM primitive whose `typeName` is `boolean`, and inside a generic the very same
+         * type is boxed and reads `java.lang.Boolean`. Checking one of the two is the T36 defect
+         * with an extra step.
+         */
+        fun booleanParameters(executable: Executable): List<String> =
+            parameterMentions(executable).filter { namesBoolean(it) }
+
+        /** [method]'s return type name if it hands a `Boolean` back, however deeply wrapped. */
+        fun booleanVerdict(method: Method): String? =
+            method.genericReturnType.typeName.takeIf { namesBoolean(it) }
+
+        private fun namesBoolean(typeName: String): Boolean =
+            namesType(typeName, "boolean") || namesType(typeName, "java.lang.Boolean")
+
+        /** Whether [method] hands an [AttributedRumor] back — as itself, as a case, or in a list. */
+        fun opensAnAttributedRumorDoor(method: Method): Boolean =
+            namesTypeUnder(method.genericReturnType.typeName, "$PACKAGE.AttributedRumor")
+
+        /** Whether [method]'s name says it answers with a status and its return names a `String`. */
+        fun handsBackAStatusToken(method: Method): Boolean =
+            STATUS_SHAPED.containsMatchIn(method.name) &&
+                namesType(method.genericReturnType.typeName, String::class.java.name)
     }
 
     @Test
@@ -295,6 +413,14 @@ class ChannelStructureTest {
     /**
      * §7.2 made unrepresentable: the entry point takes the seal's pubkey and the rumor, and there
      * is no parameter a gift wrap's ephemeral pubkey could arrive in.
+     *
+     * The parameter list is pinned by **generic** type name, whole and in order. A pin like that
+     * needs no probe of its own and none was forgotten: an exact whole-list equality cannot be
+     * erasure-blind in the dangerous direction, because a smuggled `List<String>` parameter prints
+     * as `java.util.List<java.lang.String>` and fails the pin outright. The expected side is built
+     * from `typeName` and never from `name`, because `name` prints an array as `[B` while
+     * `genericParameterTypes` prints it as `byte[]`, which would red-line every array parameter a
+     * later revision added here.
      */
     @Test
     fun `the entry point takes one pubkey, a checked event and a limit, and nothing else`() {
@@ -302,15 +428,21 @@ class ChannelStructureTest {
         val attribute = companion.methods.single { it.name == "attribute" && '$' !in it.name }
 
         assertEquals(
-            listOf(String::class.java, CheckedEvent::class.java, TagLimits::class.java),
-            attribute.parameterTypes.toList(),
+            listOf(
+                String::class.java.typeName,
+                CheckedEvent::class.java.typeName,
+                TagLimits::class.java.typeName,
+            ),
+            attribute.genericParameterTypes.map { it.typeName },
             "§7.2 compares the seal's pubkey with the rumor's; a second pubkey parameter is where " +
                 "the gift wrap's ephemeral key gets in, and §7.2 forbids using it in any comparison",
         )
         assertEquals(
             1,
-            attribute.parameterTypes.count { it == String::class.java },
-            "exactly one hex string goes in, and it is the seal's",
+            stringNamingParameters(attribute).size,
+            "exactly one hex string goes in, and it is the seal's — and a second one arriving as " +
+                "a `List<String>` is still a second one, which is why this counts type *names* " +
+                "and not erased `String` classes",
         )
         assertEquals(
             "$PACKAGE.AttributedRumor",
@@ -318,9 +450,48 @@ class ChannelStructureTest {
             "the door produces the sealed type and nothing looser",
         )
         assertTrue(
-            mentions(attribute).none { FORBIDDEN_NAMES.containsMatchIn(it) },
+            forbiddenNameMentions(attribute).isEmpty(),
             "the entry point mentions ${mentions(attribute)}",
         )
+    }
+
+    /**
+     * The control that proves the count above is not erasure-blind.
+     *
+     * Without it, "exactly one hex string goes in" is satisfied by a predicate that never matches a
+     * `List<String>` — which is precisely what the erased `parameterTypes.count { it == String }`
+     * it replaced was. The probe is fed [stringNamingParameters], the sweep's own predicate, rather
+     * than to a second copy of the check: a control over a copy proves nothing about the original.
+     */
+    @Test
+    fun `the seal pubkey count sees a String hidden inside a generic parameter`() {
+        val probe = SealPubkeyStringProbe::class.java
+        for (name in listOf("wrapped", "keyed", "parameter", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                stringNamingParameters(method).isNotEmpty(),
+                "SealPubkeyStringProbe.$name hides a String and the count missed it — " +
+                    "${parameterMentions(method)} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertTrue(stringNamingParameters(probe.methods.single { it.name == "direct" }).isNotEmpty())
+        // Not merely "reject every generic", and not a `contains` either: `java.lang.StringBuilder`
+        // contains `java.lang.String` and is not a String.
+        assertTrue(stringNamingParameters(probe.methods.single { it.name == "permitted" }).isEmpty())
+        assertTrue(stringNamingParameters(probe.methods.single { it.name == "builder" }).isEmpty())
+    }
+
+    /** A probe, not a fixture: four shapes the count must see through, and two it must not. */
+    @Suppress("unused")
+    private class SealPubkeyStringProbe {
+        fun wrapped(keys: List<String>): Int = keys.size
+        fun keyed(keys: Map<String, String>): Int = keys.size
+        fun parameter(keys: Set<String>): Int = keys.size
+        fun nested(keys: List<List<String>>): Int = keys.size
+        fun direct(key: String): Int = key.length
+        fun permitted(keys: List<Int>): Int = keys.size
+        fun builder(key: StringBuilder): Int = key.length
     }
 
     /** No published member of this package is named after a wrap, an ephemeral key or a subject. */
@@ -338,16 +509,54 @@ class ChannelStructureTest {
                     FORBIDDEN_NAMES.containsMatchIn(label(type, executable)),
                     "${label(type, executable)} is a member §7.2 or §7.4 forbids",
                 )
-                for (mentioned in mentions(executable)) {
-                    assertFalse(
-                        FORBIDDEN_NAMES.containsMatchIn(mentioned.removePrefix("$PACKAGE.")),
-                        "${label(type, executable)} mentions $mentioned",
-                    )
-                }
+                val forbidden = forbiddenNameMentions(executable)
+                assertTrue(
+                    forbidden.isEmpty(),
+                    "${label(type, executable)} mentions $forbidden",
+                )
             }
         }
         assertTrue(inspected > 20, "the sweep inspected only $inspected members, which is not the package")
     }
+
+    /**
+     * The control that proves the two name sweeps above are not erasure-blind.
+     *
+     * Without it, "nothing published here names a gift wrap" is satisfied by a member returning
+     * `List<EphemeralKeyCarrier>`, because the erased type is `java.util.List` and the forbidden
+     * word is only in the type argument. The probe is fed [forbiddenNameMentions] — the same
+     * function both sweeps run — so this cannot pass while they stay blind.
+     */
+    @Test
+    fun `the forbidden-name sweep catches a wrap named inside a generic type`() {
+        val probe = GiftWrapNameProbe::class.java
+        for (name in listOf("wrapped", "keyed", "parameter", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                forbiddenNameMentions(method).isNotEmpty(),
+                "GiftWrapNameProbe.$name names something §7.2 forbids and the sweep missed it — " +
+                    "${mentions(method)} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertTrue(forbiddenNameMentions(probe.methods.single { it.name == "direct" }).isNotEmpty())
+        // Not merely "reject every generic".
+        assertTrue(forbiddenNameMentions(probe.methods.single { it.name == "permitted" }).isEmpty())
+    }
+
+    /** A probe, not a fixture: four shapes §7.2 and §7.4 forbid, and one they permit. */
+    @Suppress("unused")
+    private class GiftWrapNameProbe {
+        fun wrapped(): List<EphemeralKeyCarrier> = emptyList()
+        fun keyed(): Map<String, EphemeralKeyCarrier> = emptyMap()
+        fun parameter(keys: Set<EphemeralKeyCarrier>): Int = keys.size
+        fun nested(): List<List<EphemeralKeyCarrier>> = emptyList()
+        fun direct(): EphemeralKeyCarrier? = null
+        fun permitted(): List<String> = emptyList()
+    }
+
+    /** Named for what §7.2 forbids a published member being named after; never instantiated. */
+    private class EphemeralKeyCarrier
 
     /**
      * §7.4's `kind:14` rule, made structural: "an implementation MAY carry `order` on a `kind:14`
@@ -368,14 +577,14 @@ class ChannelStructureTest {
         for (type in listOf(chat) + chatImplementations) {
             for (method in type.methods.filter { !it.isSynthetic && !it.isBridge }) {
                 assertTrue(
-                    mentions(method).none { OrderId::class.java.name in it },
+                    orderIdMentions(method).isEmpty(),
                     "${type.name}.${method.name} exposes an order id on a kind:14 rumor: " +
                         "${mentions(method)}",
                 )
             }
         }
         assertTrue(
-            bound.methods.any { method -> mentions(method).any { OrderId::class.java.name in it } },
+            bound.methods.any { orderIdMentions(it).isNotEmpty() },
             "AttributedRumor.Bound must expose the order id §7.4 binds it to, or the assertion " +
                 "above is about a sweep that cannot find one anywhere",
         )
@@ -385,18 +594,96 @@ class ChannelStructureTest {
         )
     }
 
-    /** The narrowest door: every published function returning one is one §7.2's check produced. */
+    /**
+     * The control that proves the `kind:14` sweep is not erasure-blind.
+     *
+     * Without it, "no member reachable on a Chat mentions an OrderId" is satisfied by
+     * `fun orders(): List<OrderId>`, which erases to `java.util.List` and hands a caller exactly
+     * the derivation §7.4 forbids, one collection deep. The probe is fed [orderIdMentions], the
+     * predicate both halves of the sweep above run.
+     */
+    @Test
+    fun `the kind 14 sweep catches an order id hidden inside a generic type`() {
+        val probe = OrderIdCollectionProbe::class.java
+        for (name in listOf("wrapped", "keyed", "parameter", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                orderIdMentions(method).isNotEmpty(),
+                "OrderIdCollectionProbe.$name hides an order id and the sweep missed it — " +
+                    "${mentions(method)} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertTrue(orderIdMentions(probe.methods.single { it.name == "direct" }).isNotEmpty())
+        // Not merely "reject every generic".
+        assertTrue(orderIdMentions(probe.methods.single { it.name == "permitted" }).isEmpty())
+    }
+
+    /** A probe, not a fixture: four shapes §7.4 forbids on a `kind:14`, and one it permits. */
+    @Suppress("unused")
+    private class OrderIdCollectionProbe {
+        fun wrapped(): List<OrderId> = emptyList()
+        fun keyed(): Map<String, OrderId> = emptyMap()
+        fun parameter(orders: Set<OrderId>): Int = orders.size
+        fun nested(): List<List<OrderId>> = emptyList()
+        fun direct(): OrderId? = null
+        fun permitted(): List<String> = emptyList()
+    }
+
+    /**
+     * The narrowest door: every published function returning one is one §7.2's check produced.
+     *
+     * `startsWith` was not enough even over the generic name, which is T36's own correction: a
+     * `fun rumors(): List<AttributedRumor>` prints as `java.util.List<…AttributedRumor>`, starts
+     * with `java.util`, and walked straight past the sweep while handing a caller a rumor nobody's
+     * seal was compared against. [opensAnAttributedRumorDoor] matches the token wherever it sits.
+     */
     @Test
     fun `the only published function returning an attributed rumor is attribute`() {
         val doors = mutableListOf<String>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                val returned = (executable as? Method)?.genericReturnType?.typeName ?: continue
-                if (returned.startsWith("$PACKAGE.AttributedRumor")) doors += label(type, executable)
+                val method = executable as? Method ?: continue
+                if (opensAnAttributedRumorDoor(method)) doors += label(type, method)
             }
         }
 
         assertEquals(listOf("AttributedRumor\$Companion.attribute"), doors)
+    }
+
+    /**
+     * The control that proves the door sweep is not erasure-blind.
+     *
+     * Without it, "the only published function returning an attributed rumor is attribute" is
+     * satisfied by a second door that returns a collection of them — the shape §7.2 cares about
+     * most, because a caller cannot tell by looking that nothing checked their seals.
+     */
+    @Test
+    fun `the door sweep catches an attributed rumor hidden inside a generic return`() {
+        val probe = AttributedRumorDoorProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested", "cased")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                opensAnAttributedRumorDoor(method),
+                "AttributedRumorDoorProbe.$name is a door and the sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertTrue(opensAnAttributedRumorDoor(probe.methods.single { it.name == "direct" }))
+        // Not merely "reject every generic".
+        assertFalse(opensAnAttributedRumorDoor(probe.methods.single { it.name == "permitted" }))
+    }
+
+    /** A probe, not a fixture: four doors §7.2 forbids a second of, and one shape it permits. */
+    @Suppress("unused")
+    private class AttributedRumorDoorProbe {
+        fun wrapped(): List<AttributedRumor> = emptyList()
+        fun keyed(): Map<String, AttributedRumor> = emptyMap()
+        fun nested(): List<List<AttributedRumor>> = emptyList()
+        fun cased(): List<AttributedRumor.Bound> = emptyList()
+        fun direct(): AttributedRumor? = null
+        fun permitted(): List<String> = emptyList()
     }
 
     /** §9.1's shape, one layer over: a decoder that can be told the answer is not a decoder. */
@@ -416,17 +703,52 @@ class ChannelStructureTest {
                 inspected++
                 // Parameters only. A Boolean *return* is an answer this package computed — §7.4's
                 // `carriesOrderId` is one — and a Boolean parameter is an answer it was handed.
-                for (mentioned in executable.genericParameterTypes.map { it.typeName }) {
-                    assertFalse(
-                        mentioned == "boolean" || mentioned == "java.lang.Boolean",
-                        "${label(type, executable)} takes a Boolean. A rumor is attributed by " +
-                            "comparing two keys this library was handed; a function that can be " +
-                            "told the answer is not performing §7.2's check.",
-                    )
-                }
+                val booleans = booleanParameters(executable)
+                assertTrue(
+                    booleans.isEmpty(),
+                    "${label(type, executable)} takes a Boolean ($booleans). A rumor is attributed " +
+                        "by comparing two keys this library was handed; a function that can be " +
+                        "told the answer is not performing §7.2's check.",
+                )
             }
         }
         assertTrue(inspected > 20, "the sweep inspected only $inspected members, which is not the package")
+    }
+
+    /**
+     * The control that proves the Boolean sweep is not erasure-blind.
+     *
+     * Without it, "no published member takes a Boolean" is satisfied by a predicate that never
+     * matches a `List<Boolean>` — which is precisely what the equality check it replaced was, and
+     * what STOP RULE 12 is about: a decoder that can be handed the verdict is not a decoder,
+     * whether the verdict arrives bare or one collection deep.
+     */
+    @Test
+    fun `the boolean sweep catches a Boolean hidden inside a generic type`() {
+        val probe = BooleanParameterProbe::class.java
+        for (name in listOf("wrapped", "keyed", "parameter", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                booleanParameters(method).isNotEmpty(),
+                "BooleanParameterProbe.$name hides a Boolean and the sweep missed it — " +
+                    "${parameterMentions(method)} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertTrue(booleanParameters(probe.methods.single { it.name == "direct" }).isNotEmpty())
+        // Not merely "reject every generic".
+        assertTrue(booleanParameters(probe.methods.single { it.name == "permitted" }).isEmpty())
+    }
+
+    /** A probe, not a fixture: four shapes §9.1 forbids as a parameter, and one it permits. */
+    @Suppress("unused")
+    private class BooleanParameterProbe {
+        fun wrapped(flags: List<Boolean>): Int = flags.size
+        fun keyed(flags: Map<String, Boolean>): Int = flags.size
+        fun parameter(flags: Set<Boolean>): Int = flags.size
+        fun nested(flags: List<List<Boolean>>): Int = flags.size
+        fun direct(flag: Boolean): Int = if (flag) 1 else 0
+        fun permitted(names: List<String>): Int = names.size
     }
 
     /**
@@ -485,10 +807,16 @@ class ChannelStructureTest {
                 val method = executable as? Method ?: continue
                 if (method.name in OBJECT_METHODS) continue
                 val returned = method.genericReturnType.typeName
-                assertFalse(
-                    returned == "boolean" || returned == "java.lang.Boolean",
+                assertNull(
+                    booleanVerdict(method),
                     "${label(type, method)} returns $returned; §7.6's outcome is the type itself",
                 )
+                // Exact equality, and deliberately not the token match one line up: this half of
+                // the rule is about a decision handed back **as text**, and a `List<String>` is the
+                // shape §7.6's answer uses to say which terms diverged without saying anything
+                // about them. `CounterProposal.divergentTerms` is that list; widening this to
+                // `namesType` would not sharpen the rule, it would delete it and replace it with a
+                // different one (STOP RULE 4), so there is no probe here and none is missing.
                 if (returned == String::class.java.name) stringAccessors += label(type, method)
             }
         }
@@ -502,12 +830,54 @@ class ChannelStructureTest {
     }
 
     /**
+     * The control that proves §7.6's verdict sweep is not erasure-blind.
+     *
+     * Without it, "no member of Acceptance or its cases returns a Boolean" is satisfied by
+     * `fun agreed(): List<Boolean>`, which erases to `java.util.List` and collapses §7.6's three
+     * outcomes back into the two a `Boolean` can carry — one collection deep, where the equality
+     * check it replaced could not see. Its own probe class rather than the parameter sweep's,
+     * because a shared one would make one of the two controls tautological.
+     */
+    @Test
+    fun `the verdict sweep catches a Boolean hidden inside a generic return`() {
+        val probe = BooleanVerdictProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                booleanVerdict(method),
+                "BooleanVerdictProbe.$name hands a verdict back and the sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertNotNull(booleanVerdict(probe.methods.single { it.name == "direct" }))
+        assertNotNull(booleanVerdict(probe.methods.single { it.name == "boxed" }))
+        // Not merely "reject every generic".
+        assertNull(booleanVerdict(probe.methods.single { it.name == "permitted" }))
+    }
+
+    /** A probe, not a fixture: five verdicts §7.6 forbids handing back, and one shape it permits. */
+    @Suppress("unused")
+    private class BooleanVerdictProbe {
+        fun wrapped(): List<Boolean> = emptyList()
+        fun keyed(): Map<String, Boolean> = emptyMap()
+        fun nested(): List<List<Boolean>> = emptyList()
+        fun direct(): Boolean = false
+        fun boxed(): Boolean? = null
+        fun permitted(): List<String> = emptyList()
+    }
+
+    /**
      * §11.1's vocabulary crossing the wire boundary: a decoded order `status` is an `OrderState`
      * and never the token a stranger wrote.
      *
      * The conflation §11.1 forbids — one `status` codec serving both the order and the listing
      * vocabularies — is reachable through a `String` accessor and through nothing else, because a
      * caller holding the raw token has to decide for itself which vocabulary to read it under.
+     *
+     * "Through a `String` accessor" includes one handing back a *collection* of them, which is why
+     * [handsBackAStatusToken] matches the token rather than the whole name: a
+     * `fun statuses(): List<String>` is the same conflation, once per element.
      */
     @Test
     fun `a decoded status is an OrderState and never the raw token`() {
@@ -518,19 +888,68 @@ class ChannelStructureTest {
         for (executable in publishedExecutables(type)) {
             val method = executable as? Method ?: continue
             assertFalse(
-                method.genericReturnType.typeName == String::class.java.name &&
-                    STATUS_SHAPED.containsMatchIn(method.name),
+                handsBackAStatusToken(method),
                 "${method.name} hands a status token back as a String",
             )
         }
     }
 
+    /**
+     * The control that proves the status sweep is not erasure-blind.
+     *
+     * Without it, "a decoded status is an OrderState and never the raw token" is satisfied by
+     * `fun statuses(): List<String>` — the vocabulary conflation §11.1 forbids, wrapped in a list.
+     * Both halves of the predicate are controlled: a status-shaped name returning no `String` and
+     * a `String` returned under a name that says nothing about status are both permitted, so this
+     * is not the weaker rule "no member returns a String".
+     */
+    @Test
+    fun `the status sweep catches a raw token hidden inside a generic return`() {
+        val probe = StatusTokenProbe::class.java
+        for (name in listOf("getStatuses", "getStateByOrder", "getNestedStatuses")) {
+            val method = probe.methods.single { it.name == name }
+            assertTrue(
+                handsBackAStatusToken(method),
+                "StatusTokenProbe.$name hands a status token back and the sweep missed it — " +
+                    "${method.genericReturnType.typeName} erases past an erased-type check",
+            )
+        }
+        // Caught by the old predicate too: this is what shows the two controls test different things.
+        assertTrue(handsBackAStatusToken(probe.methods.single { it.name == "getStatus" }))
+        // Neither half of the rule on its own: a status-shaped name that hands back no token, and
+        // a token-shaped return under a name that claims nothing about status.
+        assertFalse(handsBackAStatusToken(probe.methods.single { it.name == "getStatusCode" }))
+        assertFalse(handsBackAStatusToken(probe.methods.single { it.name == "getProvider" }))
+    }
+
+    /** A probe, not a fixture: four shapes §11.1 forbids, and two it permits. */
+    @Suppress("unused")
+    private class StatusTokenProbe {
+        fun getStatuses(): List<String> = emptyList()
+        fun getStateByOrder(): Map<String, String> = emptyMap()
+        fun getNestedStatuses(): List<List<String>> = emptyList()
+        fun getStatus(): String = ""
+        fun getStatusCode(): Int = 0
+        fun getProvider(): String = ""
+    }
+
+    /**
+     * Exact `typeName` equality, and the one place in this file where that is the rule rather than
+     * a leftover.
+     *
+     * §7.5's `SignedTerms` and §10.3's `DeliverableTags` hold their operands as whole tag arrays —
+     * `List<String>` — precisely so that §7.6's and §10.3's comparisons run over the bytes both
+     * messages carried, and the pinned list above says so for `DeliverableTags` in as many words.
+     * Matching the `String` *token* here would pull `SignedTerms.<init>` onto the list and make the
+     * assertion state a different rule from the one its own KDoc explains (STOP RULE 4). So this
+     * sweep is exact by design; there is no probe for it and none is missing.
+     */
     @Test
     fun `every published String parameter is on the pinned list`() {
         val found = mutableSetOf<String>()
         for (type in publishedClasses()) {
             for (executable in publishedExecutables(type)) {
-                if (executable.genericParameterTypes.any { it.typeName == String::class.java.name }) {
+                if (parameterMentions(executable).any { it == String::class.java.name }) {
                     found += label(type, executable)
                 }
             }

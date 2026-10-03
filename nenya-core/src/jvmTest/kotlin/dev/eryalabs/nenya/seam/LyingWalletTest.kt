@@ -58,6 +58,17 @@ class LyingWalletTest : PortableLyingWalletTest() {
         )
     }
 
+    /**
+     * §9.1's door into payment evidence, pinned and then scanned.
+     *
+     * Both halves read `genericParameterTypes`. `getParameterTypes()` is the erasure, so a
+     * `List<WalletPaymentClaim>` parameter reports as plain `List` and a scan built on it sees
+     * nothing — which is the shortest route there is from a wallet's claim to evidence.
+     *
+     * The pin needs no probe of its own: a whole-list equality cannot be erasure-blind in the
+     * dangerous direction, because a `List<PaymentHash>` parameter erases to `List` and fails the
+     * pin outright. The scan below it can be, so it has one: the probe test that follows.
+     */
     @Test
     fun `the payment verifier takes nothing a seam supplies`() {
         val companion = Class.forName("dev.eryalabs.nenya.payment.VerifiedPayment\$Companion")
@@ -65,22 +76,101 @@ class LyingWalletTest : PortableLyingWalletTest() {
 
         assertEquals(
             listOf(
-                Payee::class.java,
-                Class.forName("dev.eryalabs.nenya.payment.PaymentHash"),
-                Preimage::class.java,
+                Payee::class.java.typeName,
+                Class.forName("dev.eryalabs.nenya.payment.PaymentHash").typeName,
+                Preimage::class.java.typeName,
             ),
-            verify.parameterTypes.toList(),
+            verify.genericParameterTypes.map { it.typeName },
             "the only door into payment evidence must stay closed to the seams: a Wallet, a " +
                 "WalletPaymentClaim or a SeamAnswer on this parameter list would be §9.1 undone",
         )
-        for (parameter in verify.parameterTypes) {
+        for (parameter in verify.genericParameterTypes) {
             assertFalse(
-                Seam::class.java.isAssignableFrom(parameter) ||
-                    SeamAnswer::class.java.isAssignableFrom(parameter) ||
-                    parameter.name.startsWith(SeamReflection.PACKAGE),
-                "${parameter.name} is a seam type and is on VerifiedPayment.verify's parameter list",
+                seamTypeIn(parameter),
+                "${parameter.typeName} is a seam type and is on VerifiedPayment.verify's parameter list",
             )
         }
+    }
+
+    /**
+     * The control that proves the scan above is not erasure-blind.
+     *
+     * Without it, "no seam type on this parameter list" is satisfied by a check that never matches
+     * a `List<Wallet>` — which is precisely what the erased-type check it replaced was. The probe
+     * is fed to [seamTypeIn], the scan's **own** predicate, so a control that passed while the scan
+     * stayed blind is not expressible: there is one implementation of the rule, not two.
+     *
+     * All three of the rule's clauses are probed inside a generic, because the third one — a type
+     * declared in the seam package that is neither a [Seam] nor a [SeamAnswer], of which
+     * [WalletPaymentClaim] is the one that matters here — is the clause [SeamReflection.mentions]
+     * does not cover and [SeamReflection.mentionsPackage] was added for.
+     */
+    @Test
+    fun `the seam-type scan catches a seam hidden inside a generic parameter`() {
+        val probe = SeamParameterProbe::class.java
+        // `single` throws if the member is missing, so a probe that never compiled cannot pass here.
+        fun parameterOf(name: String): java.lang.reflect.Type =
+            probe.methods.single { it.name == name }.genericParameterTypes.single()
+
+        for (name in listOf("wrapped", "claimed", "keyed", "nested")) {
+            val hidden = parameterOf(name)
+            assertTrue(
+                seamTypeIn(hidden),
+                "SeamParameterProbe.$name hides a seam type and the scan missed it — " +
+                    "${hidden.typeName} erases to a bare collection, which is what walks past an " +
+                    "erased-type check",
+            )
+        }
+        // Caught by the old erased check too: this is what shows the two read different things.
+        assertTrue(seamTypeIn(parameterOf("direct")))
+        // Not merely "reject every generic".
+        assertFalse(seamTypeIn(parameterOf("permitted")))
+    }
+
+    /**
+     * A probe, not a fixture: four parameter shapes the scan forbids, one it forbids on the erasure
+     * alone, and one it permits.
+     *
+     * Declared here and never in `src/jvmMain`, and read by reflection rather than by name, so a
+     * probe that failed to reach the test output cannot make its control pass vacuously — `single`
+     * throws when the member is absent.
+     */
+    @Suppress("unused")
+    private class SeamParameterProbe {
+
+        /** A [Seam] inside a collection — invisible to `getParameterTypes()`. */
+        fun wrapped(wallets: List<Wallet>): Int = wallets.size
+
+        /** A seam-package type that is neither a [Seam] nor a [SeamAnswer], inside a collection. */
+        fun claimed(claims: List<WalletPaymentClaim>): Int = claims.size
+
+        /** A [SeamAnswer] as a map's value type — the wrapper every seam method returns. */
+        fun keyed(answers: Map<String, SeamAnswer<String>>): Int = answers.size
+
+        /** Two levels down, so the walk has to recurse rather than look one argument deep. */
+        fun nested(wallets: List<List<Wallet>>): Int = wallets.size
+
+        /** The shape the erased check caught as well. */
+        fun direct(wallet: Wallet): Int = wallet.hashCode()
+
+        /** A generic of a permitted type: the scan must not simply reject every parameterised type. */
+        fun permitted(names: List<String>): Int = names.size
+    }
+
+    private companion object {
+
+        /**
+         * Whether [type] is, or hides anywhere inside its type arguments, something a seam supplies.
+         *
+         * The three clauses are the ones the erased scan stated and all it stated — a [Seam], a
+         * [SeamAnswer], or any type declared in the seam package — each now read through the
+         * generic form. Named, rather than left inline, so that the scan and its probe run the same
+         * code: a control exercising a second copy of the check proves nothing about the first.
+         */
+        fun seamTypeIn(type: java.lang.reflect.Type): Boolean =
+            SeamReflection.mentions(type, Seam::class.java) ||
+                SeamReflection.mentions(type, SeamAnswer::class.java) ||
+                SeamReflection.mentionsPackage(type, SeamReflection.PACKAGE)
     }
 }
 
@@ -165,6 +255,29 @@ internal object SeamReflection {
         is java.lang.reflect.WildcardType ->
             type.upperBounds.any { mentions(it, sought) } || type.lowerBounds.any { mentions(it, sought) }
         is java.lang.reflect.GenericArrayType -> mentions(type.genericComponentType, sought)
+        else -> false
+    }
+
+    /**
+     * Whether [type] names a class whose package is [prefix], anywhere including inside a generic's
+     * type arguments.
+     *
+     * [mentions] answers a subtyping question, which cannot express "declared over there": a
+     * `WalletPaymentClaim` is neither a [Seam] nor a [SeamAnswer], and a rule that reads "nothing
+     * from the seam package" needs it caught all the same. The recursion is [mentions]' own, walked
+     * again rather than shared through a common higher-order walker, because three other files in
+     * this package call [mentions] and a refactor of its body to serve this one is a change to code
+     * they depend on for the sake of code they do not.
+     */
+    fun mentionsPackage(type: java.lang.reflect.Type, prefix: String): Boolean = when (type) {
+        is Class<*> -> type.name.startsWith(prefix)
+        is java.lang.reflect.ParameterizedType ->
+            mentionsPackage(type.rawType, prefix) ||
+                type.actualTypeArguments.any { mentionsPackage(it, prefix) }
+        is java.lang.reflect.WildcardType ->
+            type.upperBounds.any { mentionsPackage(it, prefix) } ||
+                type.lowerBounds.any { mentionsPackage(it, prefix) }
+        is java.lang.reflect.GenericArrayType -> mentionsPackage(type.genericComponentType, prefix)
         else -> false
     }
 

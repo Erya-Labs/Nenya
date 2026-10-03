@@ -7,7 +7,6 @@ import dev.eryalabs.nenya.seam.SeamCapability
 import java.lang.reflect.Modifier
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -60,12 +59,49 @@ class CapabilitySurfaceTest : PortableCapabilitySurfaceTest() {
         /** §14 item 12's forbidden types, primitive and boxed, as they appear in a `typeName`. */
         val FLOATING_POINT = Regex("""\b(double|float|java\.lang\.Double|java\.lang\.Float)\b""")
 
+        /**
+         * STOP RULE 12's forbidden type, in **both** spellings a `typeName` can give it.
+         *
+         * A bare Kotlin `Boolean` parameter is the JVM primitive and prints `boolean`; the same type
+         * inside a generic is boxed and prints `java.lang.Boolean`. A sweep that checked only one of
+         * the two would pass on exactly the shape this rule is about.
+         */
+        val BOOLEAN_SPELLINGS: List<String> = listOf("boolean", "java.lang.Boolean")
+
         /** The three enums the union is drawn from, by name, so a rename there turns this red. */
         val CAPABILITY_ENUMS: List<String> = listOf(
             "dev.eryalabs.nenya.payment.PaymentCheck",
             "dev.eryalabs.nenya.delivery.DeliveryCheck",
             "dev.eryalabs.nenya.seam.SeamCapability",
         )
+
+        /**
+         * Whether [typeName] names [sought] itself or names it inside a generic's type arguments.
+         *
+         * A bare `contains` is wrong: `java.lang.StringBuilder` contains `java.lang.String`, and
+         * `java.util.function.BooleanSupplier` would answer for `Boolean`. So the match is on a whole
+         * type token — the character either side must not continue an identifier.
+         *
+         * Written out rather than expressed as a pattern, and kept in this file rather than borrowed
+         * from another package's sweep: this repository keeps one reflection helper per package on
+         * purpose, because a shared one would be a single sweep deciding at run time which package it
+         * is about.
+         */
+        fun namesType(typeName: String, sought: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = typeName.indexOf(sought, from)
+                if (at < 0) return false
+                val before = if (at == 0) ' ' else typeName[at - 1]
+                val afterAt = at + sought.length
+                val after = if (afterAt >= typeName.length) ' ' else typeName[afterAt]
+                if (!continuesIdentifier(before) && !continuesIdentifier(after)) return true
+                from = at + 1
+            }
+        }
+
+        private fun continuesIdentifier(c: Char): Boolean =
+            c.isLetterOrDigit() || c == '.' || c == '$' || c == '_'
     }
 
     // -----------------------------------------------------------------------------------------
@@ -319,6 +355,17 @@ class CapabilitySurfaceTest : PortableCapabilitySurfaceTest() {
      * A capability surface that could be *told* what it verifies is not a capability surface. The
      * sweep is `PaymentStructureTest`'s, over `dev/eryalabs/nenya/conformance`, asserting its
      * classes by name for the reason that file gives.
+     *
+     * **It reads the generic parameter types, not the erased ones.** Until T36 this sweep compared
+     * each entry of `parameterTypes` against `Boolean`, which sees the erased type: a published
+     * `fun x(flags: List<Boolean>)` erases to `List` and satisfied the rule while accepting exactly
+     * what the rule forbids, wrapped in a collection. [booleanIn] walks `genericParameterTypes` and
+     * matches on `typeName` in both of that type's spellings, and the control below proves it
+     * catches the wrapped form.
+     *
+     * Parameters only, and deliberately: the rule is about what this surface can be *told*. A
+     * method that returns a boolean is this library stating a verdict, which is the whole point of
+     * a capability surface.
      */
     @Test
     fun `no published member of this package accepts a Boolean`() {
@@ -335,17 +382,64 @@ class CapabilitySurfaceTest : PortableCapabilitySurfaceTest() {
             val executables = type.constructors.toList() + MainClasses.methods(type)
             for (executable in executables) {
                 inspected++
-                for (parameter in executable.parameterTypes) {
-                    assertFalse(
-                        parameter == java.lang.Boolean.TYPE || parameter == java.lang.Boolean::class.java,
-                        "${type.simpleName}.${executable.name} takes a Boolean. What this library " +
-                            "verifies is a fact about its own code; a surface that can be told the " +
-                            "answer publishes the caller's opinion.",
-                    )
-                }
+                assertNull(
+                    booleanIn(executable),
+                    "${type.simpleName}.${executable.name} takes a Boolean, as " +
+                        "${booleanIn(executable)}. What this library verifies is a fact about its " +
+                        "own code; a surface that can be told the answer publishes the caller's " +
+                        "opinion.",
+                )
             }
         }
         assertTrue(inspected > 10, "the sweep inspected only $inspected members, which is not the package")
+    }
+
+    /**
+     * The control that proves the sweep above is not erasure-blind, fed to [booleanIn] — the sweep's
+     * **own** predicate, not a second copy of it, because a control exercising a re-implementation
+     * proves nothing about the one that runs.
+     *
+     * [BooleanParameterProbe] carries the shapes the erased check waved through: a `List<Boolean>`,
+     * a `Map<String, Boolean>` and a `List<List<Boolean>>` all erase to their raw container, so
+     * "no published member accepts a Boolean" was satisfied by a predicate that never matched them.
+     * `direct` is caught by the old check and the new one alike, which is what shows the two
+     * controls are testing different things; `permitted` is a generic of an allowed type, so the
+     * rule is not merely "reject every generic".
+     *
+     * Its own probe class rather than a share of [FloatingPointProbe]: one helper answering two
+     * predicates would make every control but one tautological.
+     */
+    @Test
+    fun `the Boolean sweep catches a Boolean hidden inside a generic parameter`() {
+        val probe = BooleanParameterProbe::class.java
+        for (name in listOf("wrapped", "keyed", "nested")) {
+            val method = probe.methods.single { it.name == name }
+            assertNotNull(
+                booleanIn(method),
+                "BooleanParameterProbe.$name hides a Boolean and the sweep missed it — " +
+                    "${method.genericParameterTypes.single().typeName} erases past an erased-type " +
+                    "check",
+            )
+        }
+        assertNotNull(
+            booleanIn(probe.methods.single { it.name == "direct" }),
+            "a bare Boolean parameter is what the erased check already caught; a converted sweep " +
+                "that dropped it would have traded one blind spot for another",
+        )
+        assertNull(
+            booleanIn(probe.methods.single { it.name == "permitted" }),
+            "a List<String> is not evidence of anything being told to this surface",
+        )
+    }
+
+    /** A probe, not a fixture: four parameter shapes this rule forbids, and one it permits. */
+    @Suppress("unused")
+    private class BooleanParameterProbe {
+        fun wrapped(flags: List<Boolean>): Int = flags.size
+        fun keyed(flags: Map<String, Boolean>): Int = flags.size
+        fun nested(flags: List<List<Boolean>>): Int = flags.size
+        fun direct(flag: Boolean): Int = if (flag) 1 else 0
+        fun permitted(names: List<String>): Int = names.size
     }
 
     /**
@@ -470,6 +564,24 @@ class CapabilitySurfaceTest : PortableCapabilitySurfaceTest() {
         }
         return null
     }
+
+    /**
+     * The first parameter of [executable] whose **generic** type mentions a `Boolean`, by name, or
+     * `null` when none does.
+     *
+     * The parameter's `typeName` prints the parameterised form — `java.util.List<java.lang.Boolean>`
+     * — so a whole-token match over it sees what a comparison against the erased `Class` cannot.
+     * [namesType] is what keeps `BooleanSupplier`-shaped names from matching, and both spellings are
+     * tried because the primitive and the boxed form print differently.
+     *
+     * The name returned is the whole parameter, not the token found in it, so the failure message
+     * says `java.util.List<java.lang.Boolean>` rather than `java.lang.Boolean` — the wrapping is the
+     * part a reader needs to see.
+     */
+    private fun booleanIn(executable: java.lang.reflect.Executable): String? =
+        executable.genericParameterTypes
+            .map { it.typeName }
+            .firstOrNull { parameter -> BOOLEAN_SPELLINGS.any { namesType(parameter, it) } }
 
     /**
      * The first floating-point type [executable]'s **generic** signature mentions, or `null`.
