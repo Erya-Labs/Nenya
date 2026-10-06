@@ -51,7 +51,8 @@ class OrderControlsTest {
      *
      * §8.5 is explicit that a rule rejecting the fee `type=2` while the order is still `committed`
      * would make `awaiting_payment` unreachable for every fee-bearing order, and would make the
-     * specification's own worked order (Appendix A, step 6) illegal. Revision `1.1` was worded
+     * specification's own worked order (Appendix A, step 6, in the companion) illegal. Revision
+     * `1.1` was worded
      * that way; this is the test that says `1.2` is not.
      *
      * The probe is **positive again on the priced chain**. T20 could only assert the negative half

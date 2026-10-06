@@ -156,8 +156,14 @@ vocabulary, money encoding and fee arithmetic, the private-channel envelope, the
 evidence rule, deliverable commitments, the order state machine, privacy requirements, and
 a conformance checklist. It uses RFC 2119 language and cites the NIPs it builds on.
 
-Decisions are recorded in §16 with their candidates and trade-offs, rather than silently
-defaulted — closed ones in §16.1 with the reasoning that settled them, open ones in §16.2.
+[`spec/NENYA-1-companion.md`](spec/NENYA-1-companion.md) is its non-normative companion: the
+motivation, the rationale, the decision records and a complete worked order. The contract is the
+normative document alone — every requirement sentence lives there — and the companion exists so
+the rules are readable without the reasoning that produced them.
+
+Decisions are recorded in §16, rather than silently defaulted — the decisions themselves and the
+duties they carry in §16.1 and §16.2 of the normative document, and the candidates, trade-offs and
+reasoning that settled each one in §16 of the companion.
 Requests are `kind:30404`, which is unregistered: implementations must still expose it as a
 single named constant, not because it may change but because a duplicated wire constant is
 how call sites drift apart.
@@ -230,7 +236,8 @@ check *rejects* what it must reject, not only that it accepts what it should.
 The most useful contribution right now is a careful read of `spec/NENYA-1.md` — especially
 if you maintain a nostr client, a NIP-99 marketplace, or anything that would have to
 interoperate with this. Concrete disagreements about the wire format are more valuable than
-code at this stage, and the open decisions in §16 are genuinely open.
+code at this stage, and the open decisions indexed in §16.2 are genuinely open — their candidates
+are in §16 of `spec/NENYA-1-companion.md`.
 
 Please open an issue rather than a large pull request against the spec; a wire format is
 cheap to change today and expensive to change after anyone ships it.

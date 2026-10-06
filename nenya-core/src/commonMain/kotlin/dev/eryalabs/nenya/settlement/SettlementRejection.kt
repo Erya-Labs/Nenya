@@ -537,7 +537,8 @@ public enum class SettlementRejection {
      * **payment request** is accepted as part of `committed → awaiting_payment` and is not refused
      * here or anywhere. "A rule that rejected the fee `type=2` while the order was still
      * `committed` would therefore make `awaiting_payment` unreachable for every fee-bearing order,
-     * and would make this document's own worked order (Appendix A, step 6) illegal." §11.3
+     * and would make NENYA-1's own worked order (Appendix A, step 6, in the companion)
+     * illegal." §11.3
      * invariant 2 is the direct test of the pairing.
      *
      * **The condition is equality, not "before", and the constant is named for the equality.**

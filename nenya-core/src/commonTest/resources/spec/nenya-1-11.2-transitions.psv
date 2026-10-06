@@ -30,33 +30,33 @@
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
 #
-# Regenerated for revision `1.7`, the gift-wrap envelope revision, which edits §0, §3, §4.1,
-# §4.3, §7.1, §7.2 and §18 and does not touch §11.2 at all. Every edit but §18's sits above
-# §11.2's row block and none sits inside it: §0's history row and compatibility paragraphs,
-# §3's seam row and its explanatory paragraph, §4.1's signature paragraph, §4.3's envelope
-# bounds, §7.1's two procedures and §7.2's two attribution bullets together inserted 165
-# lines above the block, so every line below is its revision `1.6` value plus 165. No line
-# was added, removed or reworded inside the block, so this regeneration changes the first
-# column only: the set of (from, to) pairs is **identical** to revision `1.6`'s, and
-# `TransitionTotalityTest`'s pair equality is untouched.
+# Regenerated for revision `1.8`, the companion-extraction revision, which moves non-normative
+# material out of §11.4, §13, §15, §16 and Appendix A into `spec/NENYA-1-companion.md`. Every
+# one of those moves is **below** §11.2's row block and none is inside it, so no move shifted a
+# line number here at all. The shift this regeneration records comes from one line and one line
+# only: the revision `1.8` row the Definition of done requires in §0's history table, which sits
+# above the block and pushed it down by exactly 1. Every line below is therefore its revision
+# `1.7` value plus 1 — 1881–1895 became 1882–1896. No line was added, removed or reworded inside
+# the block, so this regeneration changes the first column only: the set of (from, to) pairs is
+# **identical** to revision `1.7`'s, and `TransitionTotalityTest`'s pair equality is untouched.
 
-1881 | — | proposed
-1882 | proposed | accepted
-1883 | proposed | cancelled
-1884 | proposed | expired
-1885 | accepted | committed
-1886 | accepted | cancelled
-1886 | accepted | expired
-1887 | committed | awaiting_payment
-1888 | committed | cancelled
-1888 | committed | expired
-1888 | committed | disputed
-1889 | awaiting_payment | paid
-1890 | awaiting_payment | cancelled
-1890 | awaiting_payment | expired
-1890 | awaiting_payment | disputed
-1891 | paid | released
-1892 | paid | disputed
-1893 | released | settled
-1894 | released | disputed
+1882 | — | proposed
+1883 | proposed | accepted
+1884 | proposed | cancelled
+1885 | proposed | expired
+1886 | accepted | committed
+1887 | accepted | cancelled
+1887 | accepted | expired
+1888 | committed | awaiting_payment
+1889 | committed | cancelled
+1889 | committed | expired
+1889 | committed | disputed
+1890 | awaiting_payment | paid
+1891 | awaiting_payment | cancelled
+1891 | awaiting_payment | expired
+1891 | awaiting_payment | disputed
+1892 | paid | released
+1893 | paid | disputed
+1894 | released | settled
 1895 | released | disputed
+1896 | released | disputed

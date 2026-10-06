@@ -16,9 +16,9 @@ import kotlin.test.assertEquals
  * somebody swapped — turns the suite red.
  *
  * The anchor is the literal `SHA-256 ` prefix, and the digest sits inside backticks. Both
- * matter: a bare 64-hex regex over the whole document matches four copies of Appendix A's
- * worked order id first, and an anchor that simply took the 64 characters following
- * `SHA-256 ` would capture a backtick and 63 hex digits.
+ * matter: a bare 64-hex regex over the whole document matches the four copies of the worked
+ * order's own id in §7.5, §9.2, §10.1 and §10.3 first, and an anchor that simply took the 64
+ * characters following `SHA-256 ` would capture a backtick and 63 hex digits.
  *
  * ### Scoped to §18's `nip44.vectors.json` row
  *

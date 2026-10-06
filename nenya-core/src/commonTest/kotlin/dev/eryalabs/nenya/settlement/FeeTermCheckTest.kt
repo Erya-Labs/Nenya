@@ -1281,8 +1281,9 @@ class FeeTermCheckTest {
     fun `the paired positive control — the fee payment request is accepted at committed`() {
         // §11.3 invariant 2, whole. §8.5: "A rule that rejected the fee `type=2` while the order
         // was still `committed` would therefore make `awaiting_payment` unreachable for every
-        // fee-bearing order, and would make this document's own worked order (Appendix A, step 6)
-        // illegal." So the pairing is the test, and neither half means anything alone.
+        // fee-bearing order, and would make NENYA-1's own worked order (Appendix A, step 6, in
+        // the companion) illegal." So the pairing is the test, and neither half means anything
+        // alone.
         val messages = FeeOrderMessages()
         val machine = OrderFixtures.machineBeforeDeadlines()
         val committed = messages.order(OrderState.COMMITTED)
