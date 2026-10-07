@@ -58,6 +58,10 @@ class ListingStructureTest {
             "ListingStatusCodec",
             "ListingRejection",
             "ListingException",
+            // T40's write half: the §5.1/§5.2 builders decision P in loop/VISION.md asked for.
+            "AuthoredListing",
+            "ListingBuild",
+            "ListingWriter",
         )
 
         /**
@@ -77,6 +81,17 @@ class ListingStructureTest {
             "ListingRejection.valueOf",
             "ListingSide.valueOf",
             "ListingStatus.valueOf",
+            // T40's two write-half entries, and the reason neither is a status string arriving as
+            // evidence. `AuthoredListing` is the values a client *authors* — its own `d`, title,
+            // `alt`, author pubkey and extension tags — which is the same category as
+            // `Listing.<init>` above and the opposite of a counterparty's say-so: nothing in it is
+            // read as a fact about anybody else. `ListingBuild$Refused.<init>` carries the §5.3 tag
+            // name the refusal is about and the sentence for a log, which is `ListingException`'s
+            // pair in value form. The three `ListingWriter` entry points are deliberately **not**
+            // here: each takes an `AuthoredListing` and a `TagLimits`, so the one door hostile
+            // strings enter by is the carrier, which is what makes it the thing to look at.
+            "AuthoredListing.<init>",
+            "ListingBuild\$Refused.<init>",
         )
 
         fun mainClasses(): List<Class<*>> {

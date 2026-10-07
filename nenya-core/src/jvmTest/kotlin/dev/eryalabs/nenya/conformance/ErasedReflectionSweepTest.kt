@@ -215,9 +215,14 @@ class ErasedReflectionSweepTest {
                 "compares against Void.TYPE, which only exists as a Class",
             "src/jvmTest/kotlin/dev/eryalabs/nenya/seam/SeamFailClosedTest.kt:414" to
                 "tests membership against String::class.java and ByteArray::class.java",
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:449" to
+            // Both moved down when T40 added the three ListingWriter targets and their helpers to
+            // that file: the reads are the same two, unchanged, at 477 and 558 rather than 449 and
+            // 486. A pin is by file and line, so a line-shifting edit above one is a fixture change
+            // (STOP RULE 1) and this is it — declared rather than silenced, and the sweep asserting
+            // every pin is still found is what forced it.
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:477" to
                 "dispatches through Enum::class.java.isAssignableFrom",
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:486" to
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:558" to
                 "tests membership in hostileShapes(), a set of Class objects; its KDoc says the " +
                 "erasure is deliberate, because a filter written against the parameterised type " +
                 "would see nothing at all",

@@ -1,10 +1,14 @@
 package dev.eryalabs.nenya.conformance
 
 import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.Listing
+import dev.eryalabs.nenya.listing.ListingBuild
 import dev.eryalabs.nenya.listing.ListingSide
 import dev.eryalabs.nenya.listing.ListingStatusCodec
+import dev.eryalabs.nenya.listing.ListingWriter
 import dev.eryalabs.nenya.money.FeeTerm
+import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.tag.Coordinate
 import dev.eryalabs.nenya.tag.ImageRef
 import dev.eryalabs.nenya.tag.ItemRef
@@ -122,6 +126,17 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
             "Listing.encode",
             "Bid.encode",
             "TagSet.republish",
+            // T40's three §5.1/§5.2 writers. The filter's four shapes do not name them: each takes an
+            // `AuthoredListing` and a `TagLimits`, so no `String`, `List`, `CheckedEvent` or
+            // `WireEvent` appears in the signature — and `AuthoredListing.<init>`, which is where the
+            // hostile strings and the hostile tag list go in, is a constructor, which the filter does
+            // not enumerate either. They are swept anyway, because a writer handed a stranger's values
+            // by a client that trusted them is exactly §4.3's sentence: every one of §5.3's rows is
+            // fed all four hostile strings, with the corpus's own tag list as the extension tags, and
+            // the writer must answer a `ListingBuild` — never one of the six unhardened shapes.
+            "ListingWriter.request",
+            "ListingWriter.offer",
+            "ListingWriter.draft",
         )
     }
 
@@ -278,6 +293,19 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
             }
         },
         Target("Listing\$Companion.decode", Needs.CHECKED) { c -> listOf { Listing.decode(c.checked!!); Unit } },
+        // T40's writers, each twice per hostile string, for the reason the four `<init>` targets
+        // above give: a listing whose author pubkey is hostile is refused before §5.3's Encoding
+        // column is reached at all, so the second call hands it a pubkey this library accepts and
+        // puts the hostile value in every §5.3 row instead.
+        Target("ListingWriter.request", Needs.NOTHING) { c ->
+            c.strings.flatMap { text -> writerCalls(c.input, text) { ListingWriter.request(it) } }
+        },
+        Target("ListingWriter.offer", Needs.NOTHING) { c ->
+            c.strings.flatMap { text -> writerCalls(c.input, text) { ListingWriter.offer(it) } }
+        },
+        Target("ListingWriter.draft", Needs.NOTHING) { c ->
+            c.strings.flatMap { text -> writerCalls(c.input, text) { ListingWriter.draft(it) } }
+        },
         // The two encoders run only on input their decoder accepted, so the invocation counter
         // below counts attempts rather than calls for these two. That the calls really happen —
         // and that they round-trip to the same event id — is asserted separately, by
@@ -475,6 +503,50 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
     /** The same, as a §4.2 coordinate. */
     private fun wellFormedCoordinate(input: HostileCorpus.Input): Coordinate =
         Coordinate(input.kind, wellFormedPubkey(input), "listing-${input.index}")
+
+    /**
+     * The two calls each §5.1/§5.2 writer makes per hostile string: the string in the author pubkey,
+     * then a pubkey this library accepts with the string in every §5.3 row the writer takes.
+     *
+     * Both are needed for the reason the `Coordinate.<init>` target gives: §4.1's event fields are
+     * checked before §5.3's Encoding column, so a single call with the hostile value everywhere never
+     * reaches `TagWriter.d`, `TagWriter.topic` or the `t` rule at all.
+     */
+    private fun writerCalls(
+        input: HostileCorpus.Input,
+        text: String,
+        write: (AuthoredListing) -> ListingBuild,
+    ): List<() -> Unit> = listOf(
+        { write(authoredWith(input, text, text)); Unit },
+        { write(authoredWith(input, wellFormedPubkey(input), text)); Unit },
+    )
+
+    /**
+     * A listing authored from [text] in every row that takes a string, with the corpus entry's own
+     * tag list as the §4.3 extension tags.
+     *
+     * The `price` is a fixed legal amount: `Msat` makes a hostile one unrepresentable — a negative or
+     * above-cap amount is refused at construction, which is T1's whole point — so the price branch is
+     * covered by `ListingWriterTest`'s own controls instead.
+     */
+    private fun authoredWith(
+        input: HostileCorpus.Input,
+        pubkey: String,
+        text: String,
+    ): AuthoredListing = AuthoredListing(
+        authorPubkey = pubkey,
+        createdAt = input.createdAt,
+        dValue = text,
+        title = text,
+        price = Msat.ofSat(50_000L),
+        content = text,
+        summary = text,
+        mimeType = text,
+        topics = listOf(text),
+        alt = text,
+        license = text,
+        extraTags = input.tags,
+    )
 
     /** Every published function in the four packages taking one of the four hostile shapes. */
     private fun reflectedEntryPoints(): Set<String> {

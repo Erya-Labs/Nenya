@@ -90,6 +90,28 @@ public enum class ListingRejection {
     UNKNOWN_IS_NOT_EMITTABLE,
 
     /**
+     * A §5.3 row handed to `ListingWriter` as an **extension** tag rather than as the value the
+     * parameter for that row takes.
+     *
+     * Only the writer can reach this, and it is deliberately not [DUPLICATE_TAG]. The line between the
+     * two is §5.3's **Card.** column and not whether the row appears twice: [DUPLICATE_TAG] is
+     * §4.3's rule, which reaches only a row §5.3 gives cardinality `1` or `0–1`, and it is the answer
+     * exactly when this listing would carry a second occurrence of such a row. Everything else lands
+     * here — including a second `image` or `p`, which §5.3 gives `0–n` and which `Listing.decode`
+     * accepts two of, so calling that a duplicate would be a refusal citing a rule that does not
+     * apply. It is not [FORBIDDEN_TAG] either: the row is perfectly legal on a listing, it is simply
+     * this writer's to spell.
+     *
+     * Why it is refused at all rather than emitted verbatim: §4.3's preserve-unknown-tags rule is
+     * about tags an implementation does not understand, and this writer understands every row in
+     * §5.3's table. Emitting one from the extension list would put it **after** every §5.3 row rather
+     * than in the position [ListingWriter.TAG_ORDER] fixes, and §4.1 hashes the tags in order — so the
+     * event would not round-trip through `Listing.decode`, which reports that row as the row and not
+     * as an unknown tag.
+     */
+    ROW_IS_NOT_AN_EXTENSION,
+
+    /**
      * §4.3's fifth resource bound — more `image` tags than `TagLimits.maxImageTags` — exceeded.
      *
      * Its own constant rather than [MALFORMED_TAG], because the two have different fixes and §4.3
@@ -109,6 +131,21 @@ public enum class ListingRejection {
      * malformed tells the user a conformant client is broken.
      */
     UNSUPPORTED,
+
+    /**
+     * A §4.1 **event field** this library was asked to author is not what §4.1 or §4.3 fixes for it:
+     * an author pubkey that is not 64 hexadecimal characters, or a negative `created_at`.
+     *
+     * Only `ListingWriter` can reach this, and its own constant rather than [MALFORMED_TAG] because
+     * the two name different parts of the document and have different fixes. [MALFORMED_TAG] is
+     * §5.3's Encoding column refusing a tag value; this is §4.1's five id-bearing fields, which
+     * carry no tag at all. Reporting a mistyped pubkey as a malformed tag would send the caller
+     * looking through §5.3's table for a row that does not exist.
+     *
+     * The decoder never answers this: an event arrives through [dev.eryalabs.nenya.wire.WireEvent],
+     * which refuses both shapes with a `WireRejection` before a listing is decoded at all.
+     */
+    MALFORMED_EVENT_FIELD,
 
     /**
      * §5.3's Encoding column refused a value — a malformed `price`, a `data:` URI in an `image`,
