@@ -149,6 +149,24 @@ kotlin {
     // Node only, no browser(): browser tests would need a headless Chrome. Compiling
     // (compileKotlinJs, compileTestKotlinJs) needs no Node, Yarn or npm; running JS tests
     // (jsNodeTest, jsTest, allTests, check, build) and assemble do, and are not loop gates.
+    //
+    // T42 first asked for `browser()` here. The operator **removed it from the task** on 2026-10-07
+    // (loop/queue.md, T42's own text) after a tick established the reason below, so its absence is
+    // the task as written rather than a declined requirement. Stage 1 does not need it: the
+    // production output is already plain ES modules (`binaries.library()`, `useEsModules()`) with no
+    // Node dependency in jsMain, and a page loads those directly.
+    //
+    // Why it cannot be added from inside the sandbox, recorded so it is not re-litigated:
+    // it is not a gate question, which is how it was first read. `browser()`
+    // registers the Karma and webpack compilations, `:rootPackageJson` is an umbrella over EVERY
+    // JS compilation in the build rather than only the one being run, and the root build sets
+    // `yarnLockMismatchReport = FAIL` with `yarnLockAutoReplace = false`. The committed
+    // kotlin-js-store/yarn.lock holds mocha and its transitive deps and no karma and no webpack,
+    // so the npm set would move and `:kotlinStoreYarnLock` would fail — in the scheduled webtest
+    // job, which runs that task BEFORE jsNodeTest (loop/webtest-last-run.log line 17) and is the
+    // only verifier this library's JavaScript target has. Regenerating the lock needs the network,
+    // which STOP RULE 5 forbids and the sandbox denies. If a page proves a browser target is needed
+    // after all, an operator adds the environment and the reviewed lock together, in one commit.
     js(IR) {
         moduleName = "nenya"
         nodejs {
