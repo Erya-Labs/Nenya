@@ -157,9 +157,9 @@ evidence rule, deliverable commitments, the order state machine, privacy require
 a conformance checklist. It uses RFC 2119 language and cites the NIPs it builds on.
 
 [`spec/NENYA-1-companion.md`](spec/NENYA-1-companion.md) is its non-normative companion: the
-motivation, the rationale, the decision records and a complete worked order. The contract is the
-normative document alone — every requirement sentence lives there — and the companion exists so
-the rules are readable without the reasoning that produced them.
+revision history, the motivation, the rationale, the decision records and a complete worked
+order. The contract is the normative document alone — every requirement sentence lives there —
+and the companion exists so the rules are readable without the reasoning that produced them.
 
 Decisions are recorded in §16, rather than silently defaulted — the decisions themselves and the
 duties they carry in §16.1 and §16.2 of the normative document, and the candidates, trade-offs and

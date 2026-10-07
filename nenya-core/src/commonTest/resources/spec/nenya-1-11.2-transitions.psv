@@ -30,33 +30,34 @@
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
 #
-# Regenerated for revision `1.8`, the companion-extraction revision, which moves non-normative
-# material out of §11.4, §13, §15, §16 and Appendix A into `spec/NENYA-1-companion.md`. Every
-# one of those moves is **below** §11.2's row block and none is inside it, so no move shifted a
-# line number here at all. The shift this regeneration records comes from one line and one line
-# only: the revision `1.8` row the Definition of done requires in §0's history table, which sits
-# above the block and pushed it down by exactly 1. Every line below is therefore its revision
-# `1.7` value plus 1 — 1881–1895 became 1882–1896. No line was added, removed or reworded inside
-# the block, so this regeneration changes the first column only: the set of (from, to) pairs is
-# **identical** to revision `1.7`'s, and `TransitionTotalityTest`'s pair equality is untouched.
+# Regenerated for revision `1.9`, which completes the companion extraction revision `1.8`
+# began. Unlike `1.8`, this revision moves material from **above** §11.2 — §0's revision-history
+# table and four of its per-revision notes, §1's motivation, §3's rationale for distrusting the
+# seams, and the rationale paragraphs of §4.2, §4.5, §6.1, §8.2, §8.6, §9.3, §10.5 and §10.6 — so
+# every line of the row block moved up. Nothing inside the block was added, removed or reworded:
+# the shift is uniform at exactly **-116** lines, 1882–1896 became 1766–1780, and this
+# regeneration changes the first column only. The set of (from, to) pairs is **identical** to
+# revision `1.8`'s, so `TransitionTotalityTest`'s pair equality is untouched. This is a
+# transcription change under STOP RULE 1 — a fixture that must change because the specification
+# it transcribes moved — and not a silenced failure.
 
-1882 | — | proposed
-1883 | proposed | accepted
-1884 | proposed | cancelled
-1885 | proposed | expired
-1886 | accepted | committed
-1887 | accepted | cancelled
-1887 | accepted | expired
-1888 | committed | awaiting_payment
-1889 | committed | cancelled
-1889 | committed | expired
-1889 | committed | disputed
-1890 | awaiting_payment | paid
-1891 | awaiting_payment | cancelled
-1891 | awaiting_payment | expired
-1891 | awaiting_payment | disputed
-1892 | paid | released
-1893 | paid | disputed
-1894 | released | settled
-1895 | released | disputed
-1896 | released | disputed
+1766 | — | proposed
+1767 | proposed | accepted
+1768 | proposed | cancelled
+1769 | proposed | expired
+1770 | accepted | committed
+1771 | accepted | cancelled
+1771 | accepted | expired
+1772 | committed | awaiting_payment
+1773 | committed | cancelled
+1773 | committed | expired
+1773 | committed | disputed
+1774 | awaiting_payment | paid
+1775 | awaiting_payment | cancelled
+1775 | awaiting_payment | expired
+1775 | awaiting_payment | disputed
+1776 | paid | released
+1777 | paid | disputed
+1778 | released | settled
+1779 | released | disputed
+1780 | released | disputed

@@ -21,49 +21,12 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.8`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.9`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
-**Revision history**
-
-| Revision | Date | Change |
-|---|---|---|
-| `1.0` | 2026-09-09 | First published revision. Eight items left OPEN. |
-| `1.1` | 2026-09-09 | `OPEN-1`, `OPEN-2` and `OPEN-3` **closed** by the maintainer. The request kind is fixed at `30404`; the fee basis-point rule is fixed at "legal 0–10000, mandatory disclosure, no protocol ceiling below 10000"; public bidding is the default. Five items remain open (`OPEN-4`–`OPEN-8`), keeping their original numbers. |
-| `1.2` | 2026-09-09 | Consistency repair, no new wire semantics. Canonical JSON escaping (§4.1) aligned with the deployed ecosystem — the seven shortcut escapes, every other character below `0x20` as `\u00XX` — recorded as a deliberate, reasoned deviation from NIP-01's literal wording. Twenty internal contradictions resolved, chiefly: the fee-invoice deadlock (§8.5 vs §11.2), the zero-`fee_msat` deadlock (§8.3 vs §11.1), the simultaneously mandatory and optional `fee` tag (§7.5 vs §8.1), the undefined "release deadline" (§11.2), the unbound `kind:15` release (§7.4, §10.3), and the `m`/`file-type` identity (§10.1 vs §10.3). `kind:16` `type=6` assigned to the private bid, closing the §6.1 interop hole; `item` given a normative row in §5.3. The confirmation floor above `500` bps (§8.1) is recorded as a **standing disclosure duty, promoted from interim as part of the `OPEN-2` closure**. `OPEN-8` broadened to cover `type=6`; new `OPEN-9` (registering `30404`) gives the previously unnumbered publication question a number. Two example timestamps corrected (§6, §7.5). |
-| `1.3` | 2026-09-16 | Text with no UTF-8 encoding (§4.1). A `content` or tag value containing an unpaired UTF-16 surrogate MUST now be **rejected**, never serialised with a substituted replacement character: platforms substitute differently (`?` on the JVM, U+FFFD in JavaScript), so substitution gave one event two ids. Stated in §4.1, cross-referenced from §4.3, and added to §18's event-id vectors. |
-| `1.4` | 2026-09-17 | Appendix C corrected against BOLT-11 itself, and completed as a reader specification. Three errors of fact repaired: BOLT-11 does **not** define invoices as all-lowercase (it prescribes uppercase for QR codes and its own example 13 is all uppercase), so refusing an uppercase invoice is stated as **Nenya's** rule and not as BOLT-11's (§4.3, Appendix C); a tagged field of the wrong length is **skipped** as unknown rather than rejecting the invoice, which is BOLT-11's own reader rule; and the payment secret (`s`) is now REQUIRED. Appendix C additionally states, rather than leaves to the reference implementation, the reader rules Nenya enforces, and states which BOLT-11 rules Nenya does **not** perform and MUST NOT report as performed. No tag meaning, fee arithmetic or state changes. |
-| `1.5` | 2026-09-19 | Four refusals stated where the document previously named a sender, or presumed a uniqueness, without saying what to do about anything else. §7.6: an implementation MUST know the provider's key independently of the proposal and MUST reject a `type=3` acceptance sealed by any other key, the buyer's included. §8.6: a `payee=provider` `type=2` MUST arrive under a seal whose pubkey is that same provider key, the counterpart to §8.7's rule for the fee side; a second `type=2` for an `(order, payee)` already accepted MUST be rejected rather than replacing the first; an invoice already accepted for one payee on an order MUST be rejected for any other payee on that order; and a `type=2` whose invoice has already expired at the moment it would be accepted MUST be rejected then rather than at settlement. No tag meaning, fee arithmetic or state changes. |
-| `1.6` | 2026-09-23 | A **verification deadline** out of `released`, stated as a second `released → disputed` row in §11.2. An order whose buyer never completes §10.4 previously sat in `released` for ever: a blob refused for its length or for the download bound is not a hash mismatch, so no trigger existed for it, and neither did one for a dead URL or a buyer who simply never looks. The deadline is **local** rather than a new wire term — the clock reading taken at release plus a window the implementation applies and displays, falling back to the reading taken at `paid` and then to `deliver_by` — and where none of the three was ever recorded the order reports that it has no deadline rather than that it is pending. §11.2's "there is no third deadline" paragraph is replaced accordingly; §10.4, §11.4 and §18 record the consequence. No tag meaning, fee arithmetic, evidence rule or state changes: a trigger is added to a `(from, to)` pair the table already carried. |
-| `1.7` | 2026-09-23 | The gift-wrap envelope, written down as a procedure an implementer can follow, and the bounds that make it representable. §4.3's default bounds **refused real gift wraps**: NIP-44 pads a plaintext to a power-of-two-derived size, so a rumor's JSON grows twice on the way out, and a wrap's `content` passed the 16 KiB default once the rumor's JSON exceeded 7 168 bytes — a conformant implementation had to refuse to open a 10 KB chat message. A `kind:13` seal and a `kind:1059` wrap are therefore bounded by NIP-44 instead: decrypted plaintext at most 65 535 bytes, wrap `content` at most 87 472 characters, rumor JSON at most 40 960 bytes on write. The plaintext limit follows the official NIP-44 vectors and every deployed application rather than the extended-length text a later NIP-44 revision added (§4.3). §7.1 is restated as a numbered write procedure and a numbered read procedure, with six refusals it previously left unstated; §3 gains the one-time signer seam the wrap needs; §4.1 states what a nostr signature is over; §7.2 says when a message MAY be reported as signature-verified; §18 records what the gift wrap can be checked against offline. No tag meaning, fee arithmetic, evidence rule or state changes. |
-| `1.8` | 2026-10-06 | Non-normative material moved to the companion document `spec/NENYA-1-companion.md` — §11.4's residual-risk discussion, §13's trust-model elaboration, three of §15's interoperability notes, §16's decision narratives and Appendix A's worked order — leaving a pointer in each place. **No requirement changed and nothing was renumbered:** every sentence carrying an RFC-2119 key word stayed in this document, the `OPEN-1`…`OPEN-9` identifiers and every `§x.y` number mean what they meant, and no wire value, tag, cardinality, requirement level, evidence rule, state or fee rule is touched. |
-
-Revision `1.1` changes no tag meaning, no fee arithmetic, no evidence rule and no state, so
-the `["nenya", "1"]` version tag is unchanged and revision `1.0` and revision `1.1` are wire
-compatible in every respect except that a `1.0` implementation had no request kind to emit.
-Per Appendix B, closing an OPEN item is not by itself a major change.
-
-Revision `1.2` likewise changes no tag meaning, no fee arithmetic, no evidence rule and no
-state, and adds one `kind:16` `type` value — which Appendix B classifies as **minor**. The
-`["nenya", "1"]` version tag is therefore unchanged. Two consequences are worth naming
-precisely rather than burying:
-
-- The §4.1 escaping correction changes the computed `id` of an event whose `content` or tag
-  values contain a character below `0x20` other than the seven NIP-01 names. It changes no
-  other event's id. Such an event had **no** valid serialisation under revision `1.1`'s
-  literal reading — the output was not JSON — so no interoperating implementation can have
-  produced one. §4.1 states the reasoning in full.
-- A revision `1.1` implementation does not know `type=6` and, per §7.4, ignores it. A
-  private bid therefore degrades to *not received*, never to a misparsed order message. That
-  is the same failure a missing `kind:10050` produces (§7.3), and it is why §17 requires the
-  public bidding path.
-
-Revision `1.3` changes no tag meaning, no fee arithmetic, no evidence rule and no state; it
-makes a rule of §4.1's that was already implied — the id is over UTF-8 bytes, and some strings
-have none — explicit. The `["nenya", "1"]` version tag is unchanged. It changes no computed id:
-an event it newly rejects is one whose id no two implementations could agree on, because its
-serialisation has no UTF-8 encoding and every substitute byte sequence was an implementation
-accident rather than NIP-01.
+**Revision history.** The table is in §0 of `spec/NENYA-1-companion.md`, together with the
+per-revision notes for revisions `1.1`, `1.2`, `1.3` and `1.5`. The notes that remain below
+are the ones carrying a requirement sentence, and a requirement stays in this document.
 
 Revision `1.4` changes no tag meaning, no fee arithmetic and no state, and the
 `["nenya", "1"]` version tag is unchanged. It does **not** claim to change no evidence rule:
@@ -94,36 +57,6 @@ had to apply in order to read an invoice at all — the bech32 checksum, the las
 amount rules, the data-part floor — written down so another implementer need not re-derive it,
 plus an explicit statement of what Nenya does **not** check. Neither adds an obligation on a
 sender, so no conformant invoice becomes non-conformant because of them.
-
-Revision `1.5` changes no tag meaning, no fee arithmetic and no state, and the
-`["nenya", "1"]` version tag is unchanged. It adds no field, no tag and no message; each of
-its four edits states, as a refusal, something an earlier revision had already named as a
-fact about the sender or presumed about uniqueness. Per Appendix B that is a **tightening**
-and not a version change: an implementation conformant with revision `1.4` emits nothing
-revision `1.5` rejects, because §7.4's Sender column and §7.6's "from the provider" already
-said who sends each of these messages. What changes is that a *receiver* now has a stated
-obligation to check.
-
-- **§7.6 — the acceptance's sealing key.** §7.6 already called acceptance "a `type=3` status
-  update **from the provider**" and §11.2's `proposed → accepted` row already read "from the
-  provider's key". Neither said what to do with one sealed by another key, and an
-  implementation that compared only the four terms would accept a buyer's own `type=3`
-  carrying byte-identical terms — the buyer accepting its own order.
-- **§8.6 — the provider invoice's sealing key.** §7.4's Sender column gives a `type=2` as
-  "provider, or fee recipient", and §8.7 turned that into a refusal for the fee side alone.
-  The provider side is now stated in the same shape.
-- **§8.6 — one accepted `type=2` per `(order, payee)`, and one invoice per order.** §9.2
-  check 1 compares a receipt against *the* stored payment request, which presumes there is
-  exactly one; nothing said so. The two refusals that follow from it — a replacement, and one
-  invoice offered as two payees' — are now written down.
-- **§8.6 — an expired invoice is refused when it arrives.** §9.2 check 5 already required an
-  invoice to be live at the moment it was accepted, but stated the consequence at settlement,
-  where the buyer may already have paid. It is now also a rule about accepting the `type=2`.
-
-The third is the only one that refuses a flow somebody might have built: a provider that
-re-sends its invoice, for instance because the first went unanswered, now has the second
-rejected rather than silently replacing the first. That is deliberate and §8.6 states the
-reasoning in place. An invoice that expires unpaid is not re-issued within the order.
 
 Revision `1.6` changes no tag meaning, no fee arithmetic, no evidence rule and no state, and
 the `["nenya", "1"]` version tag is unchanged. It adds no field, no tag, no message and no
@@ -227,16 +160,8 @@ NIP-04).
 
 ## 1. Motivation and scope
 
-NIP-99 gives nostr a good-enough classified listing: an addressable event that says *this
-thing is for sale*. It gives nostr nothing at all for the other half of a marketplace.
-There is no want-to-buy convention anywhere in the NIPs, the kind registry, or any shipping
-client; every implementation surveyed is seller-side only. A board with only one side is a
-catalogue, not a market.
-
-NIP-99 also stops at the ad. It has no vocabulary for a bid, an order, a delivery, a
-payment, a fee, or a dispute. Everything past "here is a thing, here is a price" is
-currently either invented per-client or borrowed from NIP-15, which is deprecated and whose
-checkout rides deprecated encryption.
+The gap Nenya fills, why NIP-99 leaves it open, and the first target audience: §1 of
+`spec/NENYA-1-companion.md`.
 
 Nenya fills exactly that gap, and no more:
 
@@ -256,10 +181,6 @@ Nenya fills exactly that gap, and no more:
 Out of scope, permanently or for v1: custody, escrow, arbitration, indexing, hosting,
 identity verification, content moderation policy, and any protocol role for the author of
 this document. See §14.
-
-The first target audience is people without access to generative media tooling paying
-people who have it. Nothing in the wire format is specific to that audience; "digital
-media" is an `m` (MIME type) tag, not a hardcoded assumption.
 
 ---
 
@@ -320,13 +241,12 @@ protect. **No secret key crosses this boundary in either direction.** The implem
 asks the seam for the throwaway public key, for a signature, and for an encryption; it never
 sees, stores or logs the secret behind them (§12, §14).
 
-This is not defensive style. It is the reason the payment-evidence rule and the signed fee
-term exist: both are cases where the natural, convenient design is to believe an injected
-component, and both are cases where believing it loses the user money.
-
 Signing is deliberately abstract. An in-process key, a [NIP-55][nip55] Android signer app,
 or a remote signer are all conformant. Nothing in this document depends on where the secret
 lives.
+
+Why Nenya takes this stance toward all five seams rather than trusting them: §3 of
+`spec/NENYA-1-companion.md`.
 
 ---
 
@@ -433,9 +353,7 @@ event id:
 ["a", "<kind>:<pubkey-hex>:<d-value>", "<relay-url>"]
 ```
 
-This is not a stylistic preference. NIP-15 auctions bind bids to an event id, and NIP-15
-itself has to warn that an auction cannot be edited once bid on, because every edit detaches
-every bid. Coordinate-scoping makes that failure unrepresentable.
+Why coordinate-scoping rather than an event id: §4.2 of `spec/NENYA-1-companion.md`.
 
 A listing MAY be shared out of band as a NIP-19 `naddr`. Relay hints inside an `naddr` leak
 the sharer's relay set; see §12.
@@ -581,10 +499,8 @@ Every public Nenya event MUST carry both of:
 implementation MUST ignore a public event whose `nenya` version it does not implement,
 rather than parsing it optimistically.
 
-`t` is used because relays index single-letter tags only. This is the single hardest
-constraint on the whole design: **anything that must be filtered server-side has to ride on
-a single-letter tag.** A discriminator on `price`, `status`, `fee` or any other multi-letter
-name is invisible to a relay and forces every client to download the whole board.
+Why discovery rides on `t` and not on a multi-letter tag: §4.5 of
+`spec/NENYA-1-companion.md`.
 
 ### 4.6 Clocks and deadlines
 
@@ -899,10 +815,8 @@ interoperable; it is not the default.
 > §11.2). Assigned in revision `1.2`; the coordination question it inherits from `type=5` is
 > `OPEN-8`.
 
-Revision `1.1` specified the private bid's *contents* but pinned no rumor kind for it, which
-left two implementations free to encode it differently and not interoperate. `type=6` closes
-that hole. `kind:14` was rejected because §5.4 puts terms in tags and `kind:14` is defined as
-free text; `kind:15` is a file message; `type=1` is excluded below.
+Why `type=6` was assigned, and what the alternatives were: §6.1 of
+`spec/NENYA-1-companion.md`.
 
 - A private bid travels as a §7 gift-wrapped `kind:16` rumor with `["type", "6"]` to the
   listing author, carrying the same term tags a public bid would carry — `price`, and
@@ -1322,9 +1236,7 @@ provider receives  = price
 buyer pays         = price + fee
 ```
 
-The alternative — fee deducted from price — means the same listing shows a different
-effective price in every client depending on that client's fee configuration, which destroys
-price comparison across the board and makes the fee invisible to the provider.
+Why the fee is added rather than deducted: §8.2 of `spec/NENYA-1-companion.md`.
 
 An implementation MUST display the fee as a separate, labelled line item with both its basis
 points and its absolute value, and MUST display the total the buyer will pay.
@@ -1451,10 +1363,6 @@ is the direct test of it.
 > separate invoices. An implementation MUST NOT construct, accept, or honour a single
 > invoice covering `total_msat` that some party then splits.**
 
-A single combined invoice means somebody receives money that is not theirs and forwards part
-of it. That is custody, and in most jurisdictions it is money transmission. There is no
-version of that design in NENYA-1.
-
 Concretely:
 
 - The provider's payment request MUST be for exactly `price_msat`. An implementation MUST
@@ -1484,9 +1392,6 @@ refusal for the fee side. It is a refusal on this side too:
 > seal (`kind:13`) `pubkey` is the provider's key — the same key the acceptance for that
 > order was checked against (§7.6, §11.2) — and any other MUST be rejected.**
 
-A provider invoice from another key is somebody else's bill under the provider's name, and
-§9.2 check 1 would then anchor the whole order's payment evidence to it.
-
 **One accepted `type=2` per `(order, payee)`, and one invoice per order.** §9.2 check 1
 compares a receipt against *the* payment request stored for that order and payee, which
 presumes there is exactly one. Two rules make that true:
@@ -1494,20 +1399,6 @@ presumes there is exactly one. Two rules make that true:
 > **Once a `type=2` has been accepted for an `(order, payee)` pair, a second MUST be
 > rejected rather than replacing it. And a `type=2` whose BOLT-11 string is byte-identical
 > to one already accepted for a **different** payee on the same order MUST be rejected.**
-
-The first rule refuses a re-pointing after the fact: check 1 is a comparison against a
-stored string, so replacing that string retroactively changes which payment settles the
-order, and any party that can get a second `type=2` accepted can aim the check wherever it
-likes. It refuses one flow that looks conformant and is worth naming rather than smuggling
-— a provider re-sending its invoice, for instance because the first went unanswered. That
-is refused; an invoice that expires unpaid is not re-issued inside the order, and the
-correct response to an order whose invoice has died is §11.2's, not a second invoice.
-
-The second rule is the non-custodial rule above, enforced at the moment of storage instead
-of at settlement. One invoice presented as both payees' bills is a combined invoice with
-extra steps: whoever is paid holds `price_msat + fee_msat` and owes somebody the difference,
-which is the custody §8.6 exists to rule out. Caught here, it is refused before the buyer
-pays; caught at settlement, it is refused after — and the money has already moved.
 
 **And the same reasoning for time.** §9.2 check 5 measures an invoice's
 `timestamp + expiry` against the implementation's clock *as it read when the invoice was
@@ -1517,11 +1408,8 @@ accepted*, so the answer is already fixed at that moment:
 > reading it would record for that acceptance, rather than accepting it and refusing the
 > receipt later.**
 
-The two refusals name the same fact, and only the earlier one is useful: a buyer shown a
-dead invoice has been shown a bill nothing will settle, and an implementation that stores it
-and refuses the receipt has waited until after the payment to say so. Nothing is weakened by
-this — an invoice accepted under the rule is one check 5 will accept, and check 5 stays
-where it is for evidence arriving against a store the implementation did not itself write.
+The reasoning behind each of the four refusals above — the non-custodial rule, the sealing
+key, the two uniqueness rules and the expiry — is in §8.6 of `spec/NENYA-1-companion.md`.
 
 ### 8.7 Verifying that a fee invoice is the fee recipient's
 
@@ -1655,9 +1543,9 @@ invoice*, and that the invoice arrived in the correctly sealed thread.
 - **Static Lightning addresses (LNURL / `lud16`) MUST NOT be used for order settlement.** A
   reused address links every order the user has ever settled, and an LNURL fetch discloses
   the payer's IP to the recipient's server.
-- The binding is transport-level precisely because the alternative — writing the order id
-  into the invoice description — would publish that identifier to the payer's wallet, the
-  payee's node, and every routing hop. See §12.
+
+Why the binding is transport-level, and what the alternative would publish (§12): §9.3 of
+`spec/NENYA-1-companion.md`.
 
 ### 9.4 Other rails
 
@@ -1802,28 +1690,24 @@ What such an order does instead is leave `released` at the **verification deadli
 
 ### 10.5 What the commitment does and does not prove
 
-Because `ox` is published **before** the buyer pays and **before** the key exists in the
-buyer's hands, a provider cannot substitute a different file after payment: the only file
-whose plaintext hashes to `ox` is the one they committed to.
-
 It does **not** prove the file is good, on-brief, original, or non-infringing. Nenya has no
 quality oracle and does not want one. `ox` proves *delivery of the committed bytes*, and
 nothing more. Implementations MUST NOT present hash verification to users as a quality
 guarantee.
 
-A provider MAY additionally publish `ox` in a public bid, which lets a third party later
-adjudicate a "you delivered something other than what you committed to" claim without either
-party's cooperation. The cost is a correlation handle: if the plaintext ever becomes public,
-the hash links it to that bid. Implementations MUST make this opt-in and MUST explain the
-trade-off; it MUST NOT be the default.
+A provider MAY additionally publish `ox` in a public bid. The cost is a correlation handle:
+if the plaintext ever becomes public, the hash links it to that bid. Implementations MUST
+make this opt-in and MUST explain the trade-off; it MUST NOT be the default.
+
+Why the commitment binds the provider to the committed bytes, and what publishing `ox` in a
+bid buys: §10.5 of `spec/NENYA-1-companion.md`.
 
 ### 10.6 Metadata
 
 Providers MUST strip identifying metadata (EXIF, XMP, C2PA/JUMBF) from a deliverable
-**before** encryption and **before** upload. A blob host that strips metadata server-side has
-already seen the original. Because the commitment hashes are computed after stripping,
-stripping is not merely advisory — a deliverable stripped after commitment fails the `ox`
-check.
+**before** encryption and **before** upload.
+
+Why stripping is not merely advisory: §10.6 of `spec/NENYA-1-companion.md`.
 
 ---
 
