@@ -107,6 +107,12 @@ class ChannelStructureTest {
             "DeliveryTags",
             "DeliveryTerms",
             "DeliverableTags",
+            // T41's write half of §7.4, §7.5, §6.1 and §10.
+            "RumorEnvelope",
+            "RumorBuild",
+            "RumorBuild\$Built",
+            "RumorBuild\$Refused",
+            "RumorWriter",
         )
 
         /**
@@ -123,6 +129,15 @@ class ChannelStructureTest {
          * 4. **§10.1's blob URL**, which is a counterparty's value and deliberately not a term:
          *    nothing here decides on it and nothing fetches it;
          * 5. **§10.3's operand values**, which are strings precisely because §10.3 compares bytes.
+         * 6. **Values a client of this library AUTHORS**, which T41's write half adds, and it is
+         *    the category this list was hardest to reason about. Every `RumorEnvelope` and
+         *    `RumorWriter` entry below is a value the embedding app chose for a message it is about
+         *    to seal with its own key — the exact opposite of the shape this list guards against,
+         *    which is a counterparty's claim arriving as a term and being believed. No code in this
+         *    library reads one as evidence of anything: they are written into tags, and when a
+         *    counterparty's copy of the same message comes back it is *that* copy the decoders read,
+         *    through §7.2's attribution and §4.3's Encoding column. The same reading
+         *    `ListingStructureTest` records for `AuthoredListing.<init>` one package over.
          *
          * The assertion is set **equality** in both directions, so this list gets no weaker as it
          * grows: a stale entry turns it red exactly as a new one does.
@@ -162,6 +177,32 @@ class ChannelStructureTest {
             // built by `decode` from tags T13 already attributed, and the class is `internal` so a
             // Kotlin caller cannot mint one to compare against.
             "DeliverableTags.<init>",
+            // Category 6, T41's write half. §4.1's author pubkey and §4.1's `content`, both of
+            // them values the app is about to sign its own name to. The pubkey is read by the same
+            // `readPubkeyHex` a `p` tag goes through and refused as MALFORMED_EVENT_FIELD if it is
+            // not 64 hex characters; `content` carries no machine meaning to any codec here.
+            "RumorEnvelope.<init>",
+            // The by-value equivalent of the `ChannelException.<init>` pair two entries up: the tag
+            // name a refusal is about and the reason in words. Decides nothing.
+            "RumorBuild\$Refused.<init>",
+            // §8.1's `fee` recipient, on each of the three messages that can carry a fee term. It
+            // is the third element of a tag the AUTHOR is stating, not one being believed — §8.4's
+            // comparison of a counterparty's copy against it is `FeeTermAgreement.across`, which
+            // takes whole tags and is on no list here.
+            "RumorWriter.proposal",
+            "RumorWriter.statusUpdate",
+            "RumorWriter.privateBid",
+            // §10.1's blob URL again, and this is the write side of the entry four up: the same
+            // decision about not having a type for "a URL", made once for the value the decoder
+            // publishes and once for the value the writer is handed.
+            "RumorWriter.commitment",
+            // §10.2's decryption key and nonce, which this writer holds to the 64 and 24 LOWERCASE
+            // hex characters §10.2 makes mandatory on write. They are strings because §10.2
+            // specifies an encoding rather than a structure, and a richer type would be a type that
+            // *holds* key material — which §12 item 11 and STOP RULE 14 are precisely about not
+            // doing. `RumorWriter.release` puts both into tags and onto no field of anything, so
+            // there is no member from which one could reach a log.
+            "RumorWriter.release",
         )
 
         /**
@@ -199,9 +240,15 @@ class ChannelStructureTest {
             assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
             // The class files this package compiled to when it was written, pinned as a floor so a
             // partial output directory goes red instead of sweeping less than it claims. Raised
-            // from 18 by §7.5's and §7.6's types and from 28 by §10.1's and §10.3's; a floor is
-            // only ever raised.
-            val pinned = 37
+            // from 18 by §7.5's and §7.6's types, from 28 by §10.1's and §10.3's, and from 37 by
+            // T41's write half — `RumorEnvelope`, `RumorBuild` with its two cases, `RumorWriter`
+            // and the private `Message` carrier; a floor is only ever raised.
+            //
+            // Measured after a clean `--rerun-tasks` compile, deliberately: an incrementally-built
+            // output directory here still held one stale class from a previous run and reported 45,
+            // which would have pinned this floor one above what the package actually compiles to and
+            // turned every sweep in this file red on the next clean build.
+            val pinned = 44
             assertTrue(
                 files.size >= pinned,
                 "${directory.absolutePath} holds ${files.size} class file(s); at least $pinned were pinned",

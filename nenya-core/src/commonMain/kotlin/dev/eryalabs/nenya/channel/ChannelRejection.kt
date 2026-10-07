@@ -327,6 +327,38 @@ public enum class ChannelRejection {
      * the [TagException] the tag codec threw.
      */
     MALFORMED_TAG,
+
+    /**
+     * One of §4.1's five id-bearing event fields is not what §4.3 fixes it as: an author pubkey
+     * that is not 64 hexadecimal characters, or a negative `created_at`.
+     *
+     * Raised only by [RumorWriter], and its own constant rather than [MALFORMED_TAG] because it
+     * names no tag at all — §4.1's fields sit beside the tag array rather than in it, so a caller
+     * told "malformed tag" with a `null` tag would go looking through §7.4's vocabulary for a row
+     * that was never the problem. `ListingRejection.MALFORMED_EVENT_FIELD` is the same constant one
+     * package over, added by the writer there for the same reason.
+     *
+     * Unreachable from any decoder in this package: `AttributedRumor.attribute` takes a
+     * `CheckedEvent`, so §4.1's fields are behind `WireEvent`'s own `init` by the time it runs.
+     */
+    MALFORMED_EVENT_FIELD,
+
+    /**
+     * A tag [RumorWriter] spells from a published list was handed to it as an extra tag instead,
+     * where §4.3's duplicate rule does not reach it.
+     *
+     * Its own constant rather than [DUPLICATE_TAG], and the distinction is the caller's next move.
+     * A duplicate is a message that really would carry the tag twice, which §4.3 requires be
+     * rejected rather than resolved. This is a message that would carry it **once** — because the
+     * parameter the writer spells that row from was left `null` — so nothing is duplicated and
+     * nothing on the wire is wrong: the caller passed the value to the wrong door, and the answer
+     * is to pass it to the right one so the Encoding column is applied to it and it lands in the
+     * position §4.1 hashes it in.
+     *
+     * Raised only by [RumorWriter]. `ListingRejection.ROW_IS_NOT_AN_EXTENSION` is its counterpart
+     * one package over.
+     */
+    ROW_IS_NOT_AN_EXTENSION,
 }
 
 /**

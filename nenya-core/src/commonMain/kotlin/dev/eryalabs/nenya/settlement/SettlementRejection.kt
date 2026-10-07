@@ -567,7 +567,27 @@ public enum class SettlementRejection {
      * The precise §5.3 reason is the [TagRejection] on the `cause`, which is the `TagException` the
      * tag codec threw.
      */
-    MALFORMED_TAG;
+    MALFORMED_TAG,
+
+    /**
+     * §9.4's unrecognised `<medium>` sink has no wire form, so [PaymentWriter] cannot emit one.
+     *
+     * `PaymentMedium.UNKNOWN` carries a `null` token on purpose: §9.4 makes it the required
+     * *treatment* of a rail this implementation has never heard of — "parsed", and evidencing
+     * nothing — rather than a rail of its own. A writer handed it has been asked to put a medium on
+     * the wire that NENYA-1 does not name, and emitting a sentinel would republish an invented rail
+     * as though this implementation had defined one.
+     *
+     * Its own constant rather than [MEDIUM_NOT_LIGHTNING], and the two are genuinely different
+     * questions. That one is §8.6's: `bitcoin` and `ecash` are real rails a conformant peer may
+     * name on a *receipt*, and refusing them on a *request* is a rule about which rail an invoice
+     * may arrive on. This one is about a token that names no rail at all, and it is refused on both
+     * messages.
+     *
+     * Raised only by [PaymentWriter]: no decoder can reach it, because `PaymentMedium.of` answers
+     * `UNKNOWN` precisely so that reading one is possible.
+     */
+    UNKNOWN_MEDIUM_IS_NOT_EMITTABLE;
 
     public companion object {
 

@@ -321,7 +321,69 @@ internal object Section92 {
         tags.single()
     }
 
+    /**
+     * The tag names of §9.2's worked `kind:17`, in the order that example prints them.
+     *
+     * The other half of this object: [paymentShape] reads §9.2's backticked *sentence* about the
+     * GammaMarkets shape, and this reads its worked **event**. `PaymentWriterTest` holds
+     * `PaymentWriter.RECEIPT_TAG_ORDER` equal to this, which is the half of T41's round-trip proof
+     * the round trip itself cannot make: §4.1 hashes the tags in order, so the emission order is
+     * part of the event, and a reconstruction that drops the names the writer spells drops a wrong
+     * order with them. The document is one side of that comparison rather than the writer.
+     *
+     * `SpecTagShapes.fencedTags` is deliberately **not** used, and that is the trap worth naming:
+     * its block pattern matches a bracketed array alone on its line, and every line of a JSON
+     * example ends with a comma — so it would silently return only the last row. This scans the
+     * `json` fence and takes each array's first quoted token instead.
+     *
+     * The example's *values* are placeholders and must never be fed to a codec: `lnbc900u1p...` is
+     * elided, `<preimage-hex-64-chars>` and `<counterparty-pubkey-hex>` are not values, and none
+     * survives §4.3 or Appendix C. The names are the load-bearing half, and the fixtures compute
+     * their own values — every invoice from the vendored examples (decision **D**), every preimage
+     * from a digest.
+     */
+    val receiptTagNames: List<String> by lazy {
+        val lines = SpecTagShapes.sectionLines(HEADING)
+        val opens = lines.withIndex().filter { it.value.trim() == JSON_FENCE }.map { it.index }
+        if (opens.size != 1) {
+            fail(
+                "§9.2 in ${SpecTagShapes.specPath()} must carry exactly one $JSON_FENCE fence — its " +
+                    "worked kind:17 — and carries ${opens.size}",
+            )
+        }
+        val open = opens.single()
+        val close = lines.withIndex()
+            .firstOrNull { it.index > open && it.value.trim() == FENCE }
+            ?.index
+            ?: fail("§9.2's $JSON_FENCE fence in ${SpecTagShapes.specPath()} is never closed")
+        val names = lines.subList(open + 1, close)
+            .mapNotNull { TAG_NAME.find(it)?.groupValues?.get(1) }
+        // Asserted rather than assumed: a pattern that stopped matching would otherwise hand the
+        // writer test an empty list and make its equality "empty equals empty". The six names are
+        // never transcribed — only how many.
+        if (names.size != RECEIPT_TAG_NAMES) {
+            fail(
+                "§9.2's worked receipt in ${SpecTagShapes.specPath()} parsed to ${names.size} tag " +
+                    "name(s) ($names) where $RECEIPT_TAG_NAMES were expected",
+            )
+        }
+        if (names.size != names.toSet().size) {
+            fail("§9.2's worked receipt in ${SpecTagShapes.specPath()} names a tag twice: $names")
+        }
+        names
+    }
+
     private const val PAYMENT_TAG_NAME: String = "payment"
+
+    /** §9.2's worked receipt prints six tag arrays. */
+    private const val RECEIPT_TAG_NAMES: Int = 6
+
+    private const val JSON_FENCE: String = "```json"
+
+    private const val FENCE: String = "```"
+
+    /** A tag array's opening element: `["<name>", …`. The tag name is its first quoted token. */
+    private val TAG_NAME = Regex("""^\s*\[\s*"([^"]+)"""")
 }
 
 /** §9.4's two other rails, which v1 parses and evidences nothing from. */

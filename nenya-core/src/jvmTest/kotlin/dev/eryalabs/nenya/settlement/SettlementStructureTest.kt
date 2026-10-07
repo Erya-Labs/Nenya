@@ -84,6 +84,11 @@ class SettlementStructureTest {
             "FeeTermAgreement\$Companion",
             "FeeTermAgreement\$Agreed",
             "FeeTermAgreement\$Diverged",
+            // T41's write half of §8.6 and §9.2.
+            "PaymentBuild",
+            "PaymentBuild\$Built",
+            "PaymentBuild\$Refused",
+            "PaymentWriter",
         )
 
         /**
@@ -145,6 +150,26 @@ class SettlementStructureTest {
             // library has already recognised — and never a string a counterparty chose.
             "Bolt11Multiplier.valueOf",
             "Bolt11Field.valueOf",
+            // T41's write half, and every entry is a value the embedding app AUTHORS for a message
+            // it is about to seal with its own key — the opposite of a counterparty's claim
+            // arriving as a term. `ChannelStructureTest` states that category in full as its
+            // sixth; this is the §8.6 and §9.2 half of it.
+            //
+            // The tag name a refusal is about and the reason in words. Decides nothing — the
+            // by-value equivalent of `SettlementException.<init>` above.
+            "PaymentBuild\$Refused.<init>",
+            // §8.6's fee-recipient pubkey, validated by the same `readPubkeyHex` the decoder uses
+            // and refused as MALFORMED_PAYEE_RECIPIENT otherwise. The invoice is NOT on this list
+            // and that is the point worth reading: `paymentRequest` takes a `Bolt11Reference`, so
+            // the only door an unrecognised reference enters by is still §8.6's own recogniser.
+            "PaymentWriter.paymentRequest",
+            // §9.2's `<medium-reference>` and `<proof>`. Both are strings on purpose and for the
+            // reason §9.4 gives: on `bitcoin` the reference is an address and the proof a txid, on
+            // `ecash` a mint and a mint proof, and v1 defines no verification rule for either — so
+            // neither can be a `Bolt11Reference` or a `Preimage` without refusing a receipt §9.4
+            // says MAY be parsed. Check 2's lowercase-hex rule is applied to the proof on the one
+            // rail §9.2 states it over, which is what `isLowercasePreimageHex` is.
+            "PaymentWriter.receipt",
         )
 
         /** `Payee` as it appears inside a `typeName`, bare or parameterised. */
@@ -169,9 +194,11 @@ class SettlementStructureTest {
                 ?: fail("${directory.absolutePath} is not a readable directory")
             assertTrue(files.isNotEmpty(), "${directory.absolutePath} holds no classes")
             // The class files this package compiled to when it was written, pinned as a floor so a
-            // partial output directory goes red instead of sweeping less than it claims. A floor is
-            // only ever raised.
-            val pinned = 42
+            // partial output directory goes red instead of sweeping less than it claims. Raised
+            // from 42 by T41's write half — `PaymentBuild` with its two cases and `PaymentWriter` —
+            // and by the §8.4 and §9.4 types this package had already grown past the old floor; a
+            // floor is only ever raised.
+            val pinned = 57
             assertTrue(
                 files.size >= pinned,
                 "${directory.absolutePath} holds ${files.size} class file(s); at least $pinned were pinned",
