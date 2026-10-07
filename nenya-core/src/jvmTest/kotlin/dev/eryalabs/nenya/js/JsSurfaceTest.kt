@@ -68,6 +68,12 @@ class JsSurfaceTest {
             "JsSigner",
             "JsEnvironment",
             "JsDecryption",
+            // T43's four: §11.2's machine configuration and its event union, §9.2's store seam,
+            // and §8.4's sighting.
+            "JsOrderMachine",
+            "JsOrderEvent",
+            "JsPaymentRequestStore",
+            "JsFeeTermSighting",
         )
 
         /**
@@ -91,6 +97,22 @@ class JsSurfaceTest {
             "JsBid",
             "JsListingResult",
             "JsBidResult",
+            // T43's ten. Six are the answers §7.1, §9.2 and §11.2 produce; four are **handles** —
+            // `JsRumor`, `JsSettlement`, `JsAcceptedRequest` and `JsOrder` each hold a Kotlin value
+            // whose constructor is `internal` precisely so the library's own door is the only way
+            // to one, and a page passes them back as arguments without reading them apart. Their
+            // `internal val` accessors are mangled with the module name and so are dropped by
+            // `MainClasses.methods`, which is why only their published getters reach the sweep.
+            "JsOutgoingWrap",
+            "JsSealResult",
+            "JsRumor",
+            "JsOpenResult",
+            "JsSettlement",
+            "JsSettlementResult",
+            "JsAcceptedRequest",
+            "JsOrder",
+            "JsOrderResult",
+            "JsOrderOutcome",
         )
 
         /**
@@ -110,6 +132,9 @@ class JsSurfaceTest {
             "JsListingEntriesKt",
             "JsChannelEntriesKt",
             "JsSeamsKt",
+            "JsEnvelopeEntriesKt",
+            "JsSettlementEntriesKt",
+            "JsOrderEntriesKt",
         )
 
         /**
@@ -149,6 +174,20 @@ class JsSurfaceTest {
             "crossedSecondsOrNull" to 1,
             "asTagRows" to 1,
             "asTagArray" to 1,
+            // T43 moved the package's whole catch list into `jsGuarded` and left `jsBuild` as one
+            // line over it: two lists that must stay in step is the shape that goes stale the
+            // first time a module starts raising a type only one of them names.
+            "jsGuarded" to 1,
+            // JsEnvelopeEntries.kt — §7.4's bound/chat split, which every decoder below it needs.
+            "asBoundRumor" to 1,
+            // JsSettlementEntries.kt — §9.2's store seam, §8.4's sighting, and the one reader of a
+            // closed enum by name.
+            "asPaymentRequestStore" to 1,
+            "asFeeTermSighting" to 1,
+            "crossedConstant" to 1,
+            // JsOrderEntries.kt — §11.2's machine configuration and its fourteen-way event union.
+            "asOrderMachine" to 1,
+            "asOrderEvent" to 1,
             // JsChannelEntries.kt — the §7.4, §8.3, §10.1 and §10.3 translations.
             "asJsBuildResult" to 2,
             "asRumorEnvelope" to 1,
@@ -184,16 +223,47 @@ class JsSurfaceTest {
             "JsHex",
             "JsCrossing",
             "CrossedSigner",
+            // T43's two. `JsRefusal` is the `internal` shape `jsGuarded` reduces a thrown refusal
+            // to, so the catch list is written once for all nineteen entry points rather than once
+            // per result class; `CrossedPaymentRequestStore` is `private`, the §9.2 store seam's
+            // adapter, and the sibling of `CrossedSigner`.
+            "JsRefusal",
+            "CrossedPaymentRequestStore",
         )
 
         /**
-         * The thirteen entry points T42 exports, by name.
+         * The nineteen entry points this package exports: T42's thirteen and T43's six.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
-         * and so the count in T42's text is a fact about the compiled library rather than about its
-         * prose.
+         * and so the counts in T42's and T43's text are facts about the compiled library rather than
+         * about their prose.
          */
         val ENTRY_POINTS: Set<String> = setOf(
+            // T42 — the decode-and-build half.
+            "decodeListing",
+            "decodeBid",
+            "buildListingRequest",
+            "buildListingOffer",
+            "buildListingDraft",
+            "buildChat",
+            "buildProposal",
+            "buildStatusUpdate",
+            "buildCommitment",
+            "buildRelease",
+            "buildPrivateBid",
+            "buildPaymentRequest",
+            "buildReceipt",
+            // T43 — the half that turns the page from a board into a trade.
+            "seal",
+            "open",
+            "verifySettlement",
+            "verifyFeeReceipt",
+            "openOrder",
+            "stepOrder",
+        )
+
+        /** T42's half of [ENTRY_POINTS], so each task's own count stays a fact and not a comment. */
+        val T42_ENTRY_POINTS: Set<String> = setOf(
             "decodeListing",
             "decodeBid",
             "buildListingRequest",
@@ -326,7 +396,14 @@ class JsSurfaceTest {
                 "this list already holds is invisible to a comparison of names alone, which is how an " +
                 "export would hide behind a helper.",
         )
-        assertEquals(13, ENTRY_POINTS.size, "T42's text says thirteen")
+        assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
+        assertEquals(19, ENTRY_POINTS.size, "T43's six on top of T42's thirteen")
+        assertEquals(
+            6,
+            (ENTRY_POINTS - T42_ENTRY_POINTS).size,
+            "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
+        )
+        assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
         assertTrue(
             ENTRY_POINTS.none { it in NON_EXPORTED_HELPERS },
             "an entry point is also listed as a helper, so one of the two lists is not what it says",
@@ -398,9 +475,11 @@ class JsSurfaceTest {
                 "is in a class $FILE_CLASSES does not name",
         )
         assertTrue(
-            inspected > 120,
+            inspected > 240,
             "the sweep inspected only $inspected member(s) across " +
-                "${CROSSED_IN + CROSSED_OUT + FILE_CLASSES}, which is not this facade",
+                "${CROSSED_IN + CROSSED_OUT + FILE_CLASSES}, which is not this facade. The floor " +
+                "was 120 at T42's thirteen entry points and eight types a side; T43 doubled the " +
+                "package, so a floor that stayed where it was would pass over half of it.",
         )
     }
 
@@ -489,25 +568,33 @@ class JsSurfaceTest {
     // -----------------------------------------------------------------------------------------
 
     /**
-     * [JsCrossing] owns exactly three refusals, and `JsCrossingTest` reaches all three.
+     * [JsCrossing] owns exactly five refusals, and the equality tests reach all five.
      *
-     * A fourth appearing without anybody noticing is how a translation layer grows into a second
+     * A sixth appearing without anybody noticing is how a translation layer grows into a second
      * rulebook — the divergence STOP RULE 5 exists to prevent — so the set is held equal to the
      * constants the class declares, and the vocabulary name is held apart from every rejection enum
      * this library publishes.
+     *
+     * **Three at T42, five at T43, and the test turning red is how the widening was declared.**
+     * Both additions are the same shape as the first three and neither is a rule about a value:
+     * `NOT_A_BOUND_RUMOR` says the decoder's own parameter type has nothing to be handed (§7.4's
+     * `kind:14` is outside the bound half), and `UNCONSTRUCTIBLE_VALUE` says the Kotlin value a
+     * page named cannot be built from the fields that crossed. See each constant's note.
      */
     @Test
-    fun `the crossing's vocabulary is three refusals and a name no section uses`() {
+    fun `the crossing's vocabulary is five refusals and a name no section uses`() {
         assertEquals(
             setOf(
                 JsCrossing.MALFORMED_DECIMAL,
                 JsCrossing.WRONG_ROW_ARITY,
                 JsCrossing.UNKNOWN_PAYEE_TOKEN,
+                JsCrossing.NOT_A_BOUND_RUMOR,
+                JsCrossing.UNCONSTRUCTIBLE_VALUE,
             ),
             JsCrossing.REASONS,
-            "every reason this boundary can report must be one of the three constants it declares",
+            "every reason this boundary can report must be one of the constants it declares",
         )
-        assertEquals(3, JsCrossing.REASONS.size, "three refusals about the form of a crossing")
+        assertEquals(5, JsCrossing.REASONS.size, "five refusals about the form of a crossing")
 
         // The vocabulary name must not collide with a rejection enum a caller could be branching on: a
         // page that read `JsCrossing` as a protocol refusal would act on a rule NENYA-1 does not have.

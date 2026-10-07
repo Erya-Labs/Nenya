@@ -1,11 +1,15 @@
 package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.JdkRandom
+import dev.eryalabs.nenya.channel.ChannelFixtures
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.ListingWriter
 import dev.eryalabs.nenya.listing.ListingWriterFixtures
 import dev.eryalabs.nenya.money.Msat
+import dev.eryalabs.nenya.order.OrderEvent
+import dev.eryalabs.nenya.order.OrderFixtures
+import dev.eryalabs.nenya.order.OrderMachine
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.settlement.PaymentMedium
 import dev.eryalabs.nenya.tag.NenyaKind
@@ -22,7 +26,7 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * The crossing itself: every number that can exceed 2⁵³ survives the boundary exactly, and the three
+ * The crossing itself: every number that can exceed 2⁵³ survives the boundary exactly, and the five
  * refusals this boundary owns are the only ones it can ever report.
  *
  * ### What the exactness proof is about
@@ -40,13 +44,17 @@ import kotlin.test.fail
  * brackets each anchor rather than sitting on it, and `JsSurfaceTest` carries the arithmetic
  * demonstration of why, on the JVM, where `Double` behaviour is the platform's own.
  *
- * ### The three refusals, and why they are not a second rulebook
+ * ### The five refusals, and why they are not a second rulebook
  *
  * [JsCrossing] reports that what crossed cannot be turned into a Kotlin value at all — `"12x"` is not
- * a decimal string, so there is no amount to hand `Msat.ofMsat`. Decision **P** forbids throwing, so
- * it is returned as a value, under a vocabulary name no section of NENYA-1 uses. The set is pinned
- * here and again by reflection in `JsSurfaceTest`: a fourth refusal appearing unnoticed is how a
- * translation layer grows into a second opinion about the protocol.
+ * a decimal string, so there is no amount to hand `Msat.ofMsat`; a `kind:14` chat is not an
+ * `AttributedRumor.Bound`, so there is nothing to hand `PaymentReceipt.decode`. Decision **P**
+ * forbids throwing, so each is returned as a value, under a vocabulary name no section of NENYA-1
+ * uses. The set is pinned here and again by reflection in `JsSurfaceTest`: a sixth refusal appearing
+ * unnoticed is how a translation layer grows into a second opinion about the protocol.
+ *
+ * T43 took the set from three to five, and this test turning red is how that was declared rather
+ * than noticed.
  */
 class JsCrossingTest {
 
@@ -284,11 +292,11 @@ class JsCrossingTest {
     }
 
     // -----------------------------------------------------------------------------------------
-    // The three refusals this boundary owns.
+    // The five refusals this boundary owns.
     // -----------------------------------------------------------------------------------------
 
     /**
-     * Each of [JsCrossing]'s three reasons is reached through a real entry point, reported as a value,
+     * Each of [JsCrossing]'s five reasons is reached through a real entry point, reported as a value,
      * and tells the caller it came from the crossing rather than from NENYA-1.
      *
      * Reached through the published functions rather than by constructing a [JsCrossing]: the claim is
@@ -296,8 +304,8 @@ class JsCrossingTest {
      * the exception itself would not have proved the entry point catches it.
      */
     @Test
-    @JsName("the_three_crossing_refusals_are_returned_as_values_under_their_own_vocabulary")
-    fun `the three crossing refusals are returned as values under their own vocabulary`() {
+    @JsName("the_five_crossing_refusals_are_returned_as_values_under_their_own_vocabulary")
+    fun `the five crossing refusals are returned as values under their own vocabulary`() {
         val crossed = JsBoundaryFixtures.crossed(ListingWriterFixtures.minimal(NenyaKind.OFFER))
         val reasons = mutableSetOf<String>()
 
@@ -356,6 +364,35 @@ class JsCrossingTest {
         assertEquals("payee", unknownPayee.tag)
         reasons += JsCrossing.UNKNOWN_PAYEE_TOKEN
 
+        // NOT_A_BOUND_RUMOR: §7.4 puts `kind:14` outside the bound half in so many words, and every
+        // decoder below it — `PaymentReceipt.decode` here — takes `AttributedRumor.Bound`. So a chat
+        // is not a value any of them can be handed, and the library's own `NOT_A_RECEIPT` is
+        // unreachable for it by construction rather than by this layer's choice.
+        val chat = verifySettlement(
+            receipt = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())),
+            store = JsPaymentRequestStore(),
+            terms = JsOrderTerms(priceMsat = "1000"),
+        )
+        assertFalse(chat.ok, "a `kind:14` chat is not a §9.2 receipt")
+        assertEquals(JsCrossing.NOT_A_BOUND_RUMOR, chat.reason)
+        assertEquals(JsCrossing.VOCABULARY, chat.reasonVocabulary)
+        assertEquals("kind:17 payment receipt", chat.tag, "the diagnostic must name what was wanted")
+        reasons += JsCrossing.NOT_A_BOUND_RUMOR
+
+        // UNCONSTRUCTIBLE_VALUE: §11.2's trigger column names fourteen events and `type` must be one
+        // of them. There is no `OrderEvent` to offer the machine, so the machine is not called —
+        // which is the field that distinguishes this from a §11.2 refusal about the order.
+        val noSuchEvent = stepOrder(
+            machine = JsOrderMachine(),
+            order = JsOrder(OrderMachine().open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS))),
+            event = JsOrderEvent(type = "settled"),
+        )
+        assertFalse(noSuchEvent.ok, "`settled` is a state, not one of §11.2's fourteen triggers")
+        assertEquals(JsCrossing.UNCONSTRUCTIBLE_VALUE, noSuchEvent.reason)
+        assertEquals(JsCrossing.VOCABULARY, noSuchEvent.reasonVocabulary)
+        assertNull(noSuchEvent.order, "no call was made, so there is no outcome to carry an order")
+        reasons += JsCrossing.UNCONSTRUCTIBLE_VALUE
+
         assertEquals(
             JsCrossing.REASONS,
             reasons,
@@ -396,7 +433,7 @@ class JsCrossingTest {
     /**
      * Nothing a page hands a well-formed crossing can produce a [JsCrossing] at all.
      *
-     * The companion half of the rule that class records: the three refusals are about the *form* of a
+     * The companion half of the rule that class records: the five refusals are about the *form* of a
      * crossing, so a corpus built from the decimal strings the crossing itself writes must never see
      * one. `JsFacadeEqualityTest` sweeps the whole corpus; this asserts the consequence directly,
      * because it is the sentence a reader of [JsCrossing] needs checked.

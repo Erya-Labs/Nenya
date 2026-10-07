@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.order
 
 import dev.eryalabs.nenya.channel.Acceptance
+import dev.eryalabs.nenya.channel.AttributedRumor
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.channel.ProposalFixtures
@@ -24,6 +25,7 @@ import dev.eryalabs.nenya.settlement.PaymentRequest
 import dev.eryalabs.nenya.settlement.PaymentRequestStore
 import dev.eryalabs.nenya.settlement.Settlement
 import dev.eryalabs.nenya.settlement.SettlementFixtures
+import dev.eryalabs.nenya.tag.NenyaKind
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.fail
@@ -783,7 +785,15 @@ internal object OrderFixtures {
 
     private val messagesByKey: MutableMap<String, Messages> = mutableMapOf()
 
-    private fun messages(index: Int, stream: Int): Messages =
+    /**
+     * One order's §8.4 points and §8.6 messages, shared rather than rebuilt.
+     *
+     * `internal` rather than `private` since T43: the JavaScript facade's §9.2 equality proof needs
+     * the same receipt, the same store and the same `earlierPoints` on both sides of the boundary,
+     * and a second set built beside this one would be comparing two different orders' messages. The
+     * widening is to a test fixture and nothing in `src/commonMain` can see it.
+     */
+    internal fun messages(index: Int, stream: Int): Messages =
         messagesByKey.getOrPut("$index/$stream") { Messages(index, stream) }
 
     /**
@@ -835,7 +845,7 @@ internal object OrderFixtures {
      * them decoded by the codec the library ships, and the two `type=2`s accepted into a store
      * against a fixed clock.
      */
-    private class Messages(val index: Int, val stream: Int) {
+    internal class Messages(val index: Int, val stream: Int) {
 
         /** §8.1's three-element fee term, carried byte-identically at every point §8.4 names. */
         val feeTag: List<String> = ProposalFixtures.feeTag(index, FEE_BASIS_POINTS)
@@ -920,7 +930,19 @@ internal object OrderFixtures {
          * proof satisfies. The two are one fact here and cannot be varied apart, which is the shape
          * the library now enforces.
          */
-        fun receipt(payee: Payee): PaymentReceipt = SettlementFixtures.receiptSealedBy(
+        fun receipt(payee: Payee): PaymentReceipt = PaymentReceipt.decode(receiptRumor(payee))
+
+        /**
+         * The same `kind:17` as the §7.4 **rumor** it is decoded from.
+         *
+         * Published since T43 because the JavaScript facade's §9.2 entry points take the rumor as
+         * [dev.eryalabs.nenya.js.open] handed it back and decode it themselves — which is the only
+         * door, since `PaymentReceipt`'s constructor is `internal`. So the equality proof needs
+         * **one** rumor to feed both sides: a test that built the receipt from one set of tags and
+         * the crossed rumor from a second would be comparing two messages rather than two
+         * translations of one, and the two could agree while the crossing lost a tag.
+         */
+        fun receiptRumor(payee: Payee): AttributedRumor.Bound = SettlementFixtures.boundSealedBy(
             SettlementFixtures.buyer(index),
             SettlementFixtures.receiptTags(
                 index = index,
@@ -931,6 +953,7 @@ internal object OrderFixtures {
                 payeeTag = SettlementFixtures.payeeTag(payee, index),
                 fee = if (payee == Payee.FEE) feeTag else null,
             ),
+            NenyaKind.RECEIPT,
         )
     }
 

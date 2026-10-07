@@ -368,6 +368,53 @@ internal class JsCrossing(
         /** §8.6's `payee` crossed as a token that is neither `provider` nor `fee`. */
         const val UNKNOWN_PAYEE_TOKEN: String = "UNKNOWN_PAYEE_TOKEN"
 
+        /**
+         * A rumor crossed where §7.4's **bound** half was needed, and it is a `kind:14` chat.
+         *
+         * `AttributedRumor` is sealed over `Chat` and `Bound`, and every decoder below §7.4 —
+         * `PaymentReceipt.decode`, `PaymentRequest.decode`, `OrderProposal.decode`,
+         * `OrderStatusMessage.decode` — takes `AttributedRumor.Bound`. So a chat has no value to
+         * hand them: §7.4 puts `kind:14` outside the required-tag rule in so many words, and the
+         * type is what records that.
+         *
+         * **It is not this boundary ruling on §9.2 or §7.5.** `PaymentReceipt.decode`'s own
+         * `NOT_A_RECEIPT` is the answer for a well-formed rumor of the wrong *kind*, and it is
+         * reached for a `kind:15` or a `kind:16` exactly as a JVM caller reaches it — those are
+         * `Bound`. What is unreachable is the one kind the parameter type excludes, and inventing
+         * a §9.2 refusal for it here would be this layer answering a question the library was
+         * never asked.
+         */
+        const val NOT_A_BOUND_RUMOR: String = "NOT_A_BOUND_RUMOR"
+
+        /**
+         * What crossed names no constant this library has, or is missing a value its Kotlin
+         * counterpart has no default for, so there is no Kotlin value to construct at all.
+         *
+         * ### One reason and not six, which is against this repository's usual instinct
+         *
+         * Every rejection vocabulary in this library is deliberately fine-grained, because "this
+         * message could not be sealed" is not an answer a caller can act on and the fixes differ.
+         * That argument does not apply here, and the reason is worth stating rather than assumed:
+         * the fix for every one of these is **the same single fix** — the page named a thing this
+         * library does not have — and [field] already says which thing. A page handed
+         * `UNKNOWN_FEE_TERM_POINT` and a page handed `MISSING_ORDER_EVENT_FIELD` both go and look
+         * at the same line of their own code.
+         *
+         * What it covers, all of it the same fact: a `JsOrderEvent.type` no `OrderEvent` variant
+         * answers to; a field that variant has no default for crossing as `null`; a `FeeTermPoint`
+         * or `DeliveryFailure` name no constant matches; a `JsSettlement` offered as §9.2 evidence
+         * that is `Settlement.Unverified`; and §7.6's `accepts` answering a counter-proposal where
+         * an acceptance was required.
+         *
+         * **It is not a rule about a value.** As with the three T42 declared, the alternative is
+         * to guess a Kotlin value or to throw, and decision **P** forbids throwing. Nothing here
+         * decides anything §4 to §11 has an answer for: where the library has a constant for "a
+         * token I do not implement" — `OrderState.UNKNOWN`, `OrderMessageKind.UNKNOWN`,
+         * `PaymentMedium.UNKNOWN`, `ListingStatus.UNKNOWN` — the token crosses to **that**, and
+         * the library's own refusal is what reports it.
+         */
+        const val UNCONSTRUCTIBLE_VALUE: String = "UNCONSTRUCTIBLE_VALUE"
+
         /** The vocabulary name every one of these refusals reports. */
         const val VOCABULARY: String = "JsCrossing"
 
@@ -376,12 +423,123 @@ internal class JsCrossing(
          * `JsSurfaceTest`.
          *
          * A new entry turns that test red and asks a human, which is the point: this boundary owns
-         * three refusals about the *form* of a crossing, and a fourth appearing without anybody
-         * noticing is how a translation layer grows into a second rulebook — the divergence
-         * STOP RULE 5 exists to prevent.
+         * refusals about the *form* of a crossing, and one appearing without anybody noticing is
+         * how a translation layer grows into a second rulebook — the divergence STOP RULE 5 exists
+         * to prevent.
+         *
+         * **T43 added two, and the test it turned red is the record of it.** Both are the same
+         * shape as the three T42 declared and neither is a rule about a value: [NOT_A_BOUND_RUMOR]
+         * says the decoder's parameter type has nothing to be handed, and [UNCONSTRUCTIBLE_VALUE]
+         * says the Kotlin value the page named cannot be built from the fields that crossed. Every
+         * answer about §4, §5, §6, §7, §8, §9 or §11 still comes from the library call.
          */
-        val REASONS: Set<String> = setOf(MALFORMED_DECIMAL, WRONG_ROW_ARITY, UNKNOWN_PAYEE_TOKEN)
+        val REASONS: Set<String> = setOf(
+            MALFORMED_DECIMAL,
+            WRONG_ROW_ARITY,
+            UNKNOWN_PAYEE_TOKEN,
+            NOT_A_BOUND_RUMOR,
+            UNCONSTRUCTIBLE_VALUE,
+        )
     }
+}
+
+/**
+ * A refusal, reduced to the fields every result object in this package carries.
+ *
+ * Not exported and not a result type: it is the one shape [jsGuarded] translates a thrown refusal
+ * into, so the catch list below is written **once** for all nineteen entry points rather than once
+ * per result class. Two catch lists that must stay in step is the shape that goes stale the first
+ * time a module starts raising a type only one of them names.
+ */
+internal class JsRefusal(
+
+    /** The rejection constant's `name`. */
+    val reason: String?,
+
+    /** Which rejection enum [reason] came from — `ListingRejection`, `EnvelopeRejection`, … */
+    val vocabulary: String?,
+
+    /** The tag or field the refusal is about, where the rule names one. */
+    val tag: String? = null,
+
+    /** The tag layer's own `TagRejection.name`, where a tag codec refused the value. */
+    val tagReason: String? = null,
+
+    /** Why, in words, authored in this library and never echoing an input (§12 item 11). */
+    val detail: String? = null,
+)
+
+/**
+ * [compute]'s answer, or the refusal it threw handed to [refuse] as a value.
+ *
+ * ### The catch list is named types and never `Throwable`
+ *
+ * Swallowing an unexpected failure is how a translation layer comes to report a bug in this library
+ * as a conformance refusal, and STOP RULE 1 is about the same instinct one level up. So every arm
+ * below names a type some module of this library declares, and anything else propagates.
+ *
+ * ### Exhaustiveness is proved rather than reasoned about
+ *
+ * `JsRefusalByValueTest` feeds every entry point a hostile crossing of every shape and asserts a
+ * value comes back, because a missing arm is invisible until the input that reaches it arrives.
+ * Two were missing when T42's proof was first run — `ListingException`, raised by §5.1's closed
+ * `status` vocabulary before any writer is called, and `OrderStateException`, raised by §7.5's
+ * inverted-deadline rule inside `OrderTerms.of` — and both escaped the boundary as thrown
+ * exceptions, which is what decision **P** forbids.
+ *
+ * T43 adds three arms, each for a module its six entry points reach and T42's thirteen did not:
+ * `EnvelopeException` (§7.1's two procedures), `PaymentException` (§9.2 check 3, which §9 calls
+ * the load-bearing rule of the entire document) and `BidException`, which no entry point raises
+ * and which is here because `decodeBid` could and the list is the library's and not the caller's.
+ */
+internal inline fun <R> jsGuarded(refuse: (JsRefusal) -> R, compute: () -> R): R = try {
+    compute()
+} catch (refused: JsCrossing) {
+    refuse(JsRefusal(refused.reason, JsCrossing.VOCABULARY, refused.field, null, refused.why))
+} catch (refused: dev.eryalabs.nenya.listing.ListingException) {
+    // §5.1's and §5.2's rules that run during the translation rather than inside the writer:
+    // `ListingStatusCodec.read` refuses one of §5.2's request tokens on an offer by name.
+    refuse(
+        JsRefusal(
+            refused.reason.name,
+            "ListingRejection",
+            refused.tag,
+            (refused.cause as? dev.eryalabs.nenya.tag.TagException)?.reason?.name,
+            refused.message,
+        ),
+    )
+} catch (refused: dev.eryalabs.nenya.bid.BidException) {
+    refuse(JsRefusal(refused.reason.name, "BidRejection", refused.tag, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.order.OrderStateException) {
+    // §7.5's two deadline rules, enforced by `OrderTerms`'s own `init` rather than by a writer,
+    // and §10.3's unbound-capability rule inside `OrderEvent.DeliverableReleased`'s.
+    refuse(JsRefusal(refused.reason.name, "OrderStateRejection", null, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.envelope.EnvelopeException) {
+    // §7.1's write and read procedures. The side is on the reason's own `EnvelopeRejection.side`
+    // and is published by `JsSealResult` and `JsOpenResult` rather than folded in here.
+    refuse(JsRefusal(refused.reason.name, "EnvelopeRejection", null, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.tag.TagException) {
+    refuse(JsRefusal(refused.reason.name, "TagRejection", null, refused.reason.name, refused.message))
+} catch (refused: dev.eryalabs.nenya.money.MoneyException) {
+    refuse(JsRefusal(refused.reason.name, "MoneyRejection", null, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.seam.SeamException) {
+    // `OrderId.ofHex` on §7.4's order id.
+    refuse(JsRefusal(refused.reason.name, "SeamRejection", null, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.delivery.DeliveryException) {
+    // `DeliverableHash.ofHex` on §10.1's and §10.3's `x` and `ox`, and §10.4's two digest checks.
+    refuse(JsRefusal(refused.reason.name, "DeliveryRejection", null, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.payment.PaymentException) {
+    // §9.2 check 3's `PREIMAGE_MISMATCH`, which `Settlement` deliberately does not re-badge:
+    // §9 calls it the load-bearing rule of the entire document and one failure gets one name.
+    refuse(JsRefusal(refused.reason.name, "PaymentRejection", null, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.channel.ChannelException) {
+    refuse(JsRefusal(refused.reason.name, "ChannelRejection", refused.tag, null, refused.message))
+} catch (refused: dev.eryalabs.nenya.settlement.SettlementException) {
+    refuse(JsRefusal(refused.reason.name, "SettlementRejection", refused.tag, null, refused.message))
+} catch (refused: WireException) {
+    refuse(JsRefusal(refused.reason.name, "WireRejection", null, null, refused.message))
+} catch (refused: JsonException) {
+    refuse(JsRefusal(refused.reason.name, "JsonRejection", null, null, refused.message))
 }
 
 /** A required decimal field, read as the `Long` it names. */
@@ -411,54 +569,14 @@ internal fun crossedSecondsOrNull(field: String, text: String?): Long? = crossed
 /**
  * A builder call, with every refusal either builder or boundary can produce returned as a value.
  *
- * The catch list is exhaustive over the types the translation and the builders actually raise, and
- * it is a **list of named types rather than `Throwable`** on purpose: a translation layer that
- * caught everything would report a defect in this library as a conformance refusal, and the whole
- * point of the equality proof is that it cannot.
- *
- * **Exhaustiveness is proved rather than reasoned about.** `JsRefusalByValueTest` feeds every entry
- * point a hostile crossing of every shape and asserts a value comes back, because a missing arm is
- * invisible until the input that reaches it arrives: two were missing when T42's proof was first
- * run — `ListingException`, raised by §5.1's closed `status` vocabulary before any writer is called,
- * and `OrderStateException`, raised by §7.5's inverted-deadline rule inside `OrderTerms.of` — and
- * both escaped the boundary as thrown exceptions, which is what decision **P** forbids.
+ * One line, because [jsGuarded] holds the catch list for the whole package — see its note for why
+ * it is named types rather than `Throwable`, and for the two arms T42's proof discovered were
+ * missing. T43 moved the list there rather than writing a second one beside it: two lists that must
+ * stay in step is the shape that goes stale the first time a module starts raising a type only one
+ * of them names, and the builders and the six §7/§9/§11 entry points share most of their modules.
  */
-internal inline fun jsBuild(compute: () -> JsBuildResult): JsBuildResult = try {
-    compute()
-} catch (refused: JsCrossing) {
-    jsRefused(refused.reason, JsCrossing.VOCABULARY, refused.field, null, refused.why)
-} catch (refused: dev.eryalabs.nenya.listing.ListingException) {
-    // §5.1's and §5.2's rules that run during the translation rather than inside the writer:
-    // `ListingStatusCodec.read` refuses one of §5.2's request tokens on an offer by name.
-    jsRefused(
-        refused.reason.name,
-        "ListingRejection",
-        refused.tag,
-        (refused.cause as? dev.eryalabs.nenya.tag.TagException)?.reason?.name,
-        refused.message,
-    )
-} catch (refused: dev.eryalabs.nenya.order.OrderStateException) {
-    // §7.5's two deadline rules, enforced by `OrderTerms`'s own `init` rather than by a writer.
-    jsRefused(refused.reason.name, "OrderStateRejection", null, null, refused.message)
-} catch (refused: dev.eryalabs.nenya.tag.TagException) {
-    jsRefused(refused.reason.name, "TagRejection", null, refused.reason.name, refused.message)
-} catch (refused: dev.eryalabs.nenya.money.MoneyException) {
-    jsRefused(refused.reason.name, "MoneyRejection", null, null, refused.message)
-} catch (refused: dev.eryalabs.nenya.seam.SeamException) {
-    // `OrderId.ofHex` on §7.4's order id.
-    jsRefused(refused.reason.name, "SeamRejection", null, null, refused.message)
-} catch (refused: dev.eryalabs.nenya.delivery.DeliveryException) {
-    // `DeliverableHash.ofHex` on §10.1's and §10.3's `x` and `ox`.
-    jsRefused(refused.reason.name, "DeliveryRejection", null, null, refused.message)
-} catch (refused: dev.eryalabs.nenya.channel.ChannelException) {
-    jsRefused(refused.reason.name, "ChannelRejection", refused.tag, null, refused.message)
-} catch (refused: dev.eryalabs.nenya.settlement.SettlementException) {
-    jsRefused(refused.reason.name, "SettlementRejection", refused.tag, null, refused.message)
-} catch (refused: WireException) {
-    jsRefused(refused.reason.name, "WireRejection", null, null, refused.message)
-} catch (refused: JsonException) {
-    jsRefused(refused.reason.name, "JsonRejection", null, null, refused.message)
-}
+internal inline fun jsBuild(compute: () -> JsBuildResult): JsBuildResult =
+    jsGuarded({ jsRefused(it.reason, it.vocabulary, it.tag, it.tagReason, it.detail) }, compute)
 
 /**
  * The tag rows a caller hands in, translated to the `List<List<String>>` this library's builders
