@@ -447,7 +447,7 @@ internal class JsCrossing(
  * A refusal, reduced to the fields every result object in this package carries.
  *
  * Not exported and not a result type: it is the one shape [jsGuarded] translates a thrown refusal
- * into, so the catch list below is written **once** for all nineteen entry points rather than once
+ * into, so the catch list below is written **once** for all twenty-four entry points rather than once
  * per result class. Two catch lists that must stay in step is the shape that goes stale the first
  * time a module starts raising a type only one of them names.
  */

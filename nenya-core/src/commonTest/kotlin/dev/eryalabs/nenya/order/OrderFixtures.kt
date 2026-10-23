@@ -856,21 +856,34 @@ internal object OrderFixtures {
             fee = feeTag,
         )
 
-        val proposal: OrderProposal = ProposalFixtures.proposal(proposalTags, index)
+        /**
+         * §7.5's `type=1` as the §7.4 **rumor** it is decoded from.
+         *
+         * Published since T44, on the terms [receiptRumor] records: the JavaScript facade's
+         * `acceptPaymentRequest` rebuilds §7.6's checked acceptance from the two rumors, because
+         * `Acceptance.Accepted` is minted by `OrderProposal.accepts` and by nothing else. So the
+         * equality proof needs **one** rumor to feed both sides, and [proposal] is now decoded from
+         * this value rather than from a second pass over the same tags.
+         */
+        val proposalRumor: AttributedRumor.Bound = ProposalFixtures.bound(proposalTags, index)
+
+        val proposal: OrderProposal = OrderProposal.decode(proposalRumor)
 
         /** §7.6's acceptance, sealed by the provider — a different key from the proposal's. */
-        val acceptance: OrderStatusMessage = ProposalFixtures.statusMessage(
+        val acceptanceRumor: AttributedRumor.Bound = ProposalFixtures.bound(
             ProposalFixtures.acceptanceTags(proposalTags, index),
             index + 1,
         )
+
+        val acceptance: OrderStatusMessage = OrderStatusMessage.decode(acceptanceRumor)
 
         /**
          * §8.7's seals: the fee `type=2` arrives under the fee recipient's own key, the provider's
          * under the provider's. A fee invoice forwarded by the provider is what §8.7 refuses, and
          * a fixture that could not choose the seal could not be the accepting side of that rule.
          */
-        val requests: Map<Payee, PaymentRequest> = Payee.entries.associateWith { payee ->
-            SettlementFixtures.requestSealedBy(
+        val requestRumors: Map<Payee, AttributedRumor.Bound> = Payee.entries.associateWith { payee ->
+            SettlementFixtures.boundSealedBy(
                 when (payee) {
                     Payee.PROVIDER -> SettlementFixtures.provider(index)
                     Payee.FEE -> SettlementFixtures.feeRecipient(index)
@@ -883,8 +896,11 @@ internal object OrderFixtures {
                     // provider's, and forbids requiring one there — so the provider's carries none.
                     fee = if (payee == Payee.FEE) feeTag else null,
                 ),
-                SettlementFixtures.split(),
             )
+        }
+
+        val requests: Map<Payee, PaymentRequest> = requestRumors.mapValues { (_, rumor) ->
+            PaymentRequest.decode(rumor, SettlementFixtures.split())
         }
 
         /**
@@ -931,6 +947,35 @@ internal object OrderFixtures {
          * the library now enforces.
          */
         fun receipt(payee: Payee): PaymentReceipt = PaymentReceipt.decode(receiptRumor(payee))
+
+        /**
+         * The same `type=2` for [payee], billing [amountMsat] instead of what §8.3 owes.
+         *
+         * §9.2 check 4's control, and the one T44 names: a bill padded above the accepted terms is
+         * a conformant message in every other respect — the right order, the right payee, the right
+         * seal, a real BOLT-11 whose `p` the matching receipt can prove — and the **only** thing
+         * wrong with it is the amount. So it is what shows that a facade which stored a request
+         * without making the library's call would accept a bill this library refuses. The amount is
+         * composed into a real invoice by `SettlementFixtures.invoice`, never typed.
+         */
+        fun paddedRequestRumor(payee: Payee, amountMsat: Long): AttributedRumor.Bound =
+            SettlementFixtures.boundSealedBy(
+                when (payee) {
+                    Payee.PROVIDER -> SettlementFixtures.provider(index)
+                    Payee.FEE -> SettlementFixtures.feeRecipient(index)
+                },
+                SettlementFixtures.requestTags(
+                    index = index,
+                    payment = SettlementFixtures.requestPaymentTag(
+                        SettlementFixtures.invoice(
+                            preimageHex(index, stream),
+                            Msat.ofMsat(amountMsat),
+                        ),
+                    ),
+                    payeeTag = SettlementFixtures.payeeTag(payee, index),
+                    fee = if (payee == Payee.FEE) feeTag else null,
+                ),
+            )
 
         /**
          * The same `kind:17` as the §7.4 **rumor** it is decoded from.

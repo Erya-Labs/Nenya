@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.channel.AttributedRumor
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
+import dev.eryalabs.nenya.delivery.ServedBytesVerified
 import dev.eryalabs.nenya.envelope.OpenedMessage
 import dev.eryalabs.nenya.envelope.SealedMessage
 import dev.eryalabs.nenya.money.FeeTerm
@@ -14,6 +15,7 @@ import dev.eryalabs.nenya.seam.Randomness
 import dev.eryalabs.nenya.seam.SeamAnswer
 import dev.eryalabs.nenya.seam.Secp256k1Ops
 import dev.eryalabs.nenya.seam.Signer
+import dev.eryalabs.nenya.settlement.AcceptedPaymentRequest
 import dev.eryalabs.nenya.settlement.FeeTermSighting
 import dev.eryalabs.nenya.settlement.PaymentRequestStore
 import dev.eryalabs.nenya.settlement.Settlement
@@ -109,6 +111,39 @@ internal object JsFlowFixtures {
             )?.let { JsAcceptedRequest(it) }
         },
     )
+
+    /**
+     * A page's own `type=2` persistence, written entirely in crossed types.
+     *
+     * [crossed] above wraps a Kotlin `PaymentRequestStore`, which is what a test needs when the
+     * records already exist. This is the other direction and T44 is what needs it:
+     * [acceptPaymentRequest] **writes**, so [JsPaymentRequestStore.store] is reached for the first
+     * time, and a store that only answered `find` would let a write-through defect pass unnoticed.
+     *
+     * Nothing here touches a Kotlin type: the map holds the opaque [JsAcceptedRequest] handles the
+     * library minted and keys them by the two strings §9.2 check 1 names, which is exactly what a
+     * page can do. A store written in terms of `JsAcceptedRequest.accepted` would be reaching
+     * through the handle for an `internal` field no page has.
+     */
+    class CrossedStore {
+
+        private val records: MutableMap<String, JsAcceptedRequest> = mutableMapOf()
+
+        /** The seam as the page supplies it. */
+        val seam: JsPaymentRequestStore = JsPaymentRequestStore(
+            find = { orderIdHex, payeeToken -> records[key(orderIdHex, payeeToken)] },
+            store = { record -> records[key(record.orderIdHex, record.payee)] = record },
+        )
+
+        /** How many records the page is holding. */
+        val size: Int get() = records.size
+
+        /** The record the page holds for this order and payee, or `null`. */
+        fun find(orderIdHex: String, payeeToken: String): JsAcceptedRequest? =
+            records[key(orderIdHex, payeeToken)]
+
+        private fun key(orderIdHex: String, payeeToken: String): String = "$orderIdHex/$payeeToken"
+    }
 
     /** [sighting] as §8.4's point name and the `fee` row verbatim. */
     fun crossed(sighting: FeeTermSighting): JsFeeTermSighting =
@@ -374,6 +409,150 @@ internal object JsFlowFixtures {
             assertEquals(expected.reason, crossed.reason, "$what: the refusals differ")
             assertEquals(expected.vocabulary, crossed.reasonVocabulary, "$what: the vocabularies differ")
             assertEquals(expected.tag, crossed.tag, "$what: the tags the refusals are about differ")
+            assertEquals(expected.detail, crossed.detail, "$what: the details differ")
+        }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // §8.6's acceptance door. The mutation T44 names is aimed here.
+    // -----------------------------------------------------------------------------------------
+
+    /** What `AcceptedPaymentRequest.accept` answered, or the refusal, in one shape. */
+    class AcceptedAnswer(
+        val ok: Boolean,
+        val accepted: AcceptedPaymentRequest?,
+        val reason: String?,
+        val vocabulary: String?,
+        val tag: String?,
+        val detail: String?,
+    )
+
+    /**
+     * [call]'s answer, with the refusal types that path raises reduced to the shape decision **P**
+     * returns.
+     *
+     * Three arms, because the call behind [acceptPaymentRequest] crosses three modules: §8.6's,
+     * §8.7's, Appendix C's and §9.2's own `SettlementException`; the `ChannelException` §7.6's two
+     * decoders and `accepts` raise, which is reached before the request is looked at; and the
+     * `JsCrossing` §7.6's counter-proposal answer becomes, which has no Kotlin exception at all and
+     * is therefore the one case this projection has to construct rather than catch — see
+     * `assertSameAccepted` on why that is still an honest comparison.
+     *
+     * Deliberately not `Throwable`: an unexpected failure must fail the test rather than be quietly
+     * compared against whatever the facade did with it.
+     */
+    fun acceptedAnswerOf(call: () -> AcceptedPaymentRequest): AcceptedAnswer = try {
+        AcceptedAnswer(true, call(), null, null, null, null)
+    } catch (refused: dev.eryalabs.nenya.settlement.SettlementException) {
+        AcceptedAnswer(false, null, refused.reason.name, "SettlementRejection", refused.tag, refused.message)
+    } catch (refused: dev.eryalabs.nenya.channel.ChannelException) {
+        AcceptedAnswer(false, null, refused.reason.name, "ChannelRejection", refused.tag, refused.message)
+    }
+
+    /**
+     * The whole of §8.6's acceptance equality, field by field.
+     *
+     * **This is where T44's named mutation lands.** A facade that skipped
+     * `AcceptedPaymentRequest.accept` and stored the request itself would have no
+     * `SettlementRejection` to report for a padded bill, so the amount-padding control's expected
+     * side says `INVOICE_AMOUNT_MISMATCH` and the crossed side says it accepted — and the first
+     * assertion below is the one that fails. The record's own four fields are compared too, so a
+     * facade that made the call and then handed back a record of its own would not pass either.
+     */
+    fun assertSameAccepted(crossed: JsAcceptedRequestResult, expected: AcceptedAnswer, what: String) {
+        assertEquals(expected.ok, crossed.ok, "$what: one side accepted the bill and the other refused")
+        assertEquals(
+            if (expected.ok) "accepted" else "refused",
+            crossed.kind,
+            "$what: `kind` must discriminate the same way `ok` does",
+        )
+        if (expected.ok) {
+            val accepted = expected.accepted ?: fail("$what: an accepted answer with no record")
+            val value = crossed.request ?: fail("$what: the crossed answer carries no record")
+            JsBoundaryFixtures.assertSameFields(
+                listOf(
+                    JsBoundaryFixtures.Field("orderIdHex", value.orderIdHex, accepted.order.toHex()),
+                    JsBoundaryFixtures.Field("payee", value.payee, accepted.payee.token),
+                    // Verbatim, which is the byte-identity §9.2 check 1 makes: a crossing that
+                    // normalised a single character would re-point this order's payment evidence.
+                    JsBoundaryFixtures.Field("invoice", value.invoice, accepted.invoice.text),
+                    JsBoundaryFixtures.Field(
+                        "acceptedAtSeconds",
+                        value.acceptedAtSeconds,
+                        accepted.acceptedAt.toString(),
+                    ),
+                    JsBoundaryFixtures.Field("sealedBy", value.sealedBy, accepted.sealedBy),
+                ),
+                "$what: the accepted record",
+            )
+            assertNull(crossed.reason, "$what: an accepted answer must name no reason")
+        } else {
+            assertNull(crossed.request, "$what: a refusal must carry no record")
+            assertEquals(expected.reason, crossed.reason, "$what: the refusals differ")
+            assertEquals(expected.vocabulary, crossed.reasonVocabulary, "$what: the vocabularies differ")
+            assertEquals(expected.tag, crossed.tag, "$what: the tags the refusals are about differ")
+            assertEquals(expected.detail, crossed.detail, "$what: the details differ")
+        }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // §10.4 step 1, on its own.
+    // -----------------------------------------------------------------------------------------
+
+    /** What `ServedBytesVerified.verifyServedBytes` answered, or the refusal, in one shape. */
+    class ServedBytesAnswer(
+        val ok: Boolean,
+        val verified: ServedBytesVerified?,
+        val reason: String?,
+        val detail: String?,
+    )
+
+    /** [call]'s answer, with §10.4's three refusals reduced to the shape decision **P** returns. */
+    fun servedBytesAnswerOf(call: () -> ServedBytesVerified): ServedBytesAnswer = try {
+        ServedBytesAnswer(true, call(), null, null)
+    } catch (refused: dev.eryalabs.nenya.delivery.DeliveryException) {
+        ServedBytesAnswer(false, null, refused.reason.name, refused.message)
+    }
+
+    /** The whole of §10.4 step 1's equality, including the bound it was performed under (§17). */
+    fun assertSameServedBytes(
+        crossed: JsServedBytesResult,
+        expected: ServedBytesAnswer,
+        what: String,
+    ) {
+        assertEquals(expected.ok, crossed.ok, "$what: one side verified the blob and the other refused")
+        assertEquals(
+            if (expected.ok) "verified" else "refused",
+            crossed.kind,
+            "$what: `kind` must discriminate the same way `ok` does",
+        )
+        if (expected.ok) {
+            val verified = expected.verified ?: fail("$what: a verified answer with no value")
+            JsBoundaryFixtures.assertSameFields(
+                listOf(
+                    JsBoundaryFixtures.Field(
+                        "servedBytesLength",
+                        crossed.servedBytesLength,
+                        verified.servedBytesLength.toString(),
+                    ),
+                    JsBoundaryFixtures.Field(
+                        "maxServedBytes",
+                        crossed.maxServedBytes,
+                        verified.maxServedBytes.toString(),
+                    ),
+                ),
+                "$what: the verified blob",
+            )
+            assertNull(crossed.reason, "$what: a verified answer must name no reason")
+        } else {
+            assertNull(crossed.servedBytesLength, "$what: a refusal hashed nothing it may report")
+            assertNull(crossed.maxServedBytes, "$what: a refusal states no bound it verified under")
+            assertEquals(expected.reason, crossed.reason, "$what: the refusals differ")
+            assertEquals(
+                "DeliveryRejection",
+                crossed.reasonVocabulary,
+                "$what: §10.4's refusals are the delivery package's and no other",
+            )
             assertEquals(expected.detail, crossed.detail, "$what: the details differ")
         }
     }

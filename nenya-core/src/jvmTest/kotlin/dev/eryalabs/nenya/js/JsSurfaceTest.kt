@@ -1,5 +1,10 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
+import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
+import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
+import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.ProposalFixtures
 import dev.eryalabs.nenya.conformance.MainClasses
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingWriterFixtures
@@ -113,6 +118,19 @@ class JsSurfaceTest {
             "JsOrder",
             "JsOrderResult",
             "JsOrderOutcome",
+            // T44's eight. Six are the three message decoders' answers and the values they carry;
+            // `JsAcceptedRequestResult` is §8.6's acceptance door's, and `JsServedBytesResult` is
+            // §10.4 step 1's. The three decoded messages are read rather than passed back — their
+            // nested `JsCommitment` and `JsRelease` are the types `stepOrder` already takes, which
+            // is why no new handle is needed for them.
+            "JsOrderProposal",
+            "JsProposalResult",
+            "JsCommitmentMessage",
+            "JsCommitmentResult",
+            "JsReleaseMessage",
+            "JsReleaseResult",
+            "JsAcceptedRequestResult",
+            "JsServedBytesResult",
         )
 
         /**
@@ -135,6 +153,8 @@ class JsSurfaceTest {
             "JsEnvelopeEntriesKt",
             "JsSettlementEntriesKt",
             "JsOrderEntriesKt",
+            // T44's: the three §7 message decoders a page could not reach.
+            "JsMessageEntriesKt",
         )
 
         /**
@@ -188,6 +208,11 @@ class JsSurfaceTest {
             // JsOrderEntries.kt — §11.2's machine configuration and its fourteen-way event union.
             "asOrderMachine" to 1,
             "asOrderEvent" to 1,
+            // T44 made §7.6's checked acceptance `internal`, because `acceptPaymentRequest` needs
+            // the same value `stepOrder`'s `acceptance_received` does and decision J's objection
+            // is to *either* caller assembling one by hand. One overload: the `JsOrderEvent`
+            // extension beside it stays `private` and so is dropped from this sweep.
+            "crossedAcceptance" to 1,
             // JsChannelEntries.kt — the §7.4, §8.3, §10.1 and §10.3 translations.
             "asJsBuildResult" to 2,
             "asRumorEnvelope" to 1,
@@ -224,7 +249,7 @@ class JsSurfaceTest {
             "JsCrossing",
             "CrossedSigner",
             // T43's two. `JsRefusal` is the `internal` shape `jsGuarded` reduces a thrown refusal
-            // to, so the catch list is written once for all nineteen entry points rather than once
+            // to, so the catch list is written once for all twenty-four entry points rather than once
             // per result class; `CrossedPaymentRequestStore` is `private`, the §9.2 store seam's
             // adapter, and the sibling of `CrossedSigner`.
             "JsRefusal",
@@ -232,11 +257,12 @@ class JsSurfaceTest {
         )
 
         /**
-         * The nineteen entry points this package exports: T42's thirteen and T43's six.
+         * The twenty-four entry points this package exports: T42's thirteen, T43's six and T44's
+         * five.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
-         * and so the counts in T42's and T43's text are facts about the compiled library rather than
-         * about their prose.
+         * and so the counts in T42's, T43's and T44's text are facts about the compiled library
+         * rather than about their prose.
          */
         val ENTRY_POINTS: Set<String> = setOf(
             // T42 — the decode-and-build half.
@@ -260,6 +286,21 @@ class JsSurfaceTest {
             "verifyFeeReceipt",
             "openOrder",
             "stepOrder",
+            // T44 — the three gaps the stage-1 page found.
+            "acceptPaymentRequest",
+            "decodeProposal",
+            "decodeCommitment",
+            "decodeRelease",
+            "verifyServedBytes",
+        )
+
+        /** T44's five, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T44_ENTRY_POINTS: Set<String> = setOf(
+            "acceptPaymentRequest",
+            "decodeProposal",
+            "decodeCommitment",
+            "decodeRelease",
+            "verifyServedBytes",
         )
 
         /** T42's half of [ENTRY_POINTS], so each task's own count stays a fact and not a comment. */
@@ -363,7 +404,7 @@ class JsSurfaceTest {
     }
 
     /**
-     * Every top-level function in the package is either one of T42's thirteen entry points or a named
+     * Every top-level function in the package is either one of the pinned entry points or a named
      * helper, and each has exactly the number of overloads pinned for it.
      *
      * This is the anchor that was missing. It covers **all four** file classes, not only the two holding
@@ -384,8 +425,8 @@ class JsSurfaceTest {
         assertEquals(
             ENTRY_POINTS + NON_EXPORTED_HELPERS.keys,
             counts.keys,
-            "every top-level function in $FILE_CLASSES must be either one of T42's thirteen entry " +
-                "points or a named helper. A name in neither list is a function nothing here sweeps — " +
+            "every top-level function in $FILE_CLASSES must be either one of the ${ENTRY_POINTS.size} " +
+                "entry points or a named helper. A name in neither list is a function nothing here sweeps — " +
                 "and if it carries @JsExport it is an entry point reaching JavaScript with no equality " +
                 "proof behind it. See NON_EXPORTED_HELPERS on why the split is by name.",
         )
@@ -397,13 +438,15 @@ class JsSurfaceTest {
                 "export would hide behind a helper.",
         )
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
-        assertEquals(19, ENTRY_POINTS.size, "T43's six on top of T42's thirteen")
+        assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
+        assertEquals(24, ENTRY_POINTS.size, "T44's five on top of T43's six on top of T42's thirteen")
         assertEquals(
             6,
-            (ENTRY_POINTS - T42_ENTRY_POINTS).size,
+            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
+        assertTrue(T44_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T44's five are exported")
         assertTrue(
             ENTRY_POINTS.none { it in NON_EXPORTED_HELPERS },
             "an entry point is also listed as a helper, so one of the two lists is not what it says",
@@ -475,11 +518,12 @@ class JsSurfaceTest {
                 "is in a class $FILE_CLASSES does not name",
         )
         assertTrue(
-            inspected > 240,
+            inspected > 300,
             "the sweep inspected only $inspected member(s) across " +
                 "${CROSSED_IN + CROSSED_OUT + FILE_CLASSES}, which is not this facade. The floor " +
-                "was 120 at T42's thirteen entry points and eight types a side; T43 doubled the " +
-                "package, so a floor that stayed where it was would pass over half of it.",
+                "was 120 at T42's thirteen entry points and eight types a side, and 240 after T43 " +
+                "doubled the package; T44 adds five entry points and eight types, so a floor that " +
+                "stayed where it was would pass over the new ones.",
         )
     }
 
@@ -663,6 +707,84 @@ class JsSurfaceTest {
         )
     }
 
+    /**
+     * The same for T44's three decoded messages, on the same terms.
+     *
+     * `JsMessageEqualityTest` compares every field each of them publishes; this is what makes
+     * "every" true for those three as well. A getter added to `JsCommitmentMessage` and not to
+     * `JsMessageFixtures.commitmentFields` turns this red.
+     *
+     * The floor is passed per type rather than left at the default: a commitment message publishes
+     * seven values and a release six, which is what §10.1 and §10.3 give them, and a floor that
+     * insisted on more than they have would be unsatisfiable rather than informative. Each number
+     * is the exact count the type publishes today, so losing one is red here as well as in the
+     * comparison below.
+     */
+    @Test
+    fun `the message field comparisons cover every value the three decoded types publish`() {
+        val fixture = ProposalFixtures.pairs(1).single()
+        val proposalRumor = ProposalFixtures.bound(fixture.proposalTags, fixture.index)
+        val proposal = decodeProposal(JsRumor(proposalRumor)).proposal
+            ?: fail("the generated proposal must decode")
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsOrderProposal"), floor = 16),
+            JsMessageFixtures.proposalFields(proposal, OrderProposal.decode(proposalRumor))
+                .map { it.name }.toSet(),
+            "JsMessageFixtures.proposalFields must name every value JsOrderProposal publishes",
+        )
+
+        val delivery = DeliveryMessageFixtures.pairs(1).single()
+        val commitmentRumor =
+            DeliveryMessageFixtures.bound(delivery.commitmentTags, NenyaKind.ORDER_MESSAGE, delivery.index)
+        val commitment = decodeCommitment(JsRumor(commitmentRumor)).commitment
+            ?: fail("the generated commitment must decode")
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsCommitmentMessage"), floor = 7),
+            JsMessageFixtures.commitmentFields(
+                commitment,
+                DeliveryCommitmentMessage.decode(commitmentRumor),
+            ).map { it.name }.toSet(),
+            "JsMessageFixtures.commitmentFields must name every value JsCommitmentMessage publishes",
+        )
+
+        val releaseRumor =
+            DeliveryMessageFixtures.bound(delivery.releaseTags, NenyaKind.FILE_MESSAGE, delivery.index)
+        val release = decodeRelease(JsRumor(releaseRumor)).release
+            ?: fail("the generated release must decode")
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsReleaseMessage"), floor = 6),
+            JsMessageFixtures.releaseFields(release, DeliverableReleaseMessage.decode(releaseRumor))
+                .map { it.name }.toSet(),
+            "JsMessageFixtures.releaseFields must name every value JsReleaseMessage publishes",
+        )
+    }
+
+    /**
+     * §10.3's key and nonce reach no published value of this package, which is the privacy half of
+     * what [decodeRelease] claims.
+     *
+     * `DeliverableReleaseMessage` checks both and drops them (§12 item 11, STOP RULE 14), and the
+     * crossing has to keep that true rather than restate it: a getter on `JsReleaseMessage` named
+     * for either would be the one way the rule could be lost at the boundary, and this is the sweep
+     * that would see it.
+     */
+    @Test
+    fun `no value the release crossing publishes names a key or a nonce`() {
+        val forbidden = listOf("key", "nonce", "secret", "preimage")
+        for (name in listOf("JsReleaseMessage", "JsReleaseResult", "JsRelease")) {
+            for (property in publishedPropertyNames(typeNamed(name), floor = 1)) {
+                for (word in forbidden) {
+                    assertTrue(
+                        word !in property.lowercase(),
+                        "$name.$property names `$word`. §10.2's key and nonce are checked by the " +
+                            "decoder and dropped; a crossing that published one would put key " +
+                            "material one `console.log` away from a page's error reporter.",
+                    )
+                }
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Why the supply cap alone is not a control.
     // -----------------------------------------------------------------------------------------
@@ -730,7 +852,7 @@ class JsSurfaceTest {
     private val classes: List<Class<*>> by lazy { MainClasses.of(PACKAGE) }
 
     /** Every property [type] publishes, by name, excluding `toString` and the mangled `internal` ones. */
-    private fun publishedPropertyNames(type: Class<*>): Set<String> {
+    private fun publishedPropertyNames(type: Class<*>, floor: Int = 11): Set<String> {
         val methods = crossingMethods(type)
         val properties = methods.mapNotNull { propertyName(it) }.toSet()
         assertEquals(
@@ -740,7 +862,7 @@ class JsSurfaceTest {
                 methods.filter { propertyName(it) == null }.map { it.name } +
                 ". The field sweep reads properties, so a published function would go unchecked.",
         )
-        assertTrue(properties.size > 10, "${type.simpleName} publishes only $properties")
+        assertTrue(properties.size >= floor, "${type.simpleName} publishes only $properties")
         return properties
     }
 }

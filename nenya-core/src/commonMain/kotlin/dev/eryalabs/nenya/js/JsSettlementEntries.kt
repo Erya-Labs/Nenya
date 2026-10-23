@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.settlement.AcceptedPaymentRequest
 import dev.eryalabs.nenya.settlement.FeeTermPoint
 import dev.eryalabs.nenya.settlement.FeeTermSighting
 import dev.eryalabs.nenya.settlement.PaymentReceipt
+import dev.eryalabs.nenya.settlement.PaymentRequest
 import dev.eryalabs.nenya.settlement.PaymentRequestStore
 import dev.eryalabs.nenya.settlement.Settlement
 import kotlin.js.ExperimentalJsExport
@@ -106,6 +107,85 @@ public fun verifyFeeReceipt(
             store = store.asPaymentRequestStore(),
             order = order.order,
             earlierPoints = earlierPoints.map { it.asFeeTermSighting() },
+        ),
+        null,
+    )
+}
+
+/**
+ * §8.6's acceptance door: a `type=2` decoded, judged and persisted — or the refusal as a value.
+ *
+ * ### What this closes. T44 gap (1)
+ *
+ * Nothing T42 or T43 exported constructs an `AcceptedPaymentRequest`, and §9.2 check 1 compares a
+ * receipt against *the stored request* — so a page could build and seal a bill, and could verify a
+ * receipt, and had no way at all to accept one. An order could not leave `committed`. This is the
+ * missing call, and it is the one the operator's page had to write by hand on a local branch.
+ *
+ * ### The facade performs no check of its own, and this is where that matters most
+ *
+ * `AcceptedPaymentRequest.accept` is a **seven-refusal** call sitting on the evidence path, and
+ * every one of those refusals is reached here by the call a JVM caller makes: §8.6's provider
+ * sender rule, §8.7's fee sealing key through `Settlement.checkFeePaymentRequest`, Appendix C's
+ * parser, §9.2 check 4's amount, check 5's expiry against the clock reading taken at this moment,
+ * and §8.6's two uniqueness rules. The clock is read inside that call and an unavailable one
+ * refuses `CLOCK_UNAVAILABLE` rather than storing a request against a fabricated time. This
+ * function decides none of it.
+ *
+ * ### Why the acceptance is three arguments and not a `JsOrder`
+ *
+ * `accept` takes §7.6's **checked** `Acceptance.Accepted`, and decision J records why: a caller
+ * handed the order, the provider key and the terms separately can assemble three halves of three
+ * different orders, and would have §9.2 check 4's expected amount computed against terms nobody
+ * accepted. So the acceptance is rebuilt here from the two rumors and the resolved provider key, by
+ * the same `crossedAcceptance` [stepOrder]'s `acceptance_received` uses — one function, so the two
+ * crossings cannot come to mean different things by "the acceptance for this order". §8.3's split
+ * the decode needs comes off that acceptance's own terms for the same reason, rather than crossing
+ * as a fourth value a page could state differently.
+ *
+ * @param request the `kind:16` `type=2` as [open] handed it back.
+ * @param proposalRumor §7.5's `type=1` for this order, as [open] handed it back.
+ * @param acceptanceRumor §7.6's `status=accepted` `type=3`, as [open] handed it back.
+ * @param providerPubkey the provider's key **as the page resolved it**, independently of both
+ *   messages (§7.6). See [JsOrderEvent.providerPubkey].
+ * @param store the page's persistence (§17 item 6). Written through, and the record handed back is
+ *   the one this library minted — never whatever the store returned (§13).
+ * @param environment read for [JsEnvironment.nowSeconds] only. An absent clock is the fail-closed
+ *   default and refuses the request outright, because §9.2 check 5 is unperformable without that
+ *   reading and there is no shape here that holds an invoice and no time.
+ * @param earlierPoints §8.4's points observed **before** this request, for a `payee=fee` one;
+ *   ignored for a provider request, which §8.4 forbids requiring a `fee` tag on. Empty is a
+ *   refusal rather than a convenience: `checkFeePaymentRequest` requires the proposal and the
+ *   acceptance to be among them, so a page naming none has its fee request rejected
+ *   `FEE_TERM_POINT_MISSING` rather than stored unchecked.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun acceptPaymentRequest(
+    request: JsRumor,
+    proposalRumor: JsRumor,
+    acceptanceRumor: JsRumor,
+    providerPubkey: String,
+    store: JsPaymentRequestStore,
+    environment: JsEnvironment = JsEnvironment(),
+    earlierPoints: Array<JsFeeTermSighting> = emptyArray(),
+): JsAcceptedRequestResult = jsGuarded({ JsAcceptedRequestResult(null, it) }) {
+    val acceptance = crossedAcceptance(
+        proposalRumor = proposalRumor,
+        acceptanceRumor = acceptanceRumor,
+        providerPubkey = providerPubkey,
+        field = "acceptPaymentRequest.acceptanceRumor",
+    )
+    JsAcceptedRequestResult(
+        AcceptedPaymentRequest.accept(
+            request = PaymentRequest.decode(
+                rumor = request.asBoundRumor("kind:16 type=2 payment request"),
+                split = acceptance.terms.split,
+            ),
+            acceptance = acceptance,
+            into = store.asPaymentRequestStore(),
+            clock = environment.asClock(),
+            feeTermPoints = earlierPoints.map { it.asFeeTermSighting() },
         ),
         null,
     )
@@ -239,13 +319,13 @@ public class JsSettlementResult internal constructor(
  * fields, and a page hands it straight back through [JsPaymentRequestStore.find] — which is exactly
  * what a store does. The four fields below are published for display and are the record's own.
  *
- * **The door that mints one is not among T43's six entry points.** `accept` takes a checked §7.6
- * acceptance and writes to the store, and a write is not a thing [stepOrder] or [verifySettlement]
- * may do as a side effect of being asked a question. So this type crosses *out* today — through the
- * store seam, so a page's store can hold and return records — and the entry point that crosses one
- * *in* from a `type=2` rumor belongs to the stage that opens §8.6's acceptance door. `JsOrderEvent`
- * takes an array of these so §11.2's `PAYMENT_REQUEST_*` refusals are reachable and proved the
- * moment that door opens, rather than the facade having to grow a new parameter then.
+ * **The door that mints one is [acceptPaymentRequest], and it is its own entry point.** `accept`
+ * takes a checked §7.6 acceptance and writes to the store, and a write is not a thing [stepOrder]
+ * or [verifySettlement] may do as a side effect of being asked a question — which is why T43 left
+ * this type crossing *out* only, through the store seam, and why T44 opened the door as a call of
+ * its own rather than as a parameter on an existing one. `JsOrderEvent.requests` takes an array of
+ * these, so a page hands the records it accepted straight to §11.2's `committed → awaiting_payment`
+ * row without unpacking one.
  */
 @OptIn(ExperimentalJsExport::class)
 @JsExport
@@ -268,6 +348,58 @@ public class JsAcceptedRequest internal constructor(internal val accepted: Accep
 
     /** Names the payee only: an invoice and an order id are §12 item 11 values. */
     override fun toString(): String = "JsAcceptedRequest(payee=$payee)"
+}
+
+/**
+ * What [acceptPaymentRequest] answered: the record this library minted and stored, or the refusal.
+ *
+ * ### `ok` says the request was accepted, and that is not a statement about payment
+ *
+ * An accepted `type=2` is an invoice this library judged and the page persisted — §9.2 check 1's
+ * operand, and nothing more. No payment has happened, no preimage exists, and the only payment
+ * evidence in this library is still a preimage [verifySettlement] hashed itself.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsAcceptedRequestResult internal constructor(
+    private val accepted: AcceptedPaymentRequest?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"accepted"` or `"refused"`. */
+    public val kind: String get() = if (accepted != null) "accepted" else "refused"
+
+    /** True exactly when [kind] is `"accepted"`. See this class's note on what that does not mean. */
+    public val ok: Boolean get() = accepted != null
+
+    /**
+     * The record, when [ok] — the one `accept` minted, never the value the page's store returned.
+     *
+     * A page hands it back through [JsPaymentRequestStore.find] and to
+     * [JsOrderEvent.requests]; it has no reason to take one apart, which is why it is opaque.
+     */
+    public val request: JsAcceptedRequest? get() = accepted?.let { JsAcceptedRequest(it) }
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /**
+     * Which rejection enum [reason] came from.
+     *
+     * `SettlementRejection` for §8.6's, §8.7's, §9.2's and Appendix C's own refusals;
+     * `ChannelRejection` where §7.6's two rumors did not decode or the acceptance was refused;
+     * `JsCrossing` where §7.6 answered a counter-proposal, which is no acceptance to accept against.
+     */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an invoice or a key (§12 item 11, STOP RULE 14). */
+    public val detail: String? get() = refusal?.detail
+
+    override fun toString(): String =
+        if (ok) "JsAcceptedRequestResult(accepted)" else "JsAcceptedRequestResult(refused: $reason)"
 }
 
 /**

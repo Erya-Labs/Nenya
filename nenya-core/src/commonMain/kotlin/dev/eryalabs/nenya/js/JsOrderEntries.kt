@@ -106,9 +106,116 @@ public fun stepOrder(
     JsOrderOutcome(machine.asOrderMachine().on(order.order, event.asOrderEvent()), null)
 }
 
+/**
+ * §10.4 **step 1 alone**: the served bytes hashed here and compared to the commitment's `x`.
+ *
+ * ### Why this is its own entry point. T44 gap (3)
+ *
+ * §10.4 fixes an order — hash the served bytes against `x`, *then* decrypt, then hash the plaintext
+ * against `ox` — and says a buyer who checks `ox` first has decrypted a blob it has no reason to
+ * trust. On the JVM the ordering is a type: `DeliveryEvidence.verifyPlaintextBytes` takes a
+ * `ServedBytesVerified` and nothing else produces one. [stepOrder]'s `delivery_verified` makes both
+ * calls in that order, which is correct for a page that already has both byte strings — and is
+ * exactly the wrong shape for a page before it decrypts, because it would have to decrypt first to
+ * have a second argument to pass. That is the "MUST NOT decrypt it" rule inverted by the crossing's
+ * own convenience, and this entry point is what removes the inversion: a page calls this, and only
+ * then decrypts.
+ *
+ * The facade performs **no check of its own**. One call to `ServedBytesVerified.verifyServedBytes`,
+ * whose three refusals — the declared size above the bound, a blob whose length disagrees with
+ * `size`, and a digest that is not `x` — are returned as values under `DeliveryRejection`.
+ *
+ * ### Calling this does not change what [stepOrder] does
+ *
+ * `delivery_verified` still hashes the served bytes itself, because §11.3 invariant 4 says `settled`
+ * is reachable only after the buyer's **own** computation and a `Boolean` from a page saying "step 1
+ * passed" is the assertion STOP RULE 12 forbids. So this answer is information for the page, never
+ * an input to the order: the bytes are hashed twice, and the second hash is the one the order moves
+ * on.
+ *
+ * @param commitment §10.1's four committed values — from [decodeCommitment], or assembled.
+ * @param servedBytesHex the ciphertext the provider served, as lowercase hex.
+ * @param maxServedBytes §10.4's bound on what this page will hash, as a decimal string, or `null`
+ *   for this library's default. See [JsOrderEvent.maxServedBytes] on why this one bound crosses.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun verifyServedBytes(
+    commitment: JsCommitment,
+    servedBytesHex: String,
+    maxServedBytes: String? = null,
+): JsServedBytesResult = jsGuarded({ JsServedBytesResult(null, it) }) {
+    JsServedBytesResult(
+        ServedBytesVerified.verifyServedBytes(
+            commitment = commitment.asDeliverableCommitment(),
+            servedBytes = crossedBytes("verifyServedBytes.servedBytesHex", servedBytesHex),
+            maxServedBytes = crossedNumberOrNull("verifyServedBytes.maxServedBytes", maxServedBytes)
+                ?: ServedBytesVerified.DEFAULT_MAX_SERVED_BYTES,
+        ),
+        null,
+    )
+}
+
 // =================================================================================================
 // The boundary types.
 // =================================================================================================
+
+/**
+ * What [verifyServedBytes] answered: §10.4 step 1 passed, or the refusal.
+ *
+ * ### There is no handle here, and the absence is the design
+ *
+ * `ServedBytesVerified` is the Kotlin type whose *existence* is the permission to decrypt, and
+ * nothing in this package could reproduce that: a page is not compelled by a type to call one
+ * function before another, and a handle crossing back would read as a ticket rather than as an
+ * answer. So what crosses is the two facts §17 needs — how many bytes were hashed, and the bound
+ * they were hashed under — and [ok] says whether the digest was `x`.
+ *
+ * [maxServedBytes] crosses for the reason `ServedBytesVerified` publishes it: evidence produced
+ * under a 64 MiB bound and evidence produced under `Long.MAX_VALUE` would otherwise be
+ * indistinguishable, and "bounded, by a bound that bounds nothing" is the §17 over-claim.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsServedBytesResult internal constructor(
+    private val verified: ServedBytesVerified?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"verified"` or `"refused"`. */
+    public val kind: String get() = if (verified != null) "verified" else "refused"
+
+    /**
+     * True exactly when §10.4 step 1 passed — the SHA-256 this library computed **is** the
+     * commitment's `x`.
+     *
+     * It says step 1 and no more. §10.4 step 2's GCM authentication is the page's and step 3's `ox`
+     * comparison has not been made, so a page that treated this as "the deliverable is good" would
+     * be claiming two checks nobody performed (§17).
+     */
+    public val ok: Boolean get() = verified != null
+
+    /** How many bytes were hashed, as an exact decimal string. Equal to the commitment's `size`. */
+    public val servedBytesLength: String? get() = JsDecimal.ofOrNull(verified?.servedBytesLength)
+
+    /** The §4.3 bound this verification was performed under, as an exact decimal string. */
+    public val maxServedBytes: String? get() = JsDecimal.ofOrNull(verified?.maxServedBytes)
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `DeliveryRejection` for §10.4's own refusals. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The field the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes the bytes or a digest (§12 item 11, STOP RULE 14). */
+    public val detail: String? get() = refusal?.detail
+
+    override fun toString(): String =
+        if (ok) "JsServedBytesResult(verified)" else "JsServedBytesResult(refused: $reason)"
+}
 
 /**
  * §11.2's machine as its configuration: §4.6's clock, and the two timeouts that are local policy.
@@ -614,6 +721,14 @@ internal fun JsOrderEvent.asOrderEvent(): OrderEvent {
 private fun JsOrderEvent.crossedParty(field: String): Party =
     crossedConstant(field, crossedField(field, fromParty), Party.entries) { it.name }
 
+/** §7.6's checked acceptance for an `acceptance_received`, once its three fields are present. */
+private fun JsOrderEvent.crossedAcceptance(): Acceptance.Accepted = crossedAcceptance(
+    proposalRumor = crossedField("acceptance_received.proposalRumor", proposalRumor),
+    acceptanceRumor = crossedField("acceptance_received.acceptanceRumor", acceptanceRumor),
+    providerPubkey = crossedField("acceptance_received.providerPubkey", providerPubkey),
+    field = "acceptance_received.acceptanceRumor",
+)
+
 /**
  * §7.6's checked acceptance, through `OrderProposal.accepts` and nothing else.
  *
@@ -623,28 +738,36 @@ private fun JsOrderEvent.crossedParty(field: String): Party =
  * `OrderEvent.AcceptanceReceived` takes an `Acceptance.Accepted` and not three loose values:
  * decision J records that a caller assembling one by hand skipped that comparison and §8.6's
  * sender rule at once.
+ *
+ * `internal` and taking its three operands rather than a `JsOrderEvent`, because T44's
+ * [acceptPaymentRequest] needs the same value for the same reason: `AcceptedPaymentRequest.accept`
+ * takes an `Acceptance.Accepted` too, and decision J's objection is to *either* caller assembling
+ * one by hand. One function, so the two crossings cannot come to mean different things by "the
+ * acceptance for this order".
+ *
+ * @param field which crossed argument an answer that is not an acceptance is reported against.
  */
-private fun JsOrderEvent.crossedAcceptance(): Acceptance.Accepted {
+internal fun crossedAcceptance(
+    proposalRumor: JsRumor,
+    acceptanceRumor: JsRumor,
+    providerPubkey: String,
+    field: String,
+): Acceptance.Accepted {
     val proposal = OrderProposal.decode(
-        crossedField("acceptance_received.proposalRumor", proposalRumor)
-            .asBoundRumor("kind:16 type=1 order proposal"),
+        proposalRumor.asBoundRumor("kind:16 type=1 order proposal"),
     )
     val update = OrderStatusMessage.decode(
-        crossedField("acceptance_received.acceptanceRumor", acceptanceRumor)
-            .asBoundRumor("kind:16 type=3 status update"),
+        acceptanceRumor.asBoundRumor("kind:16 type=3 status update"),
     )
-    val answer = proposal.accepts(
-        update,
-        crossedField("acceptance_received.providerPubkey", providerPubkey),
-    )
+    val answer = proposal.accepts(update, providerPubkey)
     return answer as? Acceptance.Accepted ?: throw JsCrossing(
         JsCrossing.UNCONSTRUCTIBLE_VALUE,
-        "acceptance_received.acceptanceRumor",
+        field,
         "§7.6 answers one of three things about a `status=accepted` update — an acceptance, a " +
             "counter-proposal whose terms diverge, or a message that is not an acceptance at all " +
-            "— and this one is not the first; §11.2's only door to `accepted` takes the checked " +
-            "acceptance, and promoting either of the other two to one here would advance an order " +
-            "on terms §7.6 found divergent",
+            "— and this one is not the first; every door that takes a checked acceptance takes " +
+            "the first, and promoting either of the other two to one here would carry an order " +
+            "forward on terms §7.6 found divergent",
     )
 }
 
