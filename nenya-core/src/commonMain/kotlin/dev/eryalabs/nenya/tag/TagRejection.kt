@@ -48,7 +48,7 @@ public enum class TagRejection {
     /** A listing carries fewer occurrences than §5.3's Card. column requires — `t`'s `≥2`. */
     CARDINALITY_TOO_FEW,
 
-    /** §5.3: a listing's `t` tags do not include `nenya` and exactly one of `wtb` / `wts`. */
+    /** §5.3: a listing's `t` tags do not include `nenya` and exactly one of `request` / `wts`. */
     MISSING_TOPIC,
 
     /**

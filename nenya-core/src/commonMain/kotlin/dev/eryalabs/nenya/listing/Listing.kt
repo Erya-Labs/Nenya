@@ -360,7 +360,7 @@ public class Listing internal constructor(
         /**
          * §5.1's and §5.2's side rule, which §5.3's `t` row states only half of.
          *
-         * The tag codec has already required `nenya` and exactly one of `wtb` / `wts`; which one
+         * The tag codec has already required `nenya` and exactly one of `request` / `wts`; which one
          * belongs on which kind is §5.1's and §5.2's, and both make it REQUIRED rather than
          * conventional.
          */

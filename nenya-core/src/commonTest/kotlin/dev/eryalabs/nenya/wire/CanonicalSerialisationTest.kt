@@ -239,7 +239,7 @@ class CanonicalSerialisationTest {
             listOf("t", "nenya"),
             listOf("a", "30404:" + WireFixtures.pubkeyFor(7) + ":winter-loop"),
             listOf("alt", "a Nenya request"),
-            listOf("t", "wtb"),
+            listOf("t", "request"),
         )
         val event = WireFixtures.eventWith(tags = tags)
 

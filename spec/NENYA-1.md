@@ -21,7 +21,7 @@ implementation to understand.
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.10`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.11`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and the identifiers it reserves are not registered.
 
 **Revision history.** The table is in §0 of `spec/NENYA-1-companion.md`, together with the
@@ -595,7 +595,7 @@ semantics allow, so that one parser and one renderer serve both sides of the boa
     ["status", "active"],
     ["m", "video/mp4"],
     ["t", "nenya"],
-    ["t", "wtb"],
+    ["t", "request"],
     ["t", "ai-video"],
     ["image", "https://example.invalid/reference.jpg", "1280x720"],
     ["expiration", "1759592000"],
@@ -613,7 +613,7 @@ semantics allow, so that one parser and one renderer serve both sides of the boa
 
 Constraints specific to requests:
 
-- `["t", "wtb"]` (want to buy) is REQUIRED, alongside `["t", "nenya"]`.
+- `["t", "request"]` is REQUIRED, alongside `["t", "nenya"]`.
 - `["alt", ...]` (NIP-31) is REQUIRED. `30404` is an unregistered kind; every generic client
   that encounters one will render whatever `alt` says, or nothing at all.
 - The `price` is the buyer's **budget**, and it is the amount the provider would receive.
@@ -640,7 +640,7 @@ and they MUST NOT be applied to a bid or to an order rumor, which carry their ow
 sets (§6, §6.1, §7.4, §7.5). A shared tag validator MUST therefore take the event kind — and,
 for `kind:16`, the `type` — as an input to its cardinality and requirement rules. Applying
 the listing rules everywhere rejects this document's own bid example, which legitimately
-carries a single `["t", "nenya"]` and no `wtb`/`wts`.
+carries a single `["t", "nenya"]` and no `request`/`wts`.
 
 | Tag | Side | Card. | Requirement | Encoding | Notes |
 |---|---|---|---|---|---|
@@ -650,7 +650,7 @@ carries a single `["t", "nenya"]` and no `wtb`/`wts`.
 | `published_at` | both | 0–1 | SHOULD | `["published_at", "<unix seconds>"]` | Time of **first** publication. MUST NOT change on edit. A later `created_at` with an unchanged `published_at` is how an edit is recognised. |
 | `price` | both | 1 | MUST | `["price", "<sats>", "SAT"]` | See §4.4 and §8.2. |
 | `status` | both | 0–1 | SHOULD | `["status", "<value>"]` | Offers: `active` \| `sold` only. Requests: `active` \| `awarded` \| `fulfilled` \| `cancelled`. Absent means `active`. **This is the listing vocabulary, not the order-state vocabulary of §11.1**, which rides the same tag name on a sealed `kind:16` `type=3` and shares only the token `cancelled`, with a different meaning. One codec MUST NOT serve both (§11.1). |
-| `t` | both | ≥2 | MUST | `["t", "<token>"]` | MUST include `nenya` and exactly one of `wtb` / `wts`. Further `t` tags are free-form categories. Tokens MUST be lowercase with no whitespace; implementations MUST lowercase on write and SHOULD match case-insensitively on read, because relay tag indexes are byte-exact. |
+| `t` | both | ≥2 | MUST | `["t", "<token>"]` | MUST include `nenya` and exactly one of `request` / `wts`. Further `t` tags are free-form categories. Tokens MUST be lowercase with no whitespace; implementations MUST lowercase on write and SHOULD match case-insensitively on read, because relay tag indexes are byte-exact. |
 | `m` | both | 0–1 | SHOULD | `["m", "<mime type>"]` | Desired/produced MIME type of the deliverable, NIP-94 semantics. Single-letter, therefore relay-filterable — this is how a client offers "show me only video jobs" without downloading the board. |
 | `image` | both | 0–n | MAY | `["image", "<url>", "<width>x<height>"]` | Reference material (requests) or samples (offers). MUST be an `https:` URL, never inline bytes and never a `data:` URI. See §12.10 on auto-fetch. |
 | `expiration` | both | 0–1 | SHOULD | `["expiration", "<unix seconds>"]` | NIP-40. See §5.6. |
@@ -689,9 +689,9 @@ Server-side filters that work:
 
 Three relay behaviours that implementations MUST account for:
 
-- **Multiple values in one tag filter are OR, not AND.** `{"#t": ["nenya", "wtb"]}` returns
-  events tagged *either* `nenya` *or* `wtb`. Implementations MUST NOT rely on multi-value
-  tag filters to conjoin conditions; they MUST re-filter client-side after receipt.
+- **Multiple values in one tag filter are OR, not AND.** `{"#t": ["nenya", "request"]}`
+  returns events tagged *either* `nenya` *or* `request`. Implementations MUST NOT rely on
+  multi-value tag filters to conjoin conditions; they MUST re-filter client-side after receipt.
 - **Only the first value of a tag is indexed.** A relay indexes `nenya` from
   `["t", "nenya"]`, and nothing from the second position of `["price", "50000", "SAT"]`.
 - **A relay may silently drop an unregistered kind.** `30404` is unregistered, and a relay
@@ -777,7 +777,7 @@ Rules:
 - `K` and `k` MUST both be present and MUST both equal the listing's kind as a decimal
   string. `P` and `p` MUST both be present and MUST both equal the listing author's pubkey.
 - A bid MUST carry `price`, `t=nenya` and `nenya`. The listing table's cardinality rules do
-  **not** apply to a bid (§5.3): a single `["t", "nenya"]`, with no `wtb`/`wts`, is correct
+  **not** apply to a bid (§5.3): a single `["t", "nenya"]`, with no `request`/`wts`, is correct
   on a bid, as the example above shows.
 - A bid SHOULD carry `expiration`. A bid with no expiration is an open-ended commitment and
   implementations SHOULD render it as such.

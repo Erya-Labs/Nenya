@@ -84,11 +84,11 @@ class BidCodecTest {
     /**
      * §6's own worked example, which §5.3 names as the event a codec applying the listing rules
      * everywhere would reject: "Applying the listing rules everywhere rejects this document's own
-     * bid example, which legitimately carries a single `["t", "nenya"]` and no `wtb`/`wts`."
+     * bid example, which legitimately carries a single `["t", "nenya"]` and no `request`/`wts`."
      */
-    @JsName("a_single_t_nenya_with_no_wtb_or_wts_parses_because_s5_3_s_cardinality_is_a_listing_rule")
+    @JsName("a_single_t_nenya_with_no_request_or_wts_parses_because_s5_3_s_cardinality_is_listing")
     @Test
-    fun `a single t nenya with no wtb or wts parses, because §5_3's cardinality is a listing rule`() {
+    fun `a single t nenya with no request or wts parses, because §5_3's cardinality is a listing rule`() {
         val tags = BidFixtures.minimalBid()
         assertEquals(1, tags.count { it[0] == "t" }, "the fixture must be the shape §5.3 warns about")
 
@@ -378,9 +378,9 @@ class BidCodecTest {
     }
 
     /**
-     * §6 requires `t=nenya` specifically, and §5.3's further "exactly one of `wtb`/`wts`" rule is a
-     * listing rule that MUST NOT be applied here. A `t` tag carrying something else is therefore a
-     * *missing topic* and not a missing tag.
+     * §6 requires `t=nenya` specifically, and §5.3's further "exactly one of `request`/`wts`" rule
+     * is a listing rule that MUST NOT be applied here. A `t` tag carrying something else is
+     * therefore a *missing topic* and not a missing tag.
      */
     @JsName("a_t_tag_that_is_not_nenya_is_refused_as_a_missing_topic")
     @Test

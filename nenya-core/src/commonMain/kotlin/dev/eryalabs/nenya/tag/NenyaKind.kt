@@ -99,8 +99,8 @@ public object NenyaKind {
  *
  * §5.3 also says what happens to an implementation that ignores the split: "Applying the listing
  * rules everywhere rejects this document's own bid example", which legitimately carries a single
- * `["t", "nenya"]` and no `wtb`/`wts`. That is not a hypothetical — it is §6's worked example, and
- * a codec that rejects it cannot read the board.
+ * `["t", "nenya"]` and no `request`/`wts`. That is not a hypothetical — it is §6's worked example,
+ * and a codec that rejects it cannot read the board.
  *
  * ### The kind is declared, not inferred
  *

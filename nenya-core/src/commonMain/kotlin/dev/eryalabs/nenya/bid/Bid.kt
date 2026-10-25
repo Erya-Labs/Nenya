@@ -444,8 +444,8 @@ public class Bid internal constructor(
                     BidRejection.MISSING_TOPIC,
                     BidVocabulary.TOPIC,
                     "§4.5 and §6 require `[\"${BidVocabulary.TOPIC}\", \"${TagSet.TOPIC_NENYA}\"]` " +
-                        "on a bid; §5.3's further `wtb`/`wts` rule is a listing rule and is NOT " +
-                        "applied here, so a single `${TagSet.TOPIC_NENYA}` token is correct",
+                        "on a bid; §5.3's further `request`/`wts` rule is a listing rule and " +
+                        "is NOT applied here, so a single `${TagSet.TOPIC_NENYA}` token is correct",
                 )
             }
         }

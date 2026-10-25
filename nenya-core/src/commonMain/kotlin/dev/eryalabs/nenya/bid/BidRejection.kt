@@ -164,8 +164,8 @@ public class BidException internal constructor(
  * "MUST NOT be applied to a bid or to an order rumor, which carry their own required sets (§6,
  * §6.1, §7.4, §7.5)". §6 states this one in prose rather than in a table, so it is transcribed
  * here, in one place, and `BidCodecTest` asserts it against §6's worked example — which carries a
- * single `["t", "nenya"]` and no `wtb`/`wts`, and which §5.3 names as the event a codec applying
- * the listing rules everywhere would reject.
+ * single `["t", "nenya"]` and no `request`/`wts`, and which §5.3 names as the event a codec
+ * applying the listing rules everywhere would reject.
  */
 internal object BidVocabulary {
 

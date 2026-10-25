@@ -41,7 +41,7 @@ class TagCodecTest {
 
         assertEquals("lighthouse-loop-2026-09", read.dValue)
         assertEquals(Msat.ofSat(120_000), read.price)
-        assertEquals(listOf("nenya", "wtb"), read.topics)
+        assertEquals(listOf("nenya", "request"), read.topics)
         assertEquals(1, read.nenyaVersion)
         assertEquals(FeeTerm.Absent, read.fee)
 
@@ -58,8 +58,8 @@ class TagCodecTest {
      * §5.3 says the Card. and Requirement columns are listing rules and MUST NOT be applied to a
      * bid, and says what happens to a codec that ignores that: "Applying the listing rules
      * everywhere rejects this document's own bid example", which carries a single `["t", "nenya"]`
-     * and no `wtb`/`wts`. §6 repeats it: "a single `["t", "nenya"]`, with no `wtb`/`wts`, is
-     * correct on a bid, as the example above shows."
+     * and no `request`/`wts`. §6 repeats it: "a single `["t", "nenya"]`, with no `request`/`wts`,
+     * is correct on a bid, as the example above shows."
      */
     @JsName("a_single_t_nenya_is_correct_on_a_bid_and_refused_on_a_listing")
     @Test
@@ -77,7 +77,7 @@ class TagCodecTest {
         assertEquals(
             TagRejection.CARDINALITY_TOO_FEW,
             refused.reason,
-            "§5.3 marks `t` cardinality ≥2 on a listing; the same set also fails the wtb/wts " +
+            "§5.3 marks `t` cardinality ≥2 on a listing; the same set also fails the request/wts " +
                 "clause, and the cardinality is the rule that reaches it first",
         )
     }
@@ -101,11 +101,15 @@ class TagCodecTest {
         val tags = TagFixtures.minimalRequest()
         tags.removeAll { it[0] == "t" }
         tags += listOf("t", "Nenya")
-        tags += listOf("t", "WTB")
+        tags += listOf("t", "REQUEST")
 
         val read = TagFixtures.read(tags, request)
-        assertEquals(listOf("Nenya", "WTB"), read.topics, "§4.3 round-tripping needs the bytes as sent")
-        assertEquals(listOf("nenya", "wtb"), read.normalisedTopics)
+        assertEquals(
+            listOf("Nenya", "REQUEST"),
+            read.topics,
+            "§4.3 round-tripping needs the bytes as sent",
+        )
+        assertEquals(listOf("nenya", "request"), read.normalisedTopics)
     }
 
     @JsName("a_listing_carrying_both_side_tokens_is_refused")

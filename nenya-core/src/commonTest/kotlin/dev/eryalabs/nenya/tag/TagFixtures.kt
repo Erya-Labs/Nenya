@@ -169,7 +169,7 @@ internal object TagFixtures {
         listOf("title", "30s looping animation, lighthouse in a storm"),
         listOf("price", "120000", "SAT"),
         listOf("t", "nenya"),
-        listOf("t", "wtb"),
+        listOf("t", "request"),
         listOf("nenya", "1"),
         // MUST on a request (§5.2, §5.3), SHOULD on an offer — the one conditional row.
         listOf("alt", "Nenya marketplace request: 30s lighthouse animation"),
@@ -186,7 +186,7 @@ internal object TagFixtures {
     )
 
     /**
-     * §6's worked public bid, which carries a **single** `["t", "nenya"]` and no `wtb`/`wts`.
+     * §6's worked public bid, which carries a **single** `["t", "nenya"]` and no `request`/`wts`.
      *
      * §5.3 names this shape itself as what a codec applying the listing rules everywhere would
      * reject — "this document's own bid example".
@@ -238,7 +238,7 @@ internal object TagFixtures {
         tags += listOf("title", hostile(random, 2))
         tags += priceTag(random)
         tags += listOf("t", "nenya")
-        tags += listOf("t", if (kind == NenyaKind.REQUEST) "wtb" else "wts")
+        tags += listOf("t", if (kind == NenyaKind.REQUEST) "request" else "wts")
         repeat(random.nextInt(3)) { tags += listOf("t", "category-$index-$it") }
         tags += listOf("nenya", "1")
         tags += listOf("alt", hostile(random, 2))

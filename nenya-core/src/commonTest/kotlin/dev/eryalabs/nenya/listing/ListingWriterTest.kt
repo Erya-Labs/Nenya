@@ -567,8 +567,8 @@ class ListingWriterTest {
     }
 
     /**
-     * §5.3 requires **exactly one** of `wtb` / `wts` on a listing, and the writer emits the one §5.1
-     * or §5.2 fixes for the kind — so a second one named among the extra topics is refused.
+     * §5.3 requires **exactly one** of `request` / `wts` on a listing, and the writer emits the one
+     * §5.1 or §5.2 fixes for the kind — so a second one named among the extra topics is refused.
      *
      * Both cases are tried on both sides, including the one that looks harmless: naming the side the
      * writer was going to emit anyway still produces two side tokens on the wire.

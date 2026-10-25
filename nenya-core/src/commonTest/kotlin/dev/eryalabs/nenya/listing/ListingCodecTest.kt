@@ -108,8 +108,8 @@ class ListingCodecTest {
             assertFailsWith<ListingException> {
                 Listing.decode(ListingFixtures.checked(both, NenyaKind.REQUEST))
             }.reason,
-            "§5.3 requires *exactly* one of `wtb` / `wts`; a listing on both sides of the board " +
-                "cannot be rendered by §5.5's filters or acted on by a counterparty",
+            "§5.3 requires *exactly* one of `request` / `wts`; a listing on both sides of the " +
+                "board cannot be rendered by §5.5's filters or acted on by a counterparty",
         )
 
         val neither = ListingFixtures.without(request, "t") +
@@ -135,7 +135,7 @@ class ListingCodecTest {
     @Test
     fun `a listing whose side token disagrees with its kind is refused`() {
         // Legal at the tag layer — §5.3 asks only for exactly one of the pair — and a §5.2
-        // violation here: `wtb` is REQUIRED on a request and `wts` on an offer.
+        // violation here: `request` is REQUIRED on a request and `wts` on an offer.
         val request = ListingFixtures.without(ListingFixtures.minimalRequest(), "t") +
             listOf(listOf("t", "nenya"), listOf("t", ListingSide.WANT_TO_SELL.token))
         val refused = assertFailsWith<ListingException> {
@@ -358,7 +358,7 @@ class ListingCodecTest {
             listOf("https://example.invalid/reference.jpg"),
             listing.images.map { it.url },
         )
-        assertEquals(listOf("nenya", "wtb"), listing.topics)
+        assertEquals(listOf("nenya", "request"), listing.topics)
         assertEquals(1, listing.nenyaVersion)
         assertNull(listing.expiration, "this fixture carries no deadline for §5.6 to evaluate")
 

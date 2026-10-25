@@ -223,7 +223,7 @@ class TagWriterTest {
             listOf("title", "30s looping animation"),
             TagWriter.price(Msat.ofSat(120_000)),
             TagWriter.topic("Nenya"),
-            TagWriter.topic("WTB"),
+            TagWriter.topic("REQUEST"),
             TagWriter.version(1),
             listOf("alt", "Nenya marketplace request"),
             TagWriter.fee(FeeTerm.of(250), recipient),
@@ -236,7 +236,7 @@ class TagWriterTest {
 
         assertEquals("lighthouse-loop-2026-09", read.dValue)
         assertEquals(Msat.ofSat(120_000), read.price)
-        assertEquals(listOf("nenya", "wtb"), read.topics, "the writer lowercased them")
+        assertEquals(listOf("nenya", "request"), read.topics, "the writer lowercased them")
         assertEquals(1, read.nenyaVersion)
         assertEquals(250, read.fee.basisPoints)
         assertEquals(recipient, read.feeRecipient)

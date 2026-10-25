@@ -59,7 +59,7 @@ public class TagLimits(
  *   `≥2` / `0–n` / `0` column state what a `kind:30402`, `kind:30403` or `kind:30404` listing
  *   requires, and §5.3 says they MUST NOT be applied to a bid or an order rumor. §5.3 also says
  *   what happens if they are: "Applying the listing rules everywhere rejects this document's own
- *   bid example", which carries a single `["t", "nenya"]` and no `wtb`/`wts`.
+ *   bid example", which carries a single `["t", "nenya"]` and no `request`/`wts`.
  *
  * ### The one clause that crosses the line, said out loud
  *
@@ -220,8 +220,8 @@ public class TagSet internal constructor(
         /** §4.5's discovery token, and §5.3's "MUST include `nenya`". */
         public const val TOPIC_NENYA: String = "nenya"
 
-        /** §5.2's want-to-buy side token, REQUIRED on a request. */
-        public const val TOPIC_WTB: String = "wtb"
+        /** §5.2's request side token, REQUIRED on a request. */
+        public const val TOPIC_REQUEST: String = "request"
 
         /** §5.1's want-to-sell side token, REQUIRED on an offer. */
         public const val TOPIC_WTS: String = "wts"
@@ -441,7 +441,7 @@ public class TagSet internal constructor(
         }
 
         /**
-         * §5.3's `t` rule for a listing: "MUST include `nenya` and exactly one of `wtb` / `wts`".
+         * §5.3's `t` rule for a listing: "MUST include `nenya` and exactly one of `request` / `wts`".
          *
          * Matched case-insensitively, per the same cell. A listing carrying both side tokens is
          * refused as well as one carrying neither — "exactly one" is a claim about which side of
@@ -456,11 +456,11 @@ public class TagSet internal constructor(
                     "§4.5 and §5.3 require `[\"t\", \"$TOPIC_NENYA\"]` on every public Nenya event",
                 )
             }
-            val sides = normalised.count { it == TOPIC_WTB || it == TOPIC_WTS }
+            val sides = normalised.count { it == TOPIC_REQUEST || it == TOPIC_WTS }
             if (sides != 1) {
                 throw TagException(
                     TagRejection.MISSING_TOPIC,
-                    "§5.3 requires exactly one of `$TOPIC_WTB` / `$TOPIC_WTS` on a listing; this " +
+                    "§5.3 requires exactly one of `$TOPIC_REQUEST` / `$TOPIC_WTS` on a listing; this " +
                         "kind:${context.kind} carries $sides",
                 )
             }

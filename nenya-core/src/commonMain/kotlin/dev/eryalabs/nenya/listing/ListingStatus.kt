@@ -76,7 +76,7 @@ public enum class ListingStatus(
  * per kind.
  *
  * §5.3 requires exactly one of the pair and leaves which one to §5.1 and §5.2, which are
- * unambiguous: `wtb` is REQUIRED on a request and `wts` is REQUIRED on an offer. The tag codec
+ * unambiguous: `request` is REQUIRED on a request and `wts` is REQUIRED on an offer. The tag codec
  * enforces the "exactly one" half without knowing the kind's answer; [requiredOn] is the other
  * half, and `Listing.decode` refuses a listing whose side disagrees with its kind.
  */
@@ -86,8 +86,8 @@ public enum class ListingSide(
     public val token: String,
 ) {
 
-    /** `wtb`, want to buy: a `kind:30404` request (§5.2). */
-    WANT_TO_BUY(token = "wtb"),
+    /** `request`, the buying side: a `kind:30404` request (§5.2). */
+    WANT_TO_BUY(token = "request"),
 
     /** `wts`, want to sell: a `kind:30402` or `kind:30403` offer (§5.1). */
     WANT_TO_SELL(token = "wts");

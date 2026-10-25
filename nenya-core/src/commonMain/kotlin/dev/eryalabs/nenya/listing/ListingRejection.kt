@@ -38,12 +38,12 @@ public enum class ListingRejection {
     /** §5.3's `≥2` cardinality: the listing carries fewer occurrences than the table requires. */
     TOO_FEW_OCCURRENCES,
 
-    /** §5.3: the `t` tags do not include `nenya` and exactly one of `wtb` / `wts`. */
+    /** §5.3: the `t` tags do not include `nenya` and exactly one of `request` / `wts`. */
     MISSING_TOPIC,
 
     /**
-     * The side token disagrees with the kind: §5.2 makes `["t", "wtb"]` REQUIRED on a request and
-     * §5.1 makes `["t", "wts"]` REQUIRED on an offer.
+     * The side token disagrees with the kind: §5.2 makes `["t", "request"]` REQUIRED on a request
+     * and §5.1 makes `["t", "wts"]` REQUIRED on an offer.
      *
      * §5.3's own row requires only *exactly one* of the pair, which the tag codec enforces without
      * knowing which one belongs here; the kind-specific half is §5.1's and §5.2's and is therefore
@@ -255,7 +255,7 @@ internal fun TagException.asListingRejection(tags: List<List<String>>, kind: Int
             ListingRejection.MISSING_TOPIC,
             TOPIC_TAG,
             "§5.3 requires a listing's `$TOPIC_TAG` tags to include `nenya` and exactly one of " +
-                "`wtb` / `wts`",
+                "`request` / `wts`",
             this,
         )
 

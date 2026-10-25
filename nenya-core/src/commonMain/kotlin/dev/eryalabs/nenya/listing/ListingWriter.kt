@@ -607,7 +607,7 @@ public object ListingWriter {
     }
 
     /**
-     * §5.3's `t` rule, the half the writer can break: *exactly one* of `wtb` / `wts`.
+     * §5.3's `t` rule, the half the writer can break: *exactly one* of `request` / `wts`.
      *
      * Matched case-insensitively, because that is how §5.3 says a `t` token is matched on read and
      * `TagWriter.topic` lowercases on write — so an author's `["t", "WTS"]` on a request would

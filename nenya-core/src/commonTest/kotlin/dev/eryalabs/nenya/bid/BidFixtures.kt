@@ -105,9 +105,9 @@ internal object BidFixtures {
     /**
      * §6's worked bid, reduced to the tags §6 marks MUST, scoped to [listingKind].
      *
-     * It carries a **single** `["t", "nenya"]` and no `wtb`/`wts` — §5.3 names this shape itself as
-     * what a codec applying the listing rules everywhere would reject, calling it "this document's
-     * own bid example". Mutable, so a test can break one tag.
+     * It carries a **single** `["t", "nenya"]` and no `request`/`wts` — §5.3 names this shape
+     * itself as what a codec applying the listing rules everywhere would reject, calling it "this
+     * document's own bid example". Mutable, so a test can break one tag.
      */
     fun minimalBid(
         listingKind: Int = NenyaKind.REQUEST,
