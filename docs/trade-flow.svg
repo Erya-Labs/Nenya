@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 470" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="How a Nenya trade works: six animated steps between buyer and seller">
+  <rect width="840" height="470" rx="16" fill="#11131c"/>
+
+  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">How a Nenya trade works</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">Six steps. At every one, cheating is either impossible or instantly provable.</text>
+
+  <!-- parties -->
+  <g>
+    <circle cx="110" cy="170" r="30" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+    <circle cx="110" cy="162" r="8" fill="none" stroke="#eef0f8" stroke-width="2.2"/>
+    <path d="M94 186c4-9 10-13 16-13s12 4 16 13" fill="none" stroke="#eef0f8" stroke-width="2.2"/>
+    <text x="110" y="222" fill="#eef0f8" font-size="15" font-weight="600" text-anchor="middle">Buyer</text>
+  </g>
+  <g>
+    <circle cx="730" cy="170" r="30" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+    <path d="M730 155l5 10 11 2-8 8 2 11-10-5-10 5 2-11-8-8 11-2z" fill="none" stroke="#eef0f8" stroke-width="2"/>
+    <text x="730" y="222" fill="#eef0f8" font-size="15" font-weight="600" text-anchor="middle">Seller</text>
+  </g>
+
+  <line x1="155" y1="170" x2="685" y2="170" stroke="#2b2f44" stroke-width="2" stroke-dasharray="6 7"/>
+
+  <!-- packets: one per step, each visible in its 4.5s window of a 27s cycle -->
+  <!-- windows as keyTimes fractions: step n = [n/6, (n+1)/6); glide takes the middle 70% -->
+  <g opacity="0"><!-- 1: terms, buyer to seller -->
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;0.012;0.14;0.165;1"/>
+    <animateTransform attributeName="transform" type="translate" dur="27s" repeatCount="indefinite" values="165,0;505,0;505,0" keyTimes="0;0.15;1"/>
+    <rect x="0" y="152" width="120" height="34" rx="17" fill="#11131c" stroke="#f5b942" stroke-width="1.6"/>
+    <text x="60" y="174" fill="#eef0f8" font-size="13.5" font-weight="600" text-anchor="middle">the terms</text>
+  </g>
+  <g opacity="0"><!-- 2: locked file, seller to buyer -->
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.167;0.18;0.305;0.33;1"/>
+    <animateTransform attributeName="transform" type="translate" dur="27s" repeatCount="indefinite" values="490,0;490,0;160,0;160,0" keyTimes="0;0.167;0.32;1"/>
+    <rect x="0" y="152" width="190" height="34" rx="17" fill="#11131c" stroke="#f5b942" stroke-width="1.6"/>
+    <text x="95" y="174" fill="#eef0f8" font-size="13.5" font-weight="600" text-anchor="middle">&#128274; locked file + fingerprint</text>
+  </g>
+  <g opacity="0"><!-- 3: bill, seller to buyer -->
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.334;0.347;0.472;0.497;1"/>
+    <animateTransform attributeName="transform" type="translate" dur="27s" repeatCount="indefinite" values="520,0;520,0;165,0;165,0" keyTimes="0;0.334;0.487;1"/>
+    <rect x="0" y="152" width="160" height="34" rx="17" fill="#11131c" stroke="#f5b942" stroke-width="1.6"/>
+    <text x="80" y="174" fill="#eef0f8" font-size="13.5" font-weight="600" text-anchor="middle">&#9889; bill: 75,000 sats</text>
+  </g>
+  <g opacity="0"><!-- 4: proof, buyer to seller -->
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.5;0.513;0.638;0.663;1"/>
+    <animateTransform attributeName="transform" type="translate" dur="27s" repeatCount="indefinite" values="165,0;165,0;485,0;485,0" keyTimes="0;0.5;0.653;1"/>
+    <rect x="0" y="152" width="175" height="34" rx="17" fill="#11131c" stroke="#f5b942" stroke-width="1.6"/>
+    <text x="87" y="174" fill="#eef0f8" font-size="13.5" font-weight="600" text-anchor="middle">proof of payment</text>
+  </g>
+  <g opacity="0"><!-- 5: key, seller to buyer -->
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.667;0.68;0.805;0.83;1"/>
+    <animateTransform attributeName="transform" type="translate" dur="27s" repeatCount="indefinite" values="540,0;540,0;165,0;165,0" keyTimes="0;0.667;0.82;1"/>
+    <rect x="0" y="152" width="110" height="34" rx="17" fill="#11131c" stroke="#f5b942" stroke-width="1.6"/>
+    <text x="55" y="174" fill="#eef0f8" font-size="13.5" font-weight="600" text-anchor="middle">&#128273; the key</text>
+  </g>
+  <g opacity="0"><!-- 6: settled, centered -->
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.834;0.86;0.99;1"/>
+    <animateTransform attributeName="transform" type="translate" dur="27s" repeatCount="indefinite" values="360,0" keyTimes="0"/>
+    <rect x="0" y="152" width="120" height="34" rx="17" fill="#11131c" stroke="#5bd6a2" stroke-width="1.8"/>
+    <text x="60" y="174" fill="#5bd6a2" font-size="13.5" font-weight="700" text-anchor="middle">&#10003; settled</text>
+  </g>
+
+  <!-- captions, one per step window -->
+  <g opacity="0">
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="1;1;0;0" keyTimes="0;0.155;0.167;1"/>
+    <text x="40" y="280" fill="#eef0f8" font-size="18" font-weight="700">1. They agree</text>
+    <text x="40" y="306" fill="#c9cde0" font-size="14">The buyer orders; the seller accepts by repeating every term word for word.</text>
+    <text x="40" y="332" fill="#ff7a6e" font-size="13">Stops: quietly changed terms. One altered word and the deal is refused.</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.167;0.177;0.322;0.334;1"/>
+    <text x="40" y="280" fill="#eef0f8" font-size="18" font-weight="700">2. The seller promises, before any money moves</text>
+    <text x="40" y="306" fill="#c9cde0" font-size="14">The finished file is encrypted, and its fingerprint is sent. That fingerprint is what the buyer is buying.</text>
+    <text x="40" y="332" fill="#ff7a6e" font-size="13">Stops: swapping the file later. A single changed pixel breaks the fingerprint.</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.334;0.344;0.489;0.5;1"/>
+    <text x="40" y="280" fill="#eef0f8" font-size="18" font-weight="700">3. The bill</text>
+    <text x="40" y="306" fill="#c9cde0" font-size="14">A Lightning bill from the seller for exactly the agreed amount. Not a sat more.</text>
+    <text x="40" y="332" fill="#ff7a6e" font-size="13">Stops: padded bills and redirected fees &#8212; both refused automatically.</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.5;0.51;0.655;0.667;1"/>
+    <text x="40" y="280" fill="#eef0f8" font-size="18" font-weight="700">4. The buyer pays &#8212; and the payment is the proof</text>
+    <text x="40" y="306" fill="#c9cde0" font-size="14">Paying reveals a secret that only exists once the money moved. The seller checks it against the bill.</text>
+    <text x="40" y="332" fill="#ff7a6e" font-size="13">Stops: fake payment claims. &#8220;Trust me, I paid&#8221; counts for nothing.</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.667;0.677;0.822;0.834;1"/>
+    <text x="40" y="280" fill="#eef0f8" font-size="18" font-weight="700">5. The key &#8212; checked before it opens anything</text>
+    <text x="40" y="306" fill="#c9cde0" font-size="14">The buyer&#8217;s app checks the downloaded file&#8217;s fingerprint against the promise, and only then decrypts.</text>
+    <text x="40" y="332" fill="#ff7a6e" font-size="13">Stops: delivering the wrong file. Wrong bytes are never even opened.</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1" keyTimes="0;0.834;0.844;1"/>
+    <text x="40" y="280" fill="#eef0f8" font-size="18" font-weight="700">6. Done &#8212; or provable</text>
+    <text x="40" y="306" fill="#c9cde0" font-size="14">Buyer has the work, seller has the money. Anyone who cheated left signed, timestamped proof of it.</text>
+    <text x="40" y="332" fill="#5bd6a2" font-size="13">Cheating isn&#8217;t just blocked &#8212; it&#8217;s undeniable.</text>
+  </g>
+
+  <line x1="40" y1="368" x2="800" y2="368" stroke="#2b2f44" stroke-width="1"/>
+  <text x="40" y="400" fill="#eef0f8" font-size="14" font-weight="600">Fingerprints protect the buyer &#183; Encryption until payment protects the seller</text>
+  <text x="40" y="424" fill="#9aa0b8" font-size="13">No company, app or escrow ever touches the money. Every check is made by this library, not by any app.</text>
+  <text x="40" y="448" fill="#5d6174" font-size="12">nostr &#183; Lightning &#183; non-custodial</text>
+</svg>

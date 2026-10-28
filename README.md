@@ -7,6 +7,8 @@ verification logic for a two-sided, non-custodial marketplace: one side posts a 
 side posts an **offer** or bids on the request, and the two settle directly in bitcoin over
 Lightning. Nenya holds no funds, runs no server, and takes no cut.
 
+![How a Nenya trade works: six animated steps between buyer and seller, each naming the cheat it stops](docs/trade-flow.svg)
+
 The contract is the written microstandard in [`spec/NENYA-1.md`](spec/NENYA-1.md).
 `nenya-core` is the first reference implementation of it. Anything in the spec can be
 implemented in TypeScript, Rust or Swift against any nostr stack, and it will interoperate
