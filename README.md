@@ -1,5 +1,7 @@
 # Nenya
 
+![How a Nenya trade works: six animated steps between buyer and seller, each naming the cheat it stops](docs/trade-flow.svg)
+
 **A marketplace layer for nostr clients.** Nenya is a library you import, not an app you
 run and not a service you sign up for. It gives a nostr client the wire format and the
 verification logic for a two-sided, non-custodial marketplace: one side posts a **request**
@@ -7,7 +9,9 @@ verification logic for a two-sided, non-custodial marketplace: one side posts a 
 side posts an **offer** or bids on the request, and the two settle directly in bitcoin over
 Lightning. Nenya holds no funds, runs no server, and takes no cut.
 
-![How a Nenya trade works: six animated steps between buyer and seller, each naming the cheat it stops](docs/trade-flow.svg)
+**Want to see it running?** The [Coracle marketplace fork](https://github.com/Erya-Labs/coracle/tree/marketplace)
+is a working proof of concept: listings, bids and verified Lightning-settled deliveries
+inside a real nostr client, with a [step-by-step trade guide](https://github.com/Erya-Labs/coracle/blob/marketplace/MARKETPLACE.md).
 
 The contract is the written microstandard in [`spec/NENYA-1.md`](spec/NENYA-1.md).
 `nenya-core` is the first reference implementation of it. Anything in the spec can be
