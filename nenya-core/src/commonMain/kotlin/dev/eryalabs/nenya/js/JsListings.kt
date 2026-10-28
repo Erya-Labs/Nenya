@@ -360,3 +360,90 @@ public class JsAuthoredListing public constructor(
     /** Names nothing: a `d` value, a title and a price are §12 item 11 values. */
     override fun toString(): String = "JsAuthoredListing(redacted)"
 }
+
+/**
+ * The values a client authors a §6 public bid from, as strings and arrays.
+ *
+ * One field per `AuthoredBid` field, in that order, with [JsAuthoredListing]'s translations: money
+ * and timestamps are decimal strings, `FeeTerm` is a nullable basis-point count, `ImageRef` is the
+ * wire row §5.3 prints — and the §4.2 coordinate is its wire form, read by `Coordinate.parse`, so a
+ * malformed one is refused by this library's own reader. Nothing is defaulted differently from
+ * `AuthoredBid` and nothing is added.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsAuthoredBid public constructor(
+
+    /** §4.1's `pubkey`: the bidder's x-only key, 64 hex characters. */
+    public val bidderPubkey: String,
+
+    /** §4.1's `created_at`, unix seconds as a decimal string (§4.6: the caller's clock). */
+    public val createdAtSeconds: String,
+
+    /** §4.2's coordinate of the listing bid on, `<kind>:<pubkey-hex>:<d-value>`. */
+    public val listingCoordinate: String,
+
+    /** §8.2's price in millisatoshis, as an exact decimal string. */
+    public val priceMsat: String,
+
+    /** §4.1's `content`. */
+    public val content: String = "",
+
+    /** NIP-22's relay hint on `A` and `P`. */
+    public val rootRelayHint: String? = null,
+
+    /** NIP-22's relay hint on `a` and `p`. */
+    public val parentRelayHint: String? = null,
+
+    /** §8.1's fee in basis points, or `null` for `FeeTerm.Absent`. */
+    public val feeBasisPoints: Int? = null,
+
+    /** §8.1's `fee` recipient. */
+    public val feeRecipient: String? = null,
+
+    /** §5.3's `deliver_by`, unix seconds as a decimal string. */
+    public val deliverBySeconds: String? = null,
+
+    /** §5.3's `expiration`, unix seconds as a decimal string. */
+    public val expirationSeconds: String? = null,
+
+    /** §5.3's `t` topics beyond `nenya`. */
+    public val topics: Array<String> = emptyArray(),
+
+    /** §4.5's `nenya` major version. */
+    public val nenyaVersion: Int = ListingWriter.NENYA_MAJOR_VERSION,
+
+    /** §5.3's `alt`. */
+    public val alt: String? = null,
+
+    /** §5.3's `d`. */
+    public val dValue: String? = null,
+
+    /** §5.3's `title`. */
+    public val title: String? = null,
+
+    /** §5.3's `summary`. */
+    public val summary: String? = null,
+
+    /** §5.3's `published_at`, unix seconds as a decimal string. */
+    public val publishedAtSeconds: String? = null,
+
+    /** §5.3's `status` text, carried and not interpreted on a bid. */
+    public val status: String? = null,
+
+    /** §5.3's `m`. */
+    public val mimeType: String? = null,
+
+    /** §5.3's `image` rows, each `[url]` or `[url, "<width>x<height>"]`. */
+    public val images: Array<Array<String>> = emptyArray(),
+
+    /** §5.3's `license`. */
+    public val license: String? = null,
+
+    /** Rows §5.3 and §6 give no vocabulary for, passed through as extensions. */
+    public val extraTags: Array<Array<String>> = emptyArray(),
+) {
+
+    /** Names nothing: a coordinate is a listing id and a counterparty pubkey in one string. */
+    override fun toString(): String = "JsAuthoredBid(redacted)"
+}

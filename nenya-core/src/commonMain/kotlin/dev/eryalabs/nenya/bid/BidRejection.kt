@@ -121,6 +121,30 @@ public enum class BidRejection {
      * the [TagException] the tag codec threw. See [BidException].
      */
     MALFORMED_TAG,
+
+    // The three below are `BidWriter`'s alone. `Bid.decode` takes a `CheckedEvent`, whose event
+    // fields §4.1 has already accepted, and reads an extension tag rather than being handed one.
+
+    /**
+     * One of §4.1's event fields a writer was handed is not one §4.3 accepts — a bidder pubkey that
+     * is not 64 hex characters, a negative `created_at`. The same constant as
+     * `ListingRejection.MALFORMED_EVENT_FIELD`, for the same reason.
+     */
+    MALFORMED_EVENT_FIELD,
+
+    /**
+     * A writer was asked to emit `g` or `location`. §5.3: "Implementations MUST NOT emit `g`", and
+     * `location` has the same reasoning. `Bid.decode` carries one through rather than refusing it,
+     * because on read §5.3 only says an implementation SHOULD warn; emitting one is the MUST.
+     */
+    FORBIDDEN_TAG,
+
+    /**
+     * A §5.3 row was handed to a writer as an extension tag when the writer has a parameter for it.
+     * The same constant as `ListingRejection.ROW_IS_NOT_AN_EXTENSION`: the row belongs in its
+     * parameter, where §5.3's Encoding column is applied and §4.1's position fixed.
+     */
+    ROW_IS_NOT_AN_EXTENSION,
 }
 
 /**
@@ -165,7 +189,8 @@ public class BidException internal constructor(
  * §6.1, §7.4, §7.5)". §6 states this one in prose rather than in a table, so it is transcribed
  * here, in one place, and `BidCodecTest` asserts it against §6's worked example — which carries a
  * single `["t", "nenya"]` and no `request`/`wts`, and which §5.3 names as the event a codec
- * applying the listing rules everywhere would reject.
+ * applying the listing rules everywhere would reject. `BidWriterTest` holds [REQUIRED] equal to
+ * the tags §6's MUST bullets name, parsed out of `spec/NENYA-1.md` by `Section6` at test time.
  */
 internal object BidVocabulary {
 

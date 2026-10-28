@@ -1,6 +1,8 @@
 package dev.eryalabs.nenya.conformance
 
+import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.bid.BidWriter
 import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
@@ -137,6 +139,9 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
             "ListingWriter.request",
             "ListingWriter.offer",
             "ListingWriter.draft",
+            // T47's §6 writer, on the same terms: it takes an `AuthoredBid` and a `TagLimits`, and the
+            // hostile strings go in through `AuthoredBid.<init>`.
+            "BidWriter.bid",
         )
     }
 
@@ -318,6 +323,16 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         Target("Bid\$Companion.decode", Needs.CHECKED) { c -> listOf { Bid.decode(c.checked!!); Unit } },
         Target("Bid.encode", Needs.CHECKED) { c ->
             listOf { runCatching { Bid.decode(c.checked!!) }.getOrNull()?.encode(); Unit }
+        },
+        // T47's writer, twice per hostile string for the reason T40's three are: a hostile bidder
+        // pubkey is refused before §5.3's Encoding column is reached.
+        Target("BidWriter.bid", Needs.NOTHING) { c ->
+            c.strings.flatMap { text ->
+                listOf<() -> Unit>(
+                    { BidWriter.bid(bidWith(c.input, text, text)); Unit },
+                    { BidWriter.bid(bidWith(c.input, wellFormedPubkey(c.input), text)); Unit },
+                )
+            }
         },
     )
 
@@ -544,6 +559,30 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         mimeType = text,
         topics = listOf(text),
         alt = text,
+        license = text,
+        extraTags = input.tags,
+    )
+
+    /**
+     * A bid authored from [text] in every row that takes a string, with the corpus entry's own tag
+     * list as the §4.3 extension tags. The coordinate is a well-formed one on a listing kind, so the
+     * rows are reached; `Coordinate`'s own hostile-input target is above.
+     */
+    private fun bidWith(input: HostileCorpus.Input, pubkey: String, text: String): AuthoredBid = AuthoredBid(
+        bidderPubkey = pubkey,
+        createdAt = input.createdAt,
+        listing = Coordinate(NenyaKind.REQUEST, wellFormedPubkey(input), "listing-${input.index}"),
+        price = Msat.ofSat(90_000L),
+        content = text,
+        rootRelayHint = text,
+        parentRelayHint = text,
+        topics = listOf(text),
+        alt = text,
+        dValue = text,
+        title = text,
+        summary = text,
+        status = text,
+        mimeType = text,
         license = text,
         extraTags = input.tags,
     )

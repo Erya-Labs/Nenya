@@ -1,6 +1,8 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.bid.BidBuild
 import dev.eryalabs.nenya.channel.RumorBuild
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
@@ -128,6 +130,35 @@ internal object JsBoundaryFixtures {
         extraTags = listing.extraTags.map { it.toTypedArray() }.toTypedArray(),
     )
 
+    /** [bid] as the values a page would hand [buildBid]. */
+    fun crossed(bid: AuthoredBid): JsAuthoredBid = JsAuthoredBid(
+        bidderPubkey = bid.bidderPubkey,
+        createdAtSeconds = decimal(bid.createdAt),
+        listingCoordinate = bid.listing.toTagValue(),
+        priceMsat = decimal(bid.price.millisatoshis),
+        content = bid.content,
+        rootRelayHint = bid.rootRelayHint,
+        parentRelayHint = bid.parentRelayHint,
+        feeBasisPoints = basisPointsOf(bid.fee),
+        feeRecipient = bid.feeRecipient,
+        deliverBySeconds = decimalOrNull(bid.deliverBy),
+        expirationSeconds = decimalOrNull(bid.expiration),
+        topics = bid.topics.toTypedArray(),
+        nenyaVersion = bid.nenyaVersion,
+        alt = bid.alt,
+        dValue = bid.dValue,
+        title = bid.title,
+        summary = bid.summary,
+        publishedAtSeconds = decimalOrNull(bid.publishedAt),
+        status = bid.status,
+        mimeType = bid.mimeType,
+        images = bid.images.map { image ->
+            if (image.dimensions == null) arrayOf(image.url) else arrayOf(image.url, image.dimensions!!)
+        }.toTypedArray(),
+        license = bid.license,
+        extraTags = bid.extraTags.map { it.toTypedArray() }.toTypedArray(),
+    )
+
     /** [envelope] as §7.4's five crossed fields. */
     fun crossed(envelope: RumorEnvelope): JsRumorEnvelope = JsRumorEnvelope(
         authorPubkey = envelope.authorPubkey,
@@ -224,6 +255,14 @@ internal object JsBoundaryFixtures {
         is ListingBuild.Refused -> Answer(
             false, null, build.reason.name, "ListingRejection",
             build.tag, build.tagReason?.name, build.detail,
+        )
+    }
+
+    /** §6's writer answer. */
+    fun answerOf(build: BidBuild): Answer = when (build) {
+        is BidBuild.Built -> Answer(true, build.event, null, null, null, null, null)
+        is BidBuild.Refused -> Answer(
+            false, null, build.reason.name, "BidRejection", build.tag, build.tagReason?.name, build.detail,
         )
     }
 

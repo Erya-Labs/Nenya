@@ -219,10 +219,12 @@ class ErasedReflectionSweepTest {
             // that file: the reads are the same two, unchanged, at 477 and 558 rather than 449 and
             // 486. A pin is by file and line, so a line-shifting edit above one is a fixture change
             // (STOP RULE 1) and this is it — declared rather than silenced, and the sweep asserting
-            // every pin is still found is what forced it.
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:477" to
+            // every pin is still found is what forced it. T47 moved them again, to 492 and 597, by
+            // adding the `BidWriter.bid` target and its `bidWith` helper — the same two reads,
+            // unchanged, declared as a fixture change on the same terms.
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:492" to
                 "dispatches through Enum::class.java.isAssignableFrom",
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:558" to
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:597" to
                 "tests membership in hostileShapes(), a set of Class objects; its KDoc says the " +
                 "erasure is deliberate, because a filter written against the parameterised type " +
                 "would see nothing at all",

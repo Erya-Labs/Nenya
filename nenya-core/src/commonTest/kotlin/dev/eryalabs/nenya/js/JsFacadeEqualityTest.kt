@@ -1,7 +1,10 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.bid.BidFixtures
+import dev.eryalabs.nenya.bid.BidWriter
+import dev.eryalabs.nenya.bid.BidWriterFixtures
 import dev.eryalabs.nenya.channel.RumorWriter
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.listing.AuthoredListing
@@ -81,6 +84,9 @@ class JsFacadeEqualityTest {
 
         /** Legal §6 bids, for the `decodeBid` corpus. */
         const val BID_CASES: Int = 90
+
+        /** Bids authored by `BidWriterFixtures`, each crossed four times through `buildBid`. */
+        const val BID_BUILD_CASES: Int = 90
 
         /** Built listings serialised and fed back through `decodeListing`. */
         const val DECODE_CASES: Int = 120
@@ -183,6 +189,76 @@ class JsFacadeEqualityTest {
                 "every call to one writer would show up here and nowhere else",
         )
     }
+
+    /**
+     * T47's `buildBid`: the crossing's answer is `BidWriter.bid`'s for the same bid, over the writer's
+     * own corpus and over the same corpus spoiled three ways — a disagreeing `k`, an `item` and an `E`
+     * scope — so the refusal half of the equality is reached with `BidRejection` and the tag named.
+     */
+    @Test
+    @JsName("the_bid_builder_answers_what_BidWriter_answers")
+    fun `the bid builder answers what BidWriter answers`() {
+        val cases = BidWriterFixtures.cases(BID_BUILD_CASES)
+        var built = 0
+        val refusedReasons = mutableSetOf<String?>()
+        for (case in cases) {
+            val spoilers = listOf(
+                emptyList(),
+                listOf(listOf("k", NenyaKind.OFFER_DRAFT.toString())),
+                listOf(listOf("item", case.bid.listing.toTagValue(), "1")),
+                listOf(listOf("E", TagFixtures.pubkeyFor(case.index))),
+            )
+            for (spoiler in spoilers) {
+                val bid = withExtraTags(case.bid, spoiler)
+                val what = "bid #${case.index} with ${spoiler.map { it[0] }}"
+                val answer = buildBid(JsBoundaryFixtures.crossed(bid))
+                val expected = JsBoundaryFixtures.answerOf(BidWriter.bid(bid))
+                JsBoundaryFixtures.assertSameAnswer(answer, expected, what)
+                if (expected.ok) {
+                    built++
+                    assertEquals(NenyaKind.PUBLIC_BID, answer.event?.kind, what)
+                } else {
+                    assertEquals("BidRejection", answer.reasonVocabulary, what)
+                    assertEquals(spoiler.single()[0], answer.tag, "$what: the refusal names the tag")
+                    refusedReasons += answer.reason
+                }
+            }
+        }
+        // Every spoiled crossing is refused: a `k` of 30403 disagrees on a request or an offer and is a
+        // duplicate on a draft, and any `item` or `E` is refused outright.
+        assertEquals(BID_BUILD_CASES, built, "every unspoiled bid builds, and no spoiled one does")
+        assertTrue(
+            refusedReasons.containsAll(listOf("LISTING_KIND_MISMATCH", "DOUBLE_BINDING", "SCOPED_BY_EVENT_ID")),
+            "the three named refusals were each reached: $refusedReasons",
+        )
+    }
+
+    /** [bid] with [extras] appended to its extension tags, every other field unchanged. */
+    private fun withExtraTags(bid: AuthoredBid, extras: List<List<String>>): AuthoredBid = AuthoredBid(
+        bidderPubkey = bid.bidderPubkey,
+        createdAt = bid.createdAt,
+        listing = bid.listing,
+        price = bid.price,
+        content = bid.content,
+        rootRelayHint = bid.rootRelayHint,
+        parentRelayHint = bid.parentRelayHint,
+        fee = bid.fee,
+        feeRecipient = bid.feeRecipient,
+        deliverBy = bid.deliverBy,
+        expiration = bid.expiration,
+        topics = bid.topics,
+        nenyaVersion = bid.nenyaVersion,
+        alt = bid.alt,
+        dValue = bid.dValue,
+        title = bid.title,
+        summary = bid.summary,
+        publishedAt = bid.publishedAt,
+        status = bid.status,
+        mimeType = bid.mimeType,
+        images = bid.images,
+        license = bid.license,
+        extraTags = bid.extraTags + extras,
+    )
 
     /**
      * §5.1's two `status` refusals, each reached through the boundary and each named.

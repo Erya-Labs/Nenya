@@ -79,6 +79,8 @@ class JsSurfaceTest {
             "JsOrderEvent",
             "JsPaymentRequestStore",
             "JsFeeTermSighting",
+            // T47's one: the values `buildBid` crosses into `AuthoredBid`.
+            "JsAuthoredBid",
         )
 
         /**
@@ -249,7 +251,7 @@ class JsSurfaceTest {
             "JsCrossing",
             "CrossedSigner",
             // T43's two. `JsRefusal` is the `internal` shape `jsGuarded` reduces a thrown refusal
-            // to, so the catch list is written once for all twenty-four entry points rather than once
+            // to, so the catch list is written once for all twenty-five entry points rather than once
             // per result class; `CrossedPaymentRequestStore` is `private`, the §9.2 store seam's
             // adapter, and the sibling of `CrossedSigner`.
             "JsRefusal",
@@ -257,8 +259,8 @@ class JsSurfaceTest {
         )
 
         /**
-         * The twenty-four entry points this package exports: T42's thirteen, T43's six and T44's
-         * five.
+         * The twenty-five entry points this package exports: T42's thirteen, T43's six, T44's five
+         * and T47's one.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -292,7 +294,12 @@ class JsSurfaceTest {
             "decodeCommitment",
             "decodeRelease",
             "verifyServedBytes",
+            // T47 — §6's public bid, the one event the library read and could not write.
+            "buildBid",
         )
+
+        /** T47's one, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T47_ENTRY_POINTS: Set<String> = setOf("buildBid")
 
         /** T44's five, for the same reason [T42_ENTRY_POINTS] exists. */
         val T44_ENTRY_POINTS: Set<String> = setOf(
@@ -439,10 +446,15 @@ class JsSurfaceTest {
         )
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
-        assertEquals(24, ENTRY_POINTS.size, "T44's five on top of T43's six on top of T42's thirteen")
+        assertEquals(
+            25,
+            ENTRY_POINTS.size,
+            "T47's one on top of T44's five on top of T43's six on top of T42's thirteen",
+        )
+        assertTrue(T47_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T47's `buildBid` is exported")
         assertEquals(
             6,
-            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS).size,
+            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")

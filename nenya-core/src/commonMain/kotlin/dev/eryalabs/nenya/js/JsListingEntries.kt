@@ -1,7 +1,10 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.bid.BidBuild
 import dev.eryalabs.nenya.bid.BidException
+import dev.eryalabs.nenya.bid.BidWriter
 import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
@@ -11,6 +14,7 @@ import dev.eryalabs.nenya.listing.ListingWriter
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.MoneyException
 import dev.eryalabs.nenya.money.Msat
+import dev.eryalabs.nenya.tag.Coordinate
 import dev.eryalabs.nenya.tag.ImageRef
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.PubkeyRef
@@ -130,6 +134,53 @@ private fun ListingBuild.asJsBuildResult(): JsBuildResult = when (this) {
     is ListingBuild.Refused ->
         jsRefused(reason.name, "ListingRejection", tag, tagReason?.name, detail)
 }
+
+// =================================================================================================
+// The bid builder — T47's one call to `BidWriter`, so §6's public bid is writable from a page too.
+// =================================================================================================
+
+/**
+ * §6's `kind:1111` public bid, through `BidWriter.bid`.
+ *
+ * The coordinate crosses as its §4.2 wire form and is read by `Coordinate.parse`, whose refusal is a
+ * `TagRejection` exactly as a JVM caller's would be; every other answer is `BidWriter`'s.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun buildBid(bid: JsAuthoredBid): JsBuildResult = jsBuild {
+    when (val build = BidWriter.bid(bid.asAuthoredBid())) {
+        is BidBuild.Built -> jsBuilt(build.event)
+        is BidBuild.Refused ->
+            jsRefused(build.reason.name, "BidRejection", build.tag, build.tagReason?.name, build.detail)
+    }
+}
+
+/** This object's fields as the `AuthoredBid` `BidWriter` takes, each built by its own constructor. */
+private fun JsAuthoredBid.asAuthoredBid(): AuthoredBid = AuthoredBid(
+    bidderPubkey = bidderPubkey,
+    createdAt = crossedSeconds("created_at", createdAtSeconds),
+    listing = Coordinate.parse(listingCoordinate),
+    price = Msat.ofMsat(crossedAmount("price", priceMsat)),
+    content = content,
+    rootRelayHint = rootRelayHint,
+    parentRelayHint = parentRelayHint,
+    fee = feeBasisPoints?.let { FeeTerm.of(it) } ?: FeeTerm.Absent,
+    feeRecipient = feeRecipient,
+    deliverBy = crossedSecondsOrNull("deliver_by", deliverBySeconds),
+    expiration = crossedSecondsOrNull("expiration", expirationSeconds),
+    topics = topics.toList(),
+    nenyaVersion = nenyaVersion,
+    alt = alt,
+    dValue = dValue,
+    title = title,
+    summary = summary,
+    publishedAt = crossedSecondsOrNull("published_at", publishedAtSeconds),
+    status = status,
+    mimeType = mimeType,
+    images = images.map { it.asImageRef() },
+    license = license,
+    extraTags = extraTags.asTagRows(),
+)
 
 /**
  * This object's fields as the `AuthoredListing` `ListingWriter` takes.
