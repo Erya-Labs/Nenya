@@ -140,6 +140,10 @@ class JsSurfaceTest {
             "JsAcceptanceCheck",
             // T49's one: `DeadlineGate`'s answer, read by a page and never passed back.
             "JsDeadlineCheck",
+            // T50's two: §17's capability surface and one of its items, read by a page and never
+            // passed back.
+            "JsCapabilities",
+            "JsConformanceItem",
         )
 
         /**
@@ -164,6 +168,8 @@ class JsSurfaceTest {
             "JsOrderEntriesKt",
             // T44's: the three §7 message decoders a page could not reach.
             "JsMessageEntriesKt",
+            // T50's: §17's capability surface, which no export reached.
+            "JsCapabilitiesKt",
         )
 
         /**
@@ -269,8 +275,8 @@ class JsSurfaceTest {
         )
 
         /**
-         * The thirty entry points this package exports: T42's thirteen, T43's six, T44's five, T47's
-         * one, T48's two and T49's three.
+         * The thirty-one entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * T47's one, T48's two, T49's three and T50's one.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -313,7 +319,12 @@ class JsSurfaceTest {
             "listingActivity",
             "bidActivity",
             "checkDeadlines",
+            // T50 — §17's capability surface, which a page could not read.
+            "capabilities",
         )
+
+        /** T50's one, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T50_ENTRY_POINTS: Set<String> = setOf("capabilities")
 
         /** T49's three, for the same reason [T42_ENTRY_POINTS] exists. */
         val T49_ENTRY_POINTS: Set<String> = setOf("listingActivity", "bidActivity", "checkDeadlines")
@@ -470,11 +481,13 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            30,
+            31,
             ENTRY_POINTS.size,
-            "T49's three on top of T48's two on top of T47's one on top of T44's five on top of T43's six " +
-                "on top of T42's thirteen",
+            "T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
+                "on top of T43's six on top of T42's thirteen",
         )
+        assertEquals(1, T50_ENTRY_POINTS.size, "T50's text says one entry point")
+        assertTrue(T50_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T50's `capabilities` is exported")
         assertTrue(T47_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T47's `buildBid` is exported")
         assertEquals(2, T48_ENTRY_POINTS.size, "T48's text names two entry points")
         assertTrue(T48_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T48's two are exported")
@@ -483,7 +496,7 @@ class JsSurfaceTest {
         assertEquals(
             6,
             (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS -
-                T49_ENTRY_POINTS).size,
+                T49_ENTRY_POINTS - T50_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -841,6 +854,25 @@ class JsSurfaceTest {
             publishedPropertyNames(typeNamed("JsDeadlineCheck"), floor = 4),
             setOf("kind", "permitted", "side", "reason"),
             "JsDeadlineEqualityTest compares exactly these; a new getter must join it",
+        )
+    }
+
+    /**
+     * The same for T50's two: `JsCapabilitiesEqualityTest.differences` compares these six item fields
+     * against `ConformanceItem`, and its other tests these four surface fields against `Capabilities`.
+     * A getter added to either class and not to that comparison turns this red.
+     */
+    @Test
+    fun `the capability comparisons cover every value T50's two types publish`() {
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsConformanceItem"), floor = 6),
+            setOf("number", "status", "specSections", "evidenceClasses", "notPerformed", "note"),
+            "JsCapabilitiesEqualityTest.differences compares exactly these; a new getter must join it",
+        )
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsCapabilities"), floor = 4),
+            setOf("specification", "items", "notPerformedHere", "report"),
+            "JsCapabilitiesEqualityTest compares exactly these; a new getter must join it",
         )
     }
 
