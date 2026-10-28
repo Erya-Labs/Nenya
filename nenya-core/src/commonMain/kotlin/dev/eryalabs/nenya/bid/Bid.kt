@@ -1,7 +1,10 @@
 package dev.eryalabs.nenya.bid
 
+import dev.eryalabs.nenya.listing.ListingActivity
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
+import dev.eryalabs.nenya.seam.NenyaClock
+import dev.eryalabs.nenya.seam.SeamAnswer
 import dev.eryalabs.nenya.tag.Coordinate
 import dev.eryalabs.nenya.tag.ImageRef
 import dev.eryalabs.nenya.tag.NenyaKind
@@ -83,7 +86,8 @@ import dev.eryalabs.nenya.wire.WireEvent
  * "`k` agrees with the coordinate" is a statement about the bid's internal consistency and not
  * evidence that a listing of that kind exists, is live (§5.6), or was authored by that key.
  *
- * Pure computation: no clock, no randomness, no I/O.
+ * Pure computation: no clock, no randomness, no I/O. The one time-dependent question, [activity],
+ * takes the clock as a parameter (§4.6).
  */
 public class Bid internal constructor(
 
@@ -167,7 +171,7 @@ public class Bid internal constructor(
      * Evaluating it is the caller's, because a bid binds nothing: the deadline becomes load-bearing
      * only once it is copied into accepted terms (§5.3, §7.4), and that is where the clock belongs.
      * What this codec owes the rule is that the value is never compared against [createdAt], and it
-     * is not — nothing here reads a clock at all.
+     * is not — nothing here evaluates it, and [activity] reads only [expiration].
      */
     public val deliverBy: Long? get() = tags.deliverBy
 
@@ -213,6 +217,37 @@ public class Bid internal constructor(
      * back out. Only `p` is in §5.3's table, so only `p` is missing from this list.
      */
     public val unknownTags: List<List<String>> get() = tags.unknownTags
+
+    /**
+     * §4.6's bid deadline — "`expiration` … on a bid" — evaluated against the injected clock and
+     * nothing else.
+     *
+     * The same three answers and the same rules as `Listing.activity`, and [ListingActivity] rather
+     * than a second enum because the question is the same one: has this event's `expiration` passed?
+     * No `expiration` is [ListingActivity.ACTIVE] without the clock being consulted — an open-ended
+     * bid (§6) has no deadline to evaluate. A silent clock, or one answering a negative reading, is
+     * [ListingActivity.CANNOT_SAY], **never** [ListingActivity.ACTIVE]: that would report a deadline
+     * as unexpired that this library never evaluated (§17). The named second is itself expired.
+     *
+     * [createdAt] is not consulted: a counterparty's `created_at` is a claim (§4.6).
+     *
+     * This answers the bid's deadline and nothing else. [ListingActivity.ACTIVE] is not "this bid may
+     * be acted on": the listing it names has a deadline of its own, which [DeadlineGate.check]
+     * evaluates beside this one, and a bid binds nobody whatever this answers (§6).
+     *
+     * @param clock §3's clock seam. The default reports no time at all, so the default answer for
+     *   a bid with an `expiration` is [ListingActivity.CANNOT_SAY].
+     */
+    public fun activity(clock: NenyaClock = NenyaClock.FAIL_CLOSED): ListingActivity {
+        val deadline = expiration ?: return ListingActivity.ACTIVE
+        return when (val reading = clock.now()) {
+            is SeamAnswer.Unavailable -> ListingActivity.CANNOT_SAY
+            is SeamAnswer.Provided ->
+                if (reading.value < 0L) ListingActivity.CANNOT_SAY
+                else if (reading.value >= deadline) ListingActivity.EXPIRED
+                else ListingActivity.ACTIVE
+        }
+    }
 
     /**
      * The event this bid was decoded from, byte for byte — same tags, same order, same id.

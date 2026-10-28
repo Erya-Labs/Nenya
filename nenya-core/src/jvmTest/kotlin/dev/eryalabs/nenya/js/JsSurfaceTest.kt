@@ -138,6 +138,8 @@ class JsSurfaceTest {
             "JsStatusUpdate",
             "JsStatusUpdateResult",
             "JsAcceptanceCheck",
+            // T49's one: `DeadlineGate`'s answer, read by a page and never passed back.
+            "JsDeadlineCheck",
         )
 
         /**
@@ -259,7 +261,7 @@ class JsSurfaceTest {
             "JsCrossing",
             "CrossedSigner",
             // T43's two. `JsRefusal` is the `internal` shape `jsGuarded` reduces a thrown refusal
-            // to, so the catch list is written once for all twenty-seven entry points rather than once
+            // to, so the catch list is written once for every entry point that can refuse rather than once
             // per result class; `CrossedPaymentRequestStore` is `private`, the §9.2 store seam's
             // adapter, and the sibling of `CrossedSigner`.
             "JsRefusal",
@@ -267,8 +269,8 @@ class JsSurfaceTest {
         )
 
         /**
-         * The twenty-seven entry points this package exports: T42's thirteen, T43's six, T44's five,
-         * T47's one and T48's two.
+         * The thirty entry points this package exports: T42's thirteen, T43's six, T44's five, T47's
+         * one, T48's two and T49's three.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -307,7 +309,14 @@ class JsSurfaceTest {
             // T48 — §7.6's verdict, which `stepOrder` computed and discarded.
             "decodeStatusUpdate",
             "checkAcceptance",
+            // T49 — §4.6's and §5.6's deadlines, against the page's clock.
+            "listingActivity",
+            "bidActivity",
+            "checkDeadlines",
         )
+
+        /** T49's three, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T49_ENTRY_POINTS: Set<String> = setOf("listingActivity", "bidActivity", "checkDeadlines")
 
         /** T48's two, for the same reason [T42_ENTRY_POINTS] exists. */
         val T48_ENTRY_POINTS: Set<String> = setOf("decodeStatusUpdate", "checkAcceptance")
@@ -461,16 +470,20 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            27,
+            30,
             ENTRY_POINTS.size,
-            "T48's two on top of T47's one on top of T44's five on top of T43's six on top of T42's thirteen",
+            "T49's three on top of T48's two on top of T47's one on top of T44's five on top of T43's six " +
+                "on top of T42's thirteen",
         )
         assertTrue(T47_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T47's `buildBid` is exported")
         assertEquals(2, T48_ENTRY_POINTS.size, "T48's text names two entry points")
         assertTrue(T48_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T48's two are exported")
+        assertEquals(3, T49_ENTRY_POINTS.size, "T49's text crosses three")
+        assertTrue(T49_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T49's three are exported")
         assertEquals(
             6,
-            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS).size,
+            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS -
+                T49_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -815,6 +828,19 @@ class JsSurfaceTest {
                 "claimedStatus", "claimedStatusToken", "reason", "reasonVocabulary", "tag", "detail",
             ),
             "JsVerdictEqualityTest.assertSameVerdict compares exactly these; a new getter must join it",
+        )
+    }
+
+    /**
+     * The same for T49's answer: `JsDeadlineEqualityTest` compares `kind`, `permitted`, `side` and
+     * `reason` against `DeadlineGate.check`, and this holds that to every getter the class has.
+     */
+    @Test
+    fun `the deadline comparison covers every value JsDeadlineCheck publishes`() {
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsDeadlineCheck"), floor = 4),
+            setOf("kind", "permitted", "side", "reason"),
+            "JsDeadlineEqualityTest compares exactly these; a new getter must join it",
         )
     }
 

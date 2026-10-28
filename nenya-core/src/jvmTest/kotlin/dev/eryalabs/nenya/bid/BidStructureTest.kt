@@ -66,6 +66,10 @@ class BidStructureTest {
             "AuthoredBid",
             "BidBuild",
             "BidWriter",
+            // T49's §5.6/§4.6 deadline gate.
+            "DeadlineGate",
+            "DeadlineRefusal",
+            "DeadlineSide",
         )
 
         /**
@@ -89,6 +93,9 @@ class BidStructureTest {
             // library authored, the same pair `BidException.<init>` does.
             "AuthoredBid.<init>",
             "BidBuild\$Refused.<init>",
+            // T49's two enums: compiler-generated lookups, as `BidRejection.valueOf` is.
+            "DeadlineRefusal.valueOf",
+            "DeadlineSide.valueOf",
         )
 
         fun mainClasses(): List<Class<*>> {

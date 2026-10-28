@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.bid.DeadlineGate
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingWriter
 import dev.eryalabs.nenya.money.FeeTerm
@@ -203,6 +204,33 @@ public class JsBid internal constructor(
 
     /** Names the kind only (§12 item 11). */
     override fun toString(): String = "JsBid(kind=$kind)"
+}
+
+/**
+ * What [checkDeadlines] answered, with [kind] as the discriminator.
+ *
+ * `permitted` means **neither deadline refuses** and nothing more: not that the listing's `status`
+ * is open (§5.1), not that the bid is acceptable, and it advances no order (§6). A refusal names its
+ * [side] and its [reason]; `"…_CANNOT_SAY"` is a deadline the clock could not evaluate, never one
+ * found unexpired (§17).
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsDeadlineCheck internal constructor(private val answer: DeadlineGate) {
+
+    /** `"permitted"` or `"refused"`. */
+    public val kind: String get() = if (answer is DeadlineGate.Permitted) "permitted" else "refused"
+
+    /** True exactly when [kind] is `"permitted"`. */
+    public val permitted: Boolean get() = answer is DeadlineGate.Permitted
+
+    /** `DeadlineSide.name` — `"LISTING"` or `"BID"` — when refused. */
+    public val side: String? get() = (answer as? DeadlineGate.Refused)?.side?.name
+
+    /** `DeadlineRefusal.name`, when refused. */
+    public val reason: String? get() = (answer as? DeadlineGate.Refused)?.reason?.name
+
+    override fun toString(): String = "JsDeadlineCheck($kind${reason?.let { ": $it" } ?: ""})"
 }
 
 /**

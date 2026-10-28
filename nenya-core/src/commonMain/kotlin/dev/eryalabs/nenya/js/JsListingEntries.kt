@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.bid.BidBuild
 import dev.eryalabs.nenya.bid.BidException
 import dev.eryalabs.nenya.bid.BidWriter
+import dev.eryalabs.nenya.bid.DeadlineGate
 import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
@@ -154,6 +155,39 @@ public fun buildBid(bid: JsAuthoredBid): JsBuildResult = jsBuild {
             jsRefused(build.reason.name, "BidRejection", build.tag, build.tagReason?.name, build.detail)
     }
 }
+
+// =================================================================================================
+// Deadlines — T49's three. Each reads the page's clock through `JsEnvironment.asClock`, so a page
+// that supplied none gets `NenyaClock.FAIL_CLOSED`, and answers exactly what the Kotlin call answers.
+// Functions rather than methods on `JsListing`/`JsBid`, because those two cross as properties only
+// and `JsSurfaceTest`'s field sweeps hold them to it.
+// =================================================================================================
+
+/**
+ * §5.6's deadline on [listing] against [environment]'s clock, through `Listing.activity`:
+ * `"ACTIVE"`, `"EXPIRED"` or `"CANNOT_SAY"` — the last whenever the listing carries an `expiration`
+ * and the page supplied no clock, or one that answered no decimal time. Never throws.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun listingActivity(listing: JsListing, environment: JsEnvironment): String =
+    listing.listing.activity(environment.asClock()).name
+
+/** §4.6's deadline on [bid] against [environment]'s clock, through `Bid.activity`, as [listingActivity]. */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun bidActivity(bid: JsBid, environment: JsEnvironment): String =
+    bid.bid.activity(environment.asClock()).name
+
+/**
+ * §5.6's refusal to act against an expired listing, and §4.6's deadline on [bid] beside it, through
+ * `DeadlineGate.check` against [environment]'s clock. Pass `null` for [bid] for an action on the
+ * listing alone. See [JsDeadlineCheck] on how little `permitted` claims.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun checkDeadlines(listing: JsListing, bid: JsBid?, environment: JsEnvironment): JsDeadlineCheck =
+    JsDeadlineCheck(DeadlineGate.check(listing.listing, bid?.bid, environment.asClock()))
 
 /** This object's fields as the `AuthoredBid` `BidWriter` takes, each built by its own constructor. */
 private fun JsAuthoredBid.asAuthoredBid(): AuthoredBid = AuthoredBid(
