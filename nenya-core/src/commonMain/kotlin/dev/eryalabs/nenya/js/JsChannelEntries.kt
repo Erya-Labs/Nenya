@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.channel.ListingOrderBuild
+import dev.eryalabs.nenya.channel.ListingOrderWriter
 import dev.eryalabs.nenya.channel.RumorBuild
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorWriter
@@ -178,6 +180,48 @@ public fun buildProposal(
         feeRecipient = feeRecipient,
         amountSat = crossedNumberOrNull("amount", amountSat),
     ).asJsBuildResult()
+}
+
+/**
+ * §7.5's proposal against [listing], through `ListingOrderWriter.proposal`: refused with
+ * `reasonVocabulary` `"DeadlineRefusal"` — `LISTING_EXPIRED` or `LISTING_CANNOT_SAY` — when §5.6's
+ * deadline refuses against [environment]'s clock, and otherwise exactly what [buildProposal] answers
+ * with `itemCoordinate` set to the listing's own. A page that supplied no clock builds only against a
+ * listing carrying no `expiration`.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun buildProposalAgainst(
+    listing: JsListing,
+    environment: JsEnvironment,
+    envelope: JsRumorEnvelope,
+    orderIdHex: String,
+    terms: JsOrderTerms,
+    feeRecipient: String? = null,
+    amountSat: String? = null,
+): JsBuildResult = jsBuild {
+    when (
+        val built = ListingOrderWriter.proposal(
+            listing = listing.listing,
+            clock = environment.asClock(),
+            envelope = envelope.asRumorEnvelope(),
+            order = OrderId.ofHex(orderIdHex),
+            terms = terms.asOrderTerms(),
+            feeRecipient = feeRecipient,
+            amountSat = crossedNumberOrNull("amount", amountSat),
+        )
+    ) {
+        is ListingOrderBuild.Built -> jsBuilt(built.event)
+        is ListingOrderBuild.DeadlineRefused -> jsRefused(
+            built.reason.name,
+            "DeadlineRefusal",
+            null,
+            null,
+            "§5.6: no order may be proposed against an expired listing, and the listing's `expiration` " +
+                "either has passed or could not be judged against the injected clock",
+        )
+        is ListingOrderBuild.Refused -> built.refusal.asJsBuildResult()
+    }
 }
 
 /** §11.1's `kind:16` `type=3` status update, through `RumorWriter.statusUpdate`. */

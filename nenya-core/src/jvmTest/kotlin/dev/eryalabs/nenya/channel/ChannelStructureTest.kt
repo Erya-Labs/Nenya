@@ -113,6 +113,12 @@ class ChannelStructureTest {
             "RumorBuild\$Built",
             "RumorBuild\$Refused",
             "RumorWriter",
+            // T51's §5.6 proposal against a listing, and its three-way answer.
+            "ListingOrderWriter",
+            "ListingOrderBuild",
+            "ListingOrderBuild\$Built",
+            "ListingOrderBuild\$DeadlineRefused",
+            "ListingOrderBuild\$Refused",
         )
 
         /**
@@ -203,6 +209,9 @@ class ChannelStructureTest {
             // doing. `RumorWriter.release` puts both into tags and onto no field of anything, so
             // there is no member from which one could reach a log.
             "RumorWriter.release",
+            // T51: the same §8.1 `fee` recipient `RumorWriter.proposal` takes, passed through to it
+            // unchanged. The listing's coordinate replaces `item`; no other value is added.
+            "ListingOrderWriter.proposal",
         )
 
         /**
