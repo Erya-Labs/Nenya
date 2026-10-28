@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
 import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.channel.ProposalFixtures
 import dev.eryalabs.nenya.conformance.MainClasses
 import dev.eryalabs.nenya.listing.Listing
@@ -133,6 +134,10 @@ class JsSurfaceTest {
             "JsReleaseResult",
             "JsAcceptedRequestResult",
             "JsServedBytesResult",
+            // T48's three: §7.4's decoded `type=3` and its result, and §7.6's three-way verdict.
+            "JsStatusUpdate",
+            "JsStatusUpdateResult",
+            "JsAcceptanceCheck",
         )
 
         /**
@@ -215,6 +220,9 @@ class JsSurfaceTest {
             // is to *either* caller assembling one by hand. One overload: the `JsOrderEvent`
             // extension beside it stays `private` and so is dropped from this sweep.
             "crossedAcceptance" to 1,
+            // T48 split §7.6's three calls out of `crossedAcceptance`, so `checkAcceptance` publishes
+            // the whole answer through the same function `acceptance_received` keeps one case of.
+            "acceptanceAnswer" to 1,
             // JsChannelEntries.kt — the §7.4, §8.3, §10.1 and §10.3 translations.
             "asJsBuildResult" to 2,
             "asRumorEnvelope" to 1,
@@ -251,7 +259,7 @@ class JsSurfaceTest {
             "JsCrossing",
             "CrossedSigner",
             // T43's two. `JsRefusal` is the `internal` shape `jsGuarded` reduces a thrown refusal
-            // to, so the catch list is written once for all twenty-five entry points rather than once
+            // to, so the catch list is written once for all twenty-seven entry points rather than once
             // per result class; `CrossedPaymentRequestStore` is `private`, the §9.2 store seam's
             // adapter, and the sibling of `CrossedSigner`.
             "JsRefusal",
@@ -259,8 +267,8 @@ class JsSurfaceTest {
         )
 
         /**
-         * The twenty-five entry points this package exports: T42's thirteen, T43's six, T44's five
-         * and T47's one.
+         * The twenty-seven entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * T47's one and T48's two.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -296,7 +304,13 @@ class JsSurfaceTest {
             "verifyServedBytes",
             // T47 — §6's public bid, the one event the library read and could not write.
             "buildBid",
+            // T48 — §7.6's verdict, which `stepOrder` computed and discarded.
+            "decodeStatusUpdate",
+            "checkAcceptance",
         )
+
+        /** T48's two, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T48_ENTRY_POINTS: Set<String> = setOf("decodeStatusUpdate", "checkAcceptance")
 
         /** T47's one, for the same reason [T42_ENTRY_POINTS] exists. */
         val T47_ENTRY_POINTS: Set<String> = setOf("buildBid")
@@ -447,14 +461,16 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            25,
+            27,
             ENTRY_POINTS.size,
-            "T47's one on top of T44's five on top of T43's six on top of T42's thirteen",
+            "T48's two on top of T47's one on top of T44's five on top of T43's six on top of T42's thirteen",
         )
         assertTrue(T47_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T47's `buildBid` is exported")
+        assertEquals(2, T48_ENTRY_POINTS.size, "T48's text names two entry points")
+        assertTrue(T48_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T48's two are exported")
         assertEquals(
             6,
-            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS).size,
+            (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -768,6 +784,37 @@ class JsSurfaceTest {
             JsMessageFixtures.releaseFields(release, DeliverableReleaseMessage.decode(releaseRumor))
                 .map { it.name }.toSet(),
             "JsMessageFixtures.releaseFields must name every value JsReleaseMessage publishes",
+        )
+    }
+
+    /**
+     * The same for T48's two answers, on the same terms.
+     *
+     * `JsVerdictEqualityTest` compares every field `JsStatusUpdate` and `JsAcceptanceCheck` publish;
+     * this is what makes "every" true. `JsAcceptanceCheck`'s comparison is the body of that file's
+     * `assertSameVerdict` rather than a field list, so its names are pinned here against the getters
+     * the compiled class has — a getter added to the class and not to that comparison turns this
+     * red. The floors are the exact counts each type publishes today: seven and twelve.
+     */
+    @Test
+    fun `the verdict field comparisons cover every value T48's two types publish`() {
+        val fixture = ProposalFixtures.pairs(1).single()
+        val statusRumor = ProposalFixtures.bound(fixture.acceptanceTags, fixture.index + 1)
+        val update = decodeStatusUpdate(JsRumor(statusRumor)).statusUpdate
+            ?: fail("the generated acceptance must decode")
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsStatusUpdate"), floor = 7),
+            JsMessageFixtures.statusUpdateFields(update, OrderStatusMessage.decode(statusRumor))
+                .map { it.name }.toSet(),
+            "JsMessageFixtures.statusUpdateFields must name every value JsStatusUpdate publishes",
+        )
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsAcceptanceCheck"), floor = 12),
+            setOf(
+                "kind", "accepted", "orderIdHex", "provider", "terms", "divergentTerms",
+                "claimedStatus", "claimedStatusToken", "reason", "reasonVocabulary", "tag", "detail",
+            ),
+            "JsVerdictEqualityTest.assertSameVerdict compares exactly these; a new getter must join it",
         )
     }
 

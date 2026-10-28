@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.js
 import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.money.FeeTerm
 import kotlin.js.ExperimentalJsExport
 import kotlin.js.JsExport
@@ -96,6 +97,29 @@ public fun decodeRelease(rumor: JsRumor): JsReleaseResult =
     jsGuarded({ JsReleaseResult(null, it) }) {
         JsReleaseResult(
             DeliverableReleaseMessage.decode(rumor.asBoundRumor("kind:15 deliverable release")),
+            null,
+        )
+    }
+
+/**
+ * §7.4's `kind:16` `type=3` status update, decoded — the message §7.6 makes acceptance out of. T48.
+ *
+ * One call to `OrderStatusMessage.decode`. Its `status` is read by §11.1's order codec and by no
+ * other, so a listing token such as `sold` is the unknown sink here and never a listing state, and a
+ * `type=3` with no `status` is refused rather than defaulted to anything.
+ *
+ * **A decoded update is a claim and moves nothing.** Whether it is an acceptance is §7.6's comparison
+ * against the proposal and the provider key, which is [checkAcceptance]; whether it moves an order is
+ * [stepOrder]'s. This call performs neither.
+ *
+ * @param rumor the `kind:16` `type=3` as [open] handed it back.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun decodeStatusUpdate(rumor: JsRumor): JsStatusUpdateResult =
+    jsGuarded({ JsStatusUpdateResult(null, it) }) {
+        JsStatusUpdateResult(
+            OrderStatusMessage.decode(rumor.asBoundRumor("kind:16 type=3 status update")),
             null,
         )
     }
@@ -365,4 +389,77 @@ public class JsReleaseResult internal constructor(
 
     override fun toString(): String =
         if (ok) "JsReleaseResult(release)" else "JsReleaseResult(refused: $reason)"
+}
+
+/**
+ * §7.4's status update as the page reads it: who sealed it, which order, and the state it **claims**.
+ *
+ * The four terms it repeats are not published one by one. `OrderStatusMessage` holds them only for
+ * §7.6's comparison and publishes none, so a getter for one here would be a value the Kotlin type does
+ * not have — and a page that compared them itself would be the second rulebook [checkAcceptance]
+ * exists to remove. The whole rumor is still on [event].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsStatusUpdate internal constructor(private val message: OrderStatusMessage) {
+
+    /** §7.2's attribution: the key the seal carrying this update was signed by, lowercase. */
+    public val sender: String get() = message.sender
+
+    /** §4.1's `id`, recomputed by this library from the rumor's own five fields. */
+    public val idHex: String get() = message.id.toHex()
+
+    /** §4.1's `created_at`, unix seconds as a decimal string. A counterparty's claim (§4.6). */
+    public val createdAtSeconds: String get() = JsDecimal.of(message.createdAt)
+
+    /** §7.4's `order` id this update claims to be about. */
+    public val orderIdHex: String get() = message.order.toHex()
+
+    /** The state this update **claims**, as `OrderState.name`. A claim, never a fact. */
+    public val status: String get() = message.status.name
+
+    /**
+     * §11.1's wire token for [status], or `null` for the unknown sink. See [JsOrder.stateToken] on
+     * why the sink has no token.
+     */
+    public val statusToken: String? get() = message.status.token
+
+    /** The rumor this was decoded from, byte for byte — same tags, same order, same id (§4.3). */
+    public val event: JsWireEvent get() = JsWireEvent(message.encode())
+
+    /** Names the claimed state only, as `OrderStatusMessage` does. */
+    override fun toString(): String = "JsStatusUpdate(status=$status)"
+}
+
+/** What [decodeStatusUpdate] answered, with [kind] as the discriminator. */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsStatusUpdateResult internal constructor(
+    private val decoded: OrderStatusMessage?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"status_update"` or `"refused"`. */
+    public val kind: String get() = if (decoded != null) "status_update" else "refused"
+
+    /** True exactly when [kind] is `"status_update"`. Says it decoded — never that it was accepted. */
+    public val ok: Boolean get() = decoded != null
+
+    /** The update, when [ok]. */
+    public val statusUpdate: JsStatusUpdate? get() = decoded?.let { JsStatusUpdate(it) }
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `ChannelRejection` for §7.4's own refusals. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = refusal?.detail
+
+    override fun toString(): String =
+        if (ok) "JsStatusUpdateResult(status_update)" else "JsStatusUpdateResult(refused: $reason)"
 }

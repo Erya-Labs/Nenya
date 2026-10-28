@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.channel.ChannelException
 import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.OrderStatusMessage
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.fail
@@ -261,6 +262,51 @@ internal object JsMessageFixtures {
         val decoded = expected.value ?: return
         val value = crossed.release ?: fail("$what: the crossed answer carries no release")
         JsBoundaryFixtures.assertSameFields(releaseFields(value, decoded), "$what: the release")
+        assertNull(crossed.reason, "$what: an answer must name no reason")
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // §7.4's status update. T48.
+    // -----------------------------------------------------------------------------------------
+
+    /** Every value `JsStatusUpdate` publishes, paired with the same value off [expected]. */
+    fun statusUpdateFields(
+        crossed: JsStatusUpdate,
+        expected: OrderStatusMessage,
+    ): List<JsBoundaryFixtures.Field> = listOf(
+        JsBoundaryFixtures.Field("sender", crossed.sender, expected.sender),
+        JsBoundaryFixtures.Field("idHex", crossed.idHex, expected.id.toHex()),
+        JsBoundaryFixtures.Field(
+            "createdAtSeconds",
+            crossed.createdAtSeconds,
+            JsBoundaryFixtures.decimal(expected.createdAt),
+        ),
+        JsBoundaryFixtures.Field("orderIdHex", crossed.orderIdHex, expected.order.toHex()),
+        JsBoundaryFixtures.Field("status", crossed.status, expected.status.name),
+        JsBoundaryFixtures.Field("statusToken", crossed.statusToken, expected.status.token),
+        JsBoundaryFixtures.Field(
+            "event",
+            crossed.event.unsignedJson().value,
+            JsBoundaryFixtures.json(expected.encode()),
+        ),
+    )
+
+    /** The whole of §7.4's `type=3` decode equality. */
+    fun assertSameStatusUpdate(
+        crossed: JsStatusUpdateResult,
+        expected: Decoded<OrderStatusMessage>,
+        what: String,
+    ) {
+        assertSameShape(crossed.ok, crossed.kind, "status_update", expected, what) {
+            assertNull(crossed.statusUpdate, "$what: a refusal must carry no update")
+            assertEquals(expected.reason, crossed.reason, "$what: the refusals differ")
+            assertEquals(expected.vocabulary, crossed.reasonVocabulary, "$what: the vocabularies differ")
+            assertEquals(expected.tag, crossed.tag, "$what: the tags the refusals are about differ")
+            assertEquals(expected.detail, crossed.detail, "$what: the details differ")
+        }
+        val decoded = expected.value ?: return
+        val value = crossed.statusUpdate ?: fail("$what: the crossed answer carries no update")
+        JsBoundaryFixtures.assertSameFields(statusUpdateFields(value, decoded), "$what: the update")
         assertNull(crossed.reason, "$what: an answer must name no reason")
     }
 

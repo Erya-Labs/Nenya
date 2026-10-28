@@ -156,9 +156,141 @@ public fun verifyServedBytes(
     )
 }
 
+/**
+ * §7.6's three-way answer about a `type=3`, crossed whole. T48.
+ *
+ * ### Why this is its own entry point
+ *
+ * [stepOrder]'s `acceptance_received` computes the same answer and keeps only the first of its three
+ * cases: a counter-proposal and a message that is not an acceptance both come back as
+ * [JsCrossing.UNCONSTRUCTIBLE_VALUE], because neither is a value that row can be offered. That is
+ * right for the machine and wrong for a page that wants to *show* what happened — "the maker changed
+ * your amount" and "I could not build that" arrived as the same answer. §7.6 gives the three cases
+ * three different correct responses, and a counter-proposal's is a new `type=1` with a new order id,
+ * which a page cannot offer unless it is told which terms differ.
+ *
+ * ### It performs no check of its own and advances nothing
+ *
+ * One call to [acceptanceAnswer] — the same function `acceptance_received` and [acceptPaymentRequest]
+ * reach — so every comparison is `OrderProposal.accepts`', and its four refusals come back as values
+ * under `ChannelRejection`. No order is read or moved: nothing here returns a `JsOrder`, and an
+ * `accepted` answer is information for the page and never an input to [stepOrder], which takes the
+ * two rumors again and makes the comparison itself (STOP RULE 12).
+ *
+ * @param proposalRumor the `kind:16` `type=1`, as [open] handed it back.
+ * @param statusRumor the `kind:16` `type=3` the provider sent, as [open] handed it back.
+ * @param providerPubkey the provider key the page resolved **independently of both messages** —
+ *   see [JsOrderEvent.providerPubkey].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun checkAcceptance(
+    proposalRumor: JsRumor,
+    statusRumor: JsRumor,
+    providerPubkey: String,
+): JsAcceptanceCheck = jsGuarded({ JsAcceptanceCheck(null, it) }) {
+    JsAcceptanceCheck(acceptanceAnswer(proposalRumor, statusRumor, providerPubkey), null)
+}
+
 // =================================================================================================
 // The boundary types.
 // =================================================================================================
+
+/**
+ * What [checkAcceptance] answered: one of §7.6's three cases, or the refusal.
+ *
+ * ### There is no `ok`, on purpose
+ *
+ * Every other result in this package publishes `ok` as "an answer came back rather than a refusal".
+ * Here a counter-proposal **is** an answer, so `ok` would be true for it — and a page writing
+ * `if (check.ok)` would carry an order forward on terms §7.6 found divergent. So the discriminator is
+ * [kind] alone, and [accepted] is true for exactly one of its four values.
+ *
+ * ### Names, never values
+ *
+ * [divergentTerms] carries tag **names** in §7.6's order, as `Acceptance.CounterProposal` does: §12
+ * item 11 keeps an order's price, coordinate and deadlines out of anything a host might log.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsAcceptanceCheck internal constructor(
+    private val answer: Acceptance?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"accepted"`, `"counter_proposal"`, `"not_an_acceptance"` or `"refused"`. */
+    public val kind: String
+        get() = when (answer) {
+            is Acceptance.Accepted -> "accepted"
+            is Acceptance.CounterProposal -> "counter_proposal"
+            is Acceptance.NotAnAcceptance -> "not_an_acceptance"
+            null -> "refused"
+        }
+
+    /** True exactly when [kind] is `"accepted"`: §7.6 satisfied, all four terms byte-identical. */
+    public val accepted: Boolean get() = answer is Acceptance.Accepted
+
+    /** §7.4's `order` id both messages name, when [accepted]. */
+    public val orderIdHex: String? get() = (answer as? Acceptance.Accepted)?.order?.toHex()
+
+    /** The provider key the acceptance was checked against, lowercase, when [accepted]. */
+    public val provider: String? get() = (answer as? Acceptance.Accepted)?.provider
+
+    /**
+     * The accepted terms, when [accepted] — the proposal's, which §7.6 found the update repeating.
+     *
+     * In the shape [openOrder] takes, so a page displaying them reads the same four values the order
+     * would be opened on.
+     */
+    public val terms: JsOrderTerms?
+        get() = (answer as? Acceptance.Accepted)?.terms?.let { terms ->
+            JsOrderTerms(
+                priceMsat = JsDecimal.of(terms.split.price.millisatoshis),
+                feeBasisPoints = when (val fee = terms.split.term) {
+                    is dev.eryalabs.nenya.money.FeeTerm.Stated -> fee.basisPoints
+                    dev.eryalabs.nenya.money.FeeTerm.Absent -> null
+                },
+                expirationSeconds = JsDecimal.ofOrNull(terms.expiration),
+                deliverBySeconds = JsDecimal.ofOrNull(terms.deliverBy),
+            )
+        }
+
+    /**
+     * Which of §7.6's four terms differ, by tag **name**, in §7.6's order, for `"counter_proposal"`.
+     * Empty for every other answer. A fresh array on every read.
+     */
+    public val divergentTerms: Array<String>
+        get() = (answer as? Acceptance.CounterProposal)?.divergentTerms?.toTypedArray() ?: emptyArray()
+
+    /** What the update claimed instead, as `OrderState.name`, for `"not_an_acceptance"`. A claim. */
+    public val claimedStatus: String? get() = (answer as? Acceptance.NotAnAcceptance)?.status?.name
+
+    /**
+     * §11.1's wire token for [claimedStatus], or `null` — for any other answer, and for the unknown
+     * sink, which is a treatment and not a token. See [JsOrder.stateToken].
+     */
+    public val claimedStatusToken: String?
+        get() = (answer as? Acceptance.NotAnAcceptance)?.status?.token
+
+    /** The rejection constant's `name`, when [kind] is `"refused"`. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `ChannelRejection` for §7.6's own refusals. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag or argument the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = refusal?.detail
+
+    /** Names the case and, for a counter-proposal, the tag names — never a value. */
+    override fun toString(): String = when (answer) {
+        is Acceptance.CounterProposal -> "JsAcceptanceCheck(counter_proposal: ${answer.divergentTerms})"
+        null -> "JsAcceptanceCheck(refused: $reason)"
+        else -> "JsAcceptanceCheck($kind)"
+    }
+}
 
 /**
  * What [verifyServedBytes] answered: §10.4 step 1 passed, or the refusal.
@@ -556,7 +688,8 @@ public class JsOrderEvent public constructor(
      * §7.6's byte-identical comparison of `item`, `amount_msat`, `fee` and `deliver_by` and §8.6's
      * sender rule. An answer that is §7.6's counter-proposal, or not an acceptance at all, has no
      * `Acceptance.Accepted` to be and is [JsCrossing.UNCONSTRUCTIBLE_VALUE] — this boundary does
-     * not promote a counter-proposal to an acceptance.
+     * not promote a counter-proposal to an acceptance. A page that wants to know *which* of the
+     * other two it was, and which terms diverged, asks [checkAcceptance].
      */
     public val providerPubkey: String? = null,
 
@@ -753,13 +886,7 @@ internal fun crossedAcceptance(
     providerPubkey: String,
     field: String,
 ): Acceptance.Accepted {
-    val proposal = OrderProposal.decode(
-        proposalRumor.asBoundRumor("kind:16 type=1 order proposal"),
-    )
-    val update = OrderStatusMessage.decode(
-        acceptanceRumor.asBoundRumor("kind:16 type=3 status update"),
-    )
-    val answer = proposal.accepts(update, providerPubkey)
+    val answer = acceptanceAnswer(proposalRumor, acceptanceRumor, providerPubkey)
     return answer as? Acceptance.Accepted ?: throw JsCrossing(
         JsCrossing.UNCONSTRUCTIBLE_VALUE,
         field,
@@ -769,6 +896,29 @@ internal fun crossedAcceptance(
             "the first, and promoting either of the other two to one here would carry an order " +
             "forward on terms §7.6 found divergent",
     )
+}
+
+/**
+ * §7.6's whole three-way answer, through `OrderProposal.accepts` and nothing else.
+ *
+ * Three library calls, in the order a JVM caller makes them: decode the `type=1`, decode the
+ * `type=3`, then compare them against the provider key. Shared by [crossedAcceptance], which keeps
+ * only the first of the three answers, and by [checkAcceptance], which publishes all three — so the
+ * door that advances an order and the door that only reports cannot come to mean different things
+ * by "§7.6's answer for these two messages".
+ */
+internal fun acceptanceAnswer(
+    proposalRumor: JsRumor,
+    statusRumor: JsRumor,
+    providerPubkey: String,
+): Acceptance {
+    val proposal = OrderProposal.decode(
+        proposalRumor.asBoundRumor("kind:16 type=1 order proposal"),
+    )
+    val update = OrderStatusMessage.decode(
+        statusRumor.asBoundRumor("kind:16 type=3 status update"),
+    )
+    return proposal.accepts(update, providerPubkey)
 }
 
 /** §9.2's evidence from a crossed settlement, which must be `Evidenced` and not §9.4's `Unverified`. */
