@@ -77,6 +77,70 @@ internal object JsFlowFixtures {
         },
     )
 
+    /**
+     * [signer] as the four completion-taking functions [JsAsyncSigner] takes — [crossed]'s async twin.
+     *
+     * Each question is put to [completions] rather than answered on the spot, so the test decides when,
+     * in which order and how often each answer arrives: at once, held back, interleaved with another
+     * call's, twice, or never. The answer itself is [crossed]'s, computed when the completion fires.
+     */
+    fun crossedAsync(signer: Signer, completions: Completions, label: String = ""): JsAsyncSigner =
+        crossedAsync(crossed(signer), completions, label)
+
+    /** [sync]'s four answers, each put to [completions]; [label] prefixes the questions it records. */
+    fun crossedAsync(sync: JsSigner, completions: Completions, label: String = ""): JsAsyncSigner = JsAsyncSigner(
+        publicKeyHex = { done -> completions.ask("${label}publicKeyHex") { done(sync.publicKeyHex()) } },
+        signEvent = { serialisation, done ->
+            completions.ask("${label}signEvent") { done(sync.signEvent(serialisation)) }
+        },
+        nip44Encrypt = { key, plaintext, done ->
+            completions.ask("${label}nip44Encrypt") { done(sync.nip44Encrypt(key, plaintext)) }
+        },
+        nip44Decrypt = { key, payload, done ->
+            completions.ask("${label}nip44Decrypt") { done(sync.nip44Decrypt(key, payload)) }
+        },
+    )
+
+    /**
+     * The test-controlled scheduler behind [crossedAsync]: every question asked, and the completions
+     * not yet fired.
+     *
+     * With [immediate], a completion fires inside the call that asked — the synchronously completing
+     * fake. Otherwise it waits in [pending] until the test fires it. A fired completion stays in
+     * [fired], so a test can fire it again and prove a duplicate changes nothing.
+     */
+    class Completions(private val immediate: Boolean = false) {
+
+        private val waiting = mutableListOf<() -> Unit>()
+
+        /** Every question asked, by function name, in the order asked. */
+        val asked: MutableList<String> = mutableListOf()
+
+        /** Every completion that has fired at least once, oldest first. */
+        val fired: MutableList<() -> Unit> = mutableListOf()
+
+        /** How many completions are waiting to fire. */
+        val pending: Int get() = waiting.size
+
+        fun ask(question: String, complete: () -> Unit) {
+            asked += question
+            if (immediate) fire(complete) else waiting += complete
+        }
+
+        /** Fires the oldest waiting completion. False when none is waiting. */
+        fun fireOldest(): Boolean = waiting.isNotEmpty().also { if (it) fire(waiting.removeAt(0)) }
+
+        /** Fires waiting completions oldest first until none is left, including any they cause. */
+        fun drain() {
+            while (fireOldest()) Unit
+        }
+
+        private fun fire(complete: () -> Unit) {
+            fired += complete
+            complete()
+        }
+    }
+
     /** The §3 seams `GiftWrap.seal` and `OrderMachine` take, as the functions a page supplies. */
     fun crossedEnvironment(
         clock: NenyaClock? = null,

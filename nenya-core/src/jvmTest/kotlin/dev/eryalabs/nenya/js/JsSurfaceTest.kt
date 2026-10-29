@@ -84,6 +84,8 @@ class JsSurfaceTest {
             "JsAuthoredBid",
             // T53's one: the values `matchesBoard` crosses into `BoardQuery`.
             "JsBoardQuery",
+            // T55's one: NIP-07's signer, as four functions that answer through a completion.
+            "JsAsyncSigner",
         )
 
         /**
@@ -172,6 +174,8 @@ class JsSurfaceTest {
             "JsMessageEntriesKt",
             // T50's: §17's capability surface, which no export reached.
             "JsCapabilitiesKt",
+            // T55's: §7.1's two procedures for a signer that answers later. Its helpers are private.
+            "JsAsyncEnvelopeEntriesKt",
         )
 
         /**
@@ -274,11 +278,15 @@ class JsSurfaceTest {
             // adapter, and the sibling of `CrossedSigner`.
             "JsRefusal",
             "CrossedPaymentRequestStore",
+            // T55's two, both `private`: the driver that re-runs `seal`/`open` until no question is
+            // unanswered, and the memo that replays every seam's answers to each run in call order.
+            "ReplayDriver",
+            "ReplayMemo",
         )
 
         /**
-         * The thirty-four entry points this package exports: T42's thirteen, T43's six, T44's five,
-         * T47's one, T48's two, T49's three, T50's one, T51's one, T52's one and T53's one.
+         * The thirty-six entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * T47's one, T48's two, T49's three, T50's one, T51's one, T52's one, T53's one and T55's two.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -329,6 +337,9 @@ class JsSurfaceTest {
             "buildAgreementAgainst",
             // T53 — §5.5's client-side re-filter, because a relay ORs a multi-value tag filter.
             "matchesBoard",
+            // T55 — §7.1's two procedures driven by NIP-07's promise-returning signer.
+            "sealAsync",
+            "openAsync",
         )
 
         /**
@@ -345,6 +356,9 @@ class JsSurfaceTest {
             val covered = pinned + REFUSAL_BY_VALUE_EXEMPT
             return (ENTRY_POINTS - covered) to (covered - ENTRY_POINTS)
         }
+
+        /** T55's two, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T55_ENTRY_POINTS: Set<String> = setOf("sealAsync", "openAsync")
 
         /** T53's one, for the same reason [T42_ENTRY_POINTS] exists. */
         val T53_ENTRY_POINTS: Set<String> = setOf("matchesBoard")
@@ -513,11 +527,13 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            34,
+            36,
             ENTRY_POINTS.size,
-            "T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
+            "T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
                 "on top of T43's six on top of T42's thirteen",
         )
+        assertEquals(2, T55_ENTRY_POINTS.size, "T55's text crosses two")
+        assertTrue(T55_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T55's `sealAsync` and `openAsync` are exported")
         assertEquals(1, T53_ENTRY_POINTS.size, "T53's text crosses one")
         assertTrue(T53_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T53's `matchesBoard` is exported")
         assertEquals(1, T52_ENTRY_POINTS.size, "T52's text crosses one")
@@ -535,7 +551,7 @@ class JsSurfaceTest {
             6,
             (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS -
                 T49_ENTRY_POINTS - T50_ENTRY_POINTS - T51_ENTRY_POINTS - T52_ENTRY_POINTS -
-                T53_ENTRY_POINTS).size,
+                T53_ENTRY_POINTS - T55_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -566,7 +582,7 @@ class JsSurfaceTest {
             pinned.none { it in REFUSAL_BY_VALUE_EXEMPT },
             "an exempt entry point is also pinned as swept, so one of the two lists is not what it says",
         )
-        assertEquals(33, pinned.size, "thirty-four entry points less `capabilities`")
+        assertEquals(35, pinned.size, "thirty-six entry points less `capabilities`")
     }
 
     /** The control for the test above: a pin missing any one entry point fails the equality. */

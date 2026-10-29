@@ -88,7 +88,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Thirty-three of `JsSurfaceTest.ENTRY_POINTS`' thirty-four: `capabilities` takes nothing, so it
+         * Thirty-five of `JsSurfaceTest.ENTRY_POINTS`' thirty-six: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -125,6 +125,8 @@ class JsRefusalByValueTest {
             "buildProposalAgainst",
             "buildAgreementAgainst",
             "matchesBoard",
+            "sealAsync",
+            "openAsync",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -895,6 +897,82 @@ class JsRefusalByValueTest {
         for (clock in HOSTILE_CLOCKS) opened("open under a hostile clock", env = JsEnvironment(nowSeconds = clock))
     }
 
+    /**
+     * T55: the same hostile inputs through [sealAsync] and [openAsync], each signer answering through a
+     * synchronously completing fake, so the one answer has been delivered by the time the call returns.
+     */
+    @Test
+    @JsName("seal_async_and_open_async_return_every_hostile_input_as_a_value")
+    fun `sealAsync and openAsync return every hostile input as a value`() {
+        val rumor = JsWireEvent(EnvelopeFixtures.rumor())
+        val recipient = EnvelopeFixtures.recipientKey()
+        val sender = JsFlowFixtures.crossed(EnvelopeFixtures.senderSigner())
+        fun async(signer: JsSigner): JsAsyncSigner =
+            JsFlowFixtures.crossedAsync(signer, JsFlowFixtures.Completions(immediate = true))
+        fun environment(): JsEnvironment = JsFlowFixtures.crossedEnvironment(
+            clock = FakeClock(EnvelopeFixtures.NOW),
+            randomness = RecordingRandomness(),
+            ephemeral = Nip44PayloadEphemeralSigners(),
+        )
+        fun sealed(
+            what: String,
+            recipientPubkey: String = recipient,
+            signer: JsSigner = sender,
+            env: JsEnvironment = environment(),
+            hint: String? = null,
+        ) {
+            val answers = mutableListOf<JsSealResult>()
+            call(::sealAsync) { sealAsync(rumor, recipientPubkey, async(signer), { answers += it }, env, hint) }
+            assertEquals(1, answers.size, "$what: a synchronously completing signer is answered once, at once")
+            record(what, answers.single())
+        }
+
+        for (bad in HOSTILE_HEX) {
+            sealed("sealAsync recipientPubkey=`$bad`", recipientPubkey = bad)
+            sealed("sealAsync sender answering `$bad`", signer = hostileSigner(bad))
+            sealed("sealAsync sender signing `$bad`", signer = spoiledSigner(sender, bad))
+            val base = environment()
+            sealed(
+                "sealAsync randomness answering `$bad`",
+                env = JsEnvironment(base.nowSeconds, { _ -> bad }, base.verifySchnorr, base.freshSigner),
+            )
+            sealed(
+                "sealAsync one-time signer answering `$bad`",
+                env = JsEnvironment(base.nowSeconds, base.randomBytesHex, base.verifySchnorr, { hostileSigner(bad) }),
+            )
+            sealed(
+                "sealAsync verifier answering `$bad`",
+                env = JsEnvironment(base.nowSeconds, base.randomBytesHex, { _, _, _ -> bad }, base.freshSigner),
+            )
+        }
+        for (clock in HOSTILE_CLOCKS) sealed("sealAsync under a hostile clock", env = withClock(environment(), clock))
+        for (bad in listOf("", "not a url", "wss://")) sealed("sealAsync recipientRelayHint=`$bad`", hint = bad)
+
+        val wrapJson = GiftWrap.seal(
+            rumor = EnvelopeFixtures.rumor(),
+            recipientPubkey = recipient,
+            sender = EnvelopeFixtures.senderSigner(),
+            ephemeral = Nip44PayloadEphemeralSigners(),
+            clock = FakeClock(EnvelopeFixtures.NOW),
+            randomness = RecordingRandomness(),
+        ).toRecipient.json
+        val reader = JsFlowFixtures.crossed(EnvelopeFixtures.recipientSigner())
+        fun opened(what: String, json: String = wrapJson, me: JsSigner = reader, env: JsEnvironment = JsEnvironment()) {
+            val answers = mutableListOf<JsOpenResult>()
+            call(::openAsync) { openAsync(json, async(me), { answers += it }, env) }
+            assertEquals(1, answers.size, "$what: a synchronously completing signer is answered once, at once")
+            record(what, answers.single())
+        }
+
+        for (text in HOSTILE_TEXTS) opened("openAsync wrapJson=`${text.take(20)}`", json = text)
+        for (bad in HOSTILE_HEX) {
+            opened("openAsync reader answering `$bad`", me = hostileSigner(bad))
+            opened("openAsync reader decrypting to `$bad`", me = spoiledSigner(reader, bad))
+            opened("openAsync verifier answering `$bad`", env = JsEnvironment(verifySchnorr = { _, _, _ -> bad }))
+        }
+        for (clock in HOSTILE_CLOCKS) opened("openAsync under a hostile clock", env = JsEnvironment(nowSeconds = clock))
+    }
+
     /** §9.2's two checks and §8.6's acceptance door, with every string-bearing value spoiled. */
     @Test
     @JsName("the_settlement_entry_points_return_every_hostile_input_as_a_value")
@@ -1287,6 +1365,7 @@ class JsRefusalByValueTest {
         `every builder's envelope order id and fee recipient come back as values`()
         `neither decoder throws for any text`()
         `seal and open return every hostile input as a value`()
+        `sealAsync and openAsync return every hostile input as a value`()
         `the settlement entry points return every hostile input as a value`()
         `the order entry points return every hostile input as a value`()
         `the message decoders return a rumor they are not for as a value`()
