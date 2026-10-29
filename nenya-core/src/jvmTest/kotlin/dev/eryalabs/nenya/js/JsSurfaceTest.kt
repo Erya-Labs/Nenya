@@ -331,6 +331,21 @@ class JsSurfaceTest {
             "matchesBoard",
         )
 
+        /**
+         * The entry points `JsRefusalByValueTest` does not sweep, each with the reason it has nothing
+         * hostile to be handed. `capabilities` takes no parameter at all.
+         */
+        val REFUSAL_BY_VALUE_EXEMPT: Set<String> = setOf("capabilities")
+
+        /**
+         * What [pinned] plus [REFUSAL_BY_VALUE_EXEMPT] fails to cover of [ENTRY_POINTS], and what it
+         * names that [ENTRY_POINTS] does not — both empty exactly when the two are equal.
+         */
+        fun refusalSweepGap(pinned: Set<String>): Pair<Set<String>, Set<String>> {
+            val covered = pinned + REFUSAL_BY_VALUE_EXEMPT
+            return (ENTRY_POINTS - covered) to (covered - ENTRY_POINTS)
+        }
+
         /** T53's one, for the same reason [T42_ENTRY_POINTS] exists. */
         val T53_ENTRY_POINTS: Set<String> = setOf("matchesBoard")
 
@@ -528,6 +543,47 @@ class JsSurfaceTest {
         assertTrue(
             ENTRY_POINTS.none { it in NON_EXPORTED_HELPERS },
             "an entry point is also listed as a helper, so one of the two lists is not what it says",
+        )
+    }
+
+    /**
+     * T54: decision **P**'s refusal-by-value sweep reaches every entry point this package exports.
+     *
+     * `JsRefusalByValueTest.SWEPT_ENTRY_POINTS` is the set that file's one-`@Test` sweep must record as
+     * having returned; this holds it, plus the named exemptions, equal to [ENTRY_POINTS] — which the
+     * test above holds to the compiled file classes. So an export added without a hostile case there
+     * turns this red, and so does a pinned name nothing exports.
+     */
+    @Test
+    fun `the refusal-by-value sweep pins every entry point but the named exemptions`() {
+        val pinned = JsRefusalByValueTest.SWEPT_ENTRY_POINTS
+        assertEquals(
+            emptySet<String>() to emptySet(),
+            refusalSweepGap(pinned),
+            "(entry points neither swept nor exempt) to (names swept or exempt that nothing exports)",
+        )
+        assertTrue(
+            pinned.none { it in REFUSAL_BY_VALUE_EXEMPT },
+            "an exempt entry point is also pinned as swept, so one of the two lists is not what it says",
+        )
+        assertEquals(33, pinned.size, "thirty-four entry points less `capabilities`")
+    }
+
+    /** The control for the test above: a pin missing any one entry point fails the equality. */
+    @Test
+    fun `an entry point absent from the refusal-by-value pin fails the equality`() {
+        val pinned = JsRefusalByValueTest.SWEPT_ENTRY_POINTS
+        for (name in ENTRY_POINTS - REFUSAL_BY_VALUE_EXEMPT) {
+            assertEquals(
+                setOf(name) to emptySet(),
+                refusalSweepGap(pinned - name),
+                "a pin without `$name` must be reported as missing exactly that entry point",
+            )
+        }
+        assertEquals(
+            emptySet<String>() to setOf("notAnEntryPoint"),
+            refusalSweepGap(pinned + "notAnEntryPoint"),
+            "a pinned name nothing exports must be reported",
         )
     }
 
