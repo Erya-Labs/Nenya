@@ -7,6 +7,7 @@ import dev.eryalabs.nenya.bid.BidException
 import dev.eryalabs.nenya.bid.BidWriter
 import dev.eryalabs.nenya.bid.DeadlineGate
 import dev.eryalabs.nenya.listing.AuthoredListing
+import dev.eryalabs.nenya.listing.BoardQuery
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
 import dev.eryalabs.nenya.listing.ListingException
@@ -188,6 +189,22 @@ public fun bidActivity(bid: JsBid, environment: JsEnvironment): String =
 @JsExport
 public fun checkDeadlines(listing: JsListing, bid: JsBid?, environment: JsEnvironment): JsDeadlineCheck =
     JsDeadlineCheck(DeadlineGate.check(listing.listing, bid?.bid, environment.asClock()))
+
+// =================================================================================================
+// The board re-filter — T53's one call to `BoardQuery.matches`, because §5.5 makes a relay's
+// multi-value tag filter an OR and the conjunction the page's to redo after receipt.
+// =================================================================================================
+
+/**
+ * §5.5's client-side re-filter of [listing] by [query], through `BoardQuery.matches`: true exactly when
+ * **every** condition [query] names holds. Consults neither `status` nor the clock — a matching listing
+ * may be sold or expired (§5.6, [checkDeadlines]). Never throws.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun matchesBoard(listing: JsListing, query: JsBoardQuery): Boolean =
+    BoardQuery(query.kinds.toSet(), query.topics.toSet(), query.mimeType, query.directedTo)
+        .matches(listing.listing)
 
 /** This object's fields as the `AuthoredBid` `BidWriter` takes, each built by its own constructor. */
 private fun JsAuthoredBid.asAuthoredBid(): AuthoredBid = AuthoredBid(

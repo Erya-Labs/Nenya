@@ -234,6 +234,32 @@ public class JsDeadlineCheck internal constructor(private val answer: DeadlineGa
 }
 
 /**
+ * The values a page re-filters a board by (§5.5), as `BoardQuery` takes them: [kinds] as numbers and
+ * the rest as strings. Nothing is defaulted differently from `BoardQuery` and nothing is added; see
+ * [matchesBoard] for what a match claims.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsBoardQuery public constructor(
+
+    /** The listing kinds asked for — 30402, 30403, 30404. Empty matches nothing. */
+    public val kinds: Array<Int>,
+
+    /** The `t` tokens a listing must **all** carry, compared case-insensitively. Empty adds no condition. */
+    public val topics: Array<String> = emptyArray(),
+
+    /** §5.3's `m`, compared byte for byte, or `null` for no condition. */
+    public val mimeType: String? = null,
+
+    /** A pubkey that must be among the listing's `p` tags, or `null` for no condition. */
+    public val directedTo: String? = null,
+) {
+
+    /** Names the counts only, as `BoardQuery` does. */
+    override fun toString(): String = "JsBoardQuery(kinds=${kinds.size}, topics=${topics.size})"
+}
+
+/**
  * What [decodeListing] answered: the listing, or the refusal, with [kind] as the discriminator.
  */
 @OptIn(ExperimentalJsExport::class)

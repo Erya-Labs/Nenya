@@ -62,6 +62,8 @@ class ListingStructureTest {
             "AuthoredListing",
             "ListingBuild",
             "ListingWriter",
+            // T53's §5.5 client-side re-filter.
+            "BoardQuery",
         )
 
         /**
@@ -92,6 +94,10 @@ class ListingStructureTest {
             // strings enter by is the carrier, which is what makes it the thing to look at.
             "AuthoredListing.<init>",
             "ListingBuild\$Refused.<init>",
+            // T53's: the `t` tokens, `m` value and `p` pubkey a client re-filters its own board by
+            // (§5.5). The query's author is the caller, so nothing in it is a counterparty's say-so,
+            // and `matches` takes a decoded `Listing`, never a String.
+            "BoardQuery.<init>",
         )
 
         fun mainClasses(): List<Class<*>> {
