@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.channel
 import dev.eryalabs.nenya.bid.DeadlineGate
 import dev.eryalabs.nenya.bid.DeadlineRefusal
 import dev.eryalabs.nenya.listing.Listing
+import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.order.OrderTerms
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.seam.OrderId
@@ -10,11 +11,14 @@ import dev.eryalabs.nenya.tag.ItemRef
 import dev.eryalabs.nenya.wire.WireEvent
 
 /**
- * What [ListingOrderWriter] answers: the unsigned rumor, §5.6's deadline refusal, or the §7.4 rule
- * that refused the message itself.
+ * What [ListingOrderWriter] answers: the unsigned rumor, a proposal naming another listing, §5.6's
+ * deadline refusal, or the §7.4 rule that refused the message itself.
  *
- * Three cases rather than [RumorBuild]'s two, because the two refusals are different facts with
- * different fixes: [DeadlineRefused] is about the **listing** — its `expiration` has passed, or the
+ * [ForAnotherListing] is reachable only from [ListingOrderWriter.agreement]: `proposal` reads its
+ * `item` off the listing it is handed, so it has no second coordinate to disagree with.
+ *
+ * More cases than [RumorBuild]'s two, because the refusals are different facts with different
+ * fixes: [DeadlineRefused] is about the **listing** — its `expiration` has passed, or the
  * injected clock could not say whether it had — and no change to the message would build it, while
  * [Refused] is about the message and is exactly what `RumorWriter.proposal` answers for the same
  * values. Folding the first into a `ChannelRejection` would invent a channel rule §7.4 does not state.
@@ -25,7 +29,8 @@ public sealed interface ListingOrderBuild {
 
     /**
      * The unsigned rumor, for the app to seal — byte for byte what `RumorWriter.proposal` builds with
-     * `item` set to the listing's own coordinate.
+     * `item` set to the listing's own coordinate, or, from [ListingOrderWriter.agreement], what
+     * `RumorWriter.statusUpdate` builds with `status=accepted` and the proposal's own terms.
      *
      * It claims that **§5.6's deadline did not refuse**, and nothing more. It is not "this listing is
      * open for business": a listing carrying `["status", "sold"]`, or parked as `kind:30403`, and no
@@ -42,6 +47,21 @@ public sealed interface ListingOrderBuild {
 
         /** Names the kind and a tag count. §12 item 11 keeps the order id out of a diagnostic. */
         override fun toString(): String = "ListingOrderBuild.Built(kind=${event.kind}, tags=${event.tags.size})"
+    }
+
+    /**
+     * The proposal's §7.5 `item` names a listing other than the one handed in, so nothing was built and
+     * the deadline was never asked.
+     *
+     * Checked before the deadline, because the listing's `expiration` says nothing about a proposal
+     * made against some other listing: judging it would answer §5.6 about the wrong subject — the
+     * reason `OrderProposal.accepts` refuses `DIFFERENT_ORDER` before it reads anything else. It
+     * carries no value, neither the coordinate the proposal named nor the listing's, because §12
+     * item 11 keeps a listing coordinate out of a diagnostic.
+     */
+    public object ForAnotherListing : ListingOrderBuild {
+
+        override fun toString(): String = "ListingOrderBuild.ForAnotherListing"
     }
 
     /**
@@ -76,8 +96,8 @@ public sealed interface ListingOrderBuild {
 }
 
 /**
- * §5.6's "MUST NOT … propose an order … against an expired listing", made the way a proposal against
- * a listing is written.
+ * §5.6's "MUST NOT … propose an order, or advance an order against an expired listing", made the way
+ * a proposal against a listing, and the provider's agreement to one, are written.
  *
  * `RumorWriter.proposal` takes a bare `ItemRef` and no clock, so it cannot know what listing the
  * coordinate names or when that listing expires; it is unchanged, and stays the entry point for a
@@ -97,6 +117,11 @@ public sealed interface ListingOrderBuild {
  *
  * The deadline is judged against the clock's reading, never against [RumorEnvelope.createdAt]: §4.6
  * makes the injected clock the only source of "now", and a `created_at` is a value the caller chose.
+ *
+ * [agreement] is the provider's side of the same MUST, and only its acceptance arm: §7.6's
+ * acceptance is what moves an order `proposed → accepted` (§11.2), so it too is refused once the
+ * listing has expired. The other arms of "advance" would need the order machine to hold the listing,
+ * and nothing here claims them.
  *
  * Pure computation over the injected clock: no randomness and no I/O.
  */
@@ -128,6 +153,69 @@ public object ListingOrderWriter {
         }
         return when (
             val built = RumorWriter.proposal(envelope, order, ItemRef(listing.coordinate), terms, feeRecipient, amountSat)
+        ) {
+            is RumorBuild.Built -> ListingOrderBuild.Built(built.event)
+            is RumorBuild.Refused -> ListingOrderBuild.Refused(built)
+        }
+    }
+
+    /**
+     * §7.6's acceptance of [proposal] — a `kind:16` `type=3` carrying `status=accepted` — refused when
+     * the proposal names another listing or when §5.6's deadline refuses.
+     *
+     * Not named `accept…`: `OrderProposal.accepts` is §7.6's one answer to "were these terms
+     * accepted", and `ChannelStructureTest` pins that name to it alone. This writes the message that
+     * question is asked about; it answers nothing.
+     *
+     * ### In the order the checks are made
+     *
+     * 1. [proposal]'s `item` against [listing]'s coordinate. A different listing answers
+     *    [ListingOrderBuild.ForAnotherListing], builds nothing and never reads the clock.
+     * 2. `DeadlineGate.check(listing, null, clock)`, exactly as [proposal] makes it: anything but
+     *    `Permitted` answers [ListingOrderBuild.DeadlineRefused] and builds nothing.
+     * 3. `RumorWriter.statusUpdate` with `OrderState.ACCEPTED` and the proposal's own `order`, `item`,
+     *    `terms` and `feeRecipient`. None of the four is a parameter here, so §7.6's repeated terms
+     *    come off the decoded proposal rather than being typed a second time.
+     *
+     * ### What it does not claim
+     *
+     * The terms are repeated **as this library spells them**. A proposal this library built — through
+     * [proposal] or `RumorWriter.proposal` — carries exactly that spelling, so `OrderProposal.accepts`
+     * answers `Accepted` for the agreement. A stranger's proposal that decodes but is spelled some
+     * other way (an uppercase pubkey inside the coordinate, say) is answered `CounterProposal`
+     * instead, because §7.6 compares bytes and this writer re-spells what it decoded rather than
+     * copying the stranger's bytes. That is the closed direction.
+     *
+     * Nor does it check who [envelope]'s author is. The provider is the listing's author on an offer
+     * and the chosen bidder on a request, so the listing alone cannot say; `OrderProposal.accepts`
+     * refuses an acceptance sealed by anyone but the provider the buyer resolved. And it advances
+     * nothing: nothing in `dev.eryalabs.nenya.order` calls it.
+     *
+     * @param listing the listing [proposal] was made against.
+     * @param clock §3's clock seam, read at most once and only after the `item` comparison.
+     * @param envelope §7.4's envelope: the provider's key, its `created_at`, and the buyer as `p`.
+     * @param proposal the §7.5 proposal being agreed to, as `OrderProposal.decode` answered it.
+     */
+    public fun agreement(
+        listing: Listing,
+        clock: NenyaClock,
+        envelope: RumorEnvelope,
+        proposal: OrderProposal,
+    ): ListingOrderBuild {
+        if (proposal.item.coordinate != listing.coordinate) return ListingOrderBuild.ForAnotherListing
+        when (val gate = DeadlineGate.check(listing, null, clock)) {
+            DeadlineGate.Permitted -> Unit
+            is DeadlineGate.Refused -> return ListingOrderBuild.DeadlineRefused(gate.reason)
+        }
+        return when (
+            val built = RumorWriter.statusUpdate(
+                envelope,
+                proposal.order,
+                OrderState.ACCEPTED,
+                proposal.item,
+                proposal.terms,
+                proposal.feeRecipient,
+            )
         ) {
             is RumorBuild.Built -> ListingOrderBuild.Built(built.event)
             is RumorBuild.Refused -> ListingOrderBuild.Refused(built)

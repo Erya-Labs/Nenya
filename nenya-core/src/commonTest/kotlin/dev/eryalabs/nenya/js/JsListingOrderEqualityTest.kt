@@ -84,6 +84,8 @@ class JsListingOrderEqualityTest {
                                 )
                                 built++
                             }
+                            ListingOrderBuild.ForAnotherListing ->
+                                fail("$what: `proposal` reads its item off the listing and has no other to name")
                             is ListingOrderBuild.Refused -> JsBoundaryFixtures.assertSameAnswer(
                                 answer,
                                 JsBoundaryFixtures.answerOf(expected.refusal),

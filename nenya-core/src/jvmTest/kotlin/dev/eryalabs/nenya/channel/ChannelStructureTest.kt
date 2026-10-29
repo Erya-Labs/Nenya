@@ -119,6 +119,8 @@ class ChannelStructureTest {
             "ListingOrderBuild\$Built",
             "ListingOrderBuild\$DeadlineRefused",
             "ListingOrderBuild\$Refused",
+            // T52's §5.6 agreement against a listing, refusing a proposal that names another one.
+            "ListingOrderBuild\$ForAnotherListing",
         )
 
         /**

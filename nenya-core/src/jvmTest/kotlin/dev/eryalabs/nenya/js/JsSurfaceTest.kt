@@ -275,8 +275,8 @@ class JsSurfaceTest {
         )
 
         /**
-         * The thirty-two entry points this package exports: T42's thirteen, T43's six, T44's five,
-         * T47's one, T48's two, T49's three, T50's one and T51's one.
+         * The thirty-three entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * T47's one, T48's two, T49's three, T50's one, T51's one and T52's one.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -323,7 +323,12 @@ class JsSurfaceTest {
             "capabilities",
             // T51 — §5.6's refusal to propose an order against an expired listing.
             "buildProposalAgainst",
+            // T52 — §5.6's same refusal on the provider's side: no acceptance against an expired listing.
+            "buildAgreementAgainst",
         )
+
+        /** T52's one, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T52_ENTRY_POINTS: Set<String> = setOf("buildAgreementAgainst")
 
         /** T51's one, for the same reason [T42_ENTRY_POINTS] exists. */
         val T51_ENTRY_POINTS: Set<String> = setOf("buildProposalAgainst")
@@ -486,11 +491,13 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            32,
+            33,
             ENTRY_POINTS.size,
-            "T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
+            "T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
                 "on top of T43's six on top of T42's thirteen",
         )
+        assertEquals(1, T52_ENTRY_POINTS.size, "T52's text crosses one")
+        assertTrue(T52_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T52's `buildAgreementAgainst` is exported")
         assertEquals(1, T51_ENTRY_POINTS.size, "T51's text crosses one")
         assertTrue(T51_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T51's `buildProposalAgainst` is exported")
         assertEquals(1, T50_ENTRY_POINTS.size, "T50's text says one entry point")
@@ -503,7 +510,7 @@ class JsSurfaceTest {
         assertEquals(
             6,
             (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS -
-                T49_ENTRY_POINTS - T50_ENTRY_POINTS - T51_ENTRY_POINTS).size,
+                T49_ENTRY_POINTS - T50_ENTRY_POINTS - T51_ENTRY_POINTS - T52_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")

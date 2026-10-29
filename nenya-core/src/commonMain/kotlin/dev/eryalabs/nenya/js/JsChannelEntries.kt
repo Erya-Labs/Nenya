@@ -1,7 +1,9 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
+import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.RumorBuild
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorWriter
@@ -200,28 +202,42 @@ public fun buildProposalAgainst(
     feeRecipient: String? = null,
     amountSat: String? = null,
 ): JsBuildResult = jsBuild {
-    when (
-        val built = ListingOrderWriter.proposal(
-            listing = listing.listing,
-            clock = environment.asClock(),
-            envelope = envelope.asRumorEnvelope(),
-            order = OrderId.ofHex(orderIdHex),
-            terms = terms.asOrderTerms(),
-            feeRecipient = feeRecipient,
-            amountSat = crossedNumberOrNull("amount", amountSat),
-        )
-    ) {
-        is ListingOrderBuild.Built -> jsBuilt(built.event)
-        is ListingOrderBuild.DeadlineRefused -> jsRefused(
-            built.reason.name,
-            "DeadlineRefusal",
-            null,
-            null,
-            "§5.6: no order may be proposed against an expired listing, and the listing's `expiration` " +
-                "either has passed or could not be judged against the injected clock",
-        )
-        is ListingOrderBuild.Refused -> built.refusal.asJsBuildResult()
-    }
+    ListingOrderWriter.proposal(
+        listing = listing.listing,
+        clock = environment.asClock(),
+        envelope = envelope.asRumorEnvelope(),
+        order = OrderId.ofHex(orderIdHex),
+        terms = terms.asOrderTerms(),
+        feeRecipient = feeRecipient,
+        amountSat = crossedNumberOrNull("amount", amountSat),
+    ).asListingOrderResult()
+}
+
+/**
+ * §7.6's acceptance of [proposalRumor] against [listing], through `ListingOrderWriter.agreement`.
+ *
+ * Refused with `reasonVocabulary` `"ListingOrderBuild"` and `reason` `FOR_ANOTHER_LISTING` when the
+ * proposal's `item` names a different listing, then with `"DeadlineRefusal"` exactly as
+ * [buildProposalAgainst] is; otherwise exactly what [buildStatusUpdate] answers for `accepted` with
+ * the proposal's own order id, `item`, terms and fee recipient. The proposal is decoded by
+ * `OrderProposal.decode`, so one it refuses comes back under `ChannelRejection`.
+ *
+ * @param proposalRumor the buyer's `kind:16` `type=1`, as [open] handed it back.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun buildAgreementAgainst(
+    listing: JsListing,
+    environment: JsEnvironment,
+    envelope: JsRumorEnvelope,
+    proposalRumor: JsRumor,
+): JsBuildResult = jsBuild {
+    ListingOrderWriter.agreement(
+        listing = listing.listing,
+        clock = environment.asClock(),
+        envelope = envelope.asRumorEnvelope(),
+        proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal")),
+    ).asListingOrderResult()
 }
 
 /** §11.1's `kind:16` `type=3` status update, through `RumorWriter.statusUpdate`. */
@@ -367,6 +383,31 @@ public fun buildReceipt(
 internal fun RumorBuild.asJsBuildResult(): JsBuildResult = when (this) {
     is RumorBuild.Built -> jsBuilt(event)
     is RumorBuild.Refused -> jsRefused(reason.name, "ChannelRejection", tag, null, detail)
+}
+
+/**
+ * `ListingOrderBuild`'s four cases. `private`, so it is no helper `JsSurfaceTest` has to count: it is
+ * the two `…Against` entry points' shared tail and nothing else's.
+ */
+private fun ListingOrderBuild.asListingOrderResult(): JsBuildResult = when (this) {
+    is ListingOrderBuild.Built -> jsBuilt(event)
+    ListingOrderBuild.ForAnotherListing -> jsRefused(
+        "FOR_ANOTHER_LISTING",
+        "ListingOrderBuild",
+        ChannelVocabulary.ITEM,
+        null,
+        "§7.5's `item` names the listing a proposal derives from, and this proposal's names a different " +
+            "listing from the one handed in, so that listing's §5.6 deadline says nothing about it",
+    )
+    is ListingOrderBuild.DeadlineRefused -> jsRefused(
+        reason.name,
+        "DeadlineRefusal",
+        null,
+        null,
+        "§5.6: no order may be proposed or advanced against an expired listing, and the listing's " +
+            "`expiration` either has passed or could not be judged against the injected clock",
+    )
+    is ListingOrderBuild.Refused -> refusal.asJsBuildResult()
 }
 
 /**
