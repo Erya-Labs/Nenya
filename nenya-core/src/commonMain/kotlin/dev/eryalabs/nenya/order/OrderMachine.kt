@@ -90,6 +90,19 @@ public enum class TransitionRejection {
     ACCEPTANCE_FOR_ANOTHER_ORDER,
 
     /**
+     * An [OrderEvent.AcceptanceReceived] reached a `proposed` order whose terms carry an
+     * `expiration`, and the injected clock had reached it. The order is unchanged.
+     *
+     * §7.5 makes the proposal's `expiration` "the deadline for **acceptance**", and §4.6 makes the
+     * injected clock the only judge of it. Without this refusal an order reached `accepted` past
+     * its own deadline whenever no [OrderEvent.ClockChecked] happened to arrive first — an order
+     * §11.2's `proposed → expired` row has already expired. The boundary is the one
+     * `→ expired` uses: at `expiration` the order expires, so at `expiration` it cannot be
+     * accepted. A [OrderEvent.ClockChecked] then expires it.
+     */
+    ACCEPTANCE_DEADLINE_PASSED,
+
+    /**
      * A stored `type=2` record in an [OrderEvent.PaymentRequestsReceived] names a **different**
      * order.
      *
@@ -1049,6 +1062,11 @@ public class OrderMachine(
      *
      * The provider key travels onto the order as it advances, and is the operand §8.6's revision
      * `1.5` sender rule is checked against one state later (decision I, decision H).
+     *
+     * Then §7.5's deadline for acceptance: where the terms carry an `expiration`, the injected clock
+     * is read and the acceptance is refused at or past it, on the boundary [acceptanceDeadline]
+     * expires the order on — so no order is both acceptable and expired at one reading. Terms with
+     * no `expiration` read no clock at all, exactly as before.
      */
     private fun acceptance(order: Order, event: OrderEvent.AcceptanceReceived): OrderOutcome {
         if (event.acceptance.order != order.id) {
@@ -1060,6 +1078,22 @@ public class OrderMachine(
                     "message in a thread carries: the acceptance may well be genuine, and it is " +
                     "not this order's",
             )
+        }
+        val deadline = order.terms.expiration
+        if (deadline != null) {
+            val now = when (val clockNow = reading()) {
+                is ClockReading.At -> clockNow.unixSeconds
+                is ClockReading.Refused -> return clockRefusal(order, clockNow)
+            }
+            if (now >= deadline) {
+                return refuse(
+                    order,
+                    TransitionRejection.ACCEPTANCE_DEADLINE_PASSED,
+                    "§7.5 makes the proposal's `expiration` the deadline for acceptance, and the " +
+                        "injected clock has reached it (§4.6): §11.2's `proposed → expired` row " +
+                        "fires here, so `accepted` is no longer reachable",
+                )
+            }
         }
         return advance(
             order.with(

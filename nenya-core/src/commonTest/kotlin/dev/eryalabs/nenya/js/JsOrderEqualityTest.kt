@@ -182,10 +182,49 @@ class JsOrderEqualityTest {
     }
 
     /**
+     * §7.5's deadline for acceptance across the boundary, at both sides of it and with no clock.
+     *
+     * One second before `expiration` both doors advance; at `expiration` both refuse
+     * `ACCEPTANCE_DEADLINE_PASSED` and a `clock_checked` on the same clock then expires the order;
+     * with no clock supplied both refuse `CLOCK_UNAVAILABLE`. Each step compared field for field.
+     */
+    @Test
+    @JsName("stepOrder_crosses_section_7_5_s_deadline_for_acceptance")
+    fun `stepOrder crosses §7_5's deadline for acceptance`() {
+        val proposed = OrderFixtures.orders()[OrderState.PROPOSED] ?: fail("proposed must exist")
+        val acceptance = OrderEvent.AcceptanceReceived(OrderFixtures.chain().accepted)
+
+        fun both(what: String, clock: NenyaClock?, order: Order, event: OrderEvent): JsOrderOutcome {
+            val expected = OrderMachine(clock ?: NenyaClock.FAIL_CLOSED).on(order, event)
+            val jsEvent = if (event is OrderEvent.ClockChecked) JsOrderEvent(type = "clock_checked") else crossed(event)
+            val crossed = stepOrder(JsOrderMachine(crossedEnvironment(clock)), JsOrder(order), jsEvent)
+            JsFlowFixtures.assertSameOutcome(crossed, expected, what)
+            return crossed
+        }
+
+        val before = both("one second before", FakeClock(OrderFixtures.EXPIRATION - 1), proposed, acceptance)
+        assertTrue(before.ok, "one second before `expiration` must advance: ${before.reason}")
+        assertEquals(OrderState.ACCEPTED.name, before.order?.state)
+
+        val at = both("at `expiration`", FakeClock(OrderFixtures.EXPIRATION), proposed, acceptance)
+        assertFalse(at.ok, "at `expiration` the acceptance must be refused")
+        assertEquals(TransitionRejection.ACCEPTANCE_DEADLINE_PASSED.name, at.reason)
+        assertEquals(OrderState.PROPOSED.name, at.order?.state)
+
+        val expired = both("the clock then", FakeClock(OrderFixtures.EXPIRATION), proposed, OrderEvent.ClockChecked)
+        assertTrue(expired.ok, "§11.2's `proposed → expired` fires at the same reading")
+        assertEquals(OrderState.EXPIRED.name, expired.order?.state)
+
+        val silent = both("no clock", null, proposed, acceptance)
+        assertFalse(silent.ok, "no clock, never `accepted`")
+        assertEquals(TransitionRejection.CLOCK_UNAVAILABLE.name, silent.reason)
+    }
+
+    /**
      * Decision B's refusal carries the checks nobody performed, across the boundary.
      *
      * Its own test because `missingChecks` is the one field on [JsOrderOutcome] that is meaningful
-     * for exactly one refusal and empty-and-misleading on the other twenty-seven. §9.2's set is
+     * for exactly one refusal and empty-and-misleading on the other twenty-eight. §9.2's set is
      * what lets a page say "the invoice amount was never checked" rather than "the order did not
      * move", and a crossing that published an empty array for it would lose that entirely while
      * agreeing about the constant.
@@ -454,6 +493,14 @@ class JsOrderEqualityTest {
                 ),
                 providerPubkey = SettlementFixtures.provider(OrderFixtures.OTHER_ORDER_INDEX),
             ),
+        )
+        add(
+            "this order's acceptance with the clock at the proposal's `expiration`",
+            TransitionRejection.ACCEPTANCE_DEADLINE_PASSED,
+            state(OrderState.PROPOSED),
+            OrderEvent.AcceptanceReceived(chain.accepted),
+            crossed(OrderEvent.AcceptanceReceived(chain.accepted)),
+            clock = FakeClock(OrderFixtures.EXPIRATION),
         )
 
         // ------------------------------------------------------------------- §8.6's `type=2` rules

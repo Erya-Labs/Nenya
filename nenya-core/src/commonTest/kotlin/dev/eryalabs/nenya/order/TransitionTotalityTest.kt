@@ -49,6 +49,14 @@ abstract class PortableTransitionTotalityTest {
 
     private val machine = OrderFixtures.machineAfterDeadlines()
 
+    /**
+     * The two fixture clocks the cross-product runs under. One clock cannot produce §11.2's whole
+     * set: the `→ expired` rows need it past the proposal's `expiration`, and `proposed → accepted`
+     * needs it before (§7.5 — `expiration` is the deadline for acceptance). The produced set is the
+     * union over both, and the "nothing outside §11.2" half is therefore checked under both.
+     */
+    private val machines = listOf(OrderFixtures.machineBeforeDeadlines(), machine)
+
     private val orders = OrderFixtures.orders()
 
     /**
@@ -125,10 +133,10 @@ abstract class PortableTransitionTotalityTest {
     private fun crossProductOrders(): List<Order> =
         orders.values + OrderFixtures.orders(OrderFixtures.freeTerms()).values
 
-    /** Every `(from, to)` the function produced, over the whole cross-product. */
+    /** Every `(from, to)` the function produced, over the whole cross-product, under both clocks. */
     private fun produced(): Set<Pair<String, String>> {
         val pairs = mutableSetOf<Pair<String, String>>()
-        for (order in crossProductOrders()) {
+        for (machine in machines) for (order in crossProductOrders()) {
             for (event in events) {
                 val outcome = machine.on(order, event)
                 if (outcome is OrderOutcome.Advanced) {

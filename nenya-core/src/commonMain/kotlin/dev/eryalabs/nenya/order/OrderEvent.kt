@@ -217,10 +217,12 @@ public sealed interface OrderEvent {
      * two of the three are things it had no operand for: it holds no tags, so it cannot compare
      * bytes, and it holds no seal, so it cannot tell the provider's key from the buyer's. The order
      * therefore **never trusts whoever sealed an acceptance** — it trusts the comparison the codec
-     * made against a key the caller resolved — and what is left for [OrderMachine] is the one
-     * question the codec cannot answer, because a checked acceptance is an ordinary value a caller
-     * may offer to any order: is this acceptance *this* order's
-     * ([TransitionRejection.ACCEPTANCE_FOR_ANOTHER_ORDER])?
+     * made against a key the caller resolved — and what is left for [OrderMachine] is the two
+     * questions the codec cannot answer, because a checked acceptance is an ordinary value a caller
+     * may offer to any order at any time: is this acceptance *this* order's
+     * ([TransitionRejection.ACCEPTANCE_FOR_ANOTHER_ORDER])? And, where the terms carry §7.5's
+     * `expiration` — the deadline for acceptance — has the injected clock reached it
+     * ([TransitionRejection.ACCEPTANCE_DEADLINE_PASSED])?
      *
      * ### What is still open, stated rather than implied
      *
