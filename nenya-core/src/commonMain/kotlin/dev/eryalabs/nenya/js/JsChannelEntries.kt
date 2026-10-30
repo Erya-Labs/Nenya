@@ -218,7 +218,9 @@ public fun buildProposalAgainst(
  *
  * Refused with `reasonVocabulary` `"ListingOrderBuild"` and `reason` `FOR_ANOTHER_LISTING` when the
  * proposal's `item` names a different listing, then with `"DeadlineRefusal"` exactly as
- * [buildProposalAgainst] is; otherwise exactly what [buildStatusUpdate] answers for `accepted` with
+ * [buildProposalAgainst] is, then with `"ProposalDeadlineRefusal"` — `PROPOSAL_EXPIRED` or
+ * `PROPOSAL_CANNOT_SAY` — when the proposal's own `expiration`, §7.5's deadline for acceptance,
+ * refuses against [environment]'s clock; otherwise exactly what [buildStatusUpdate] answers for `accepted` with
  * the proposal's own order id, `item`, terms and fee recipient. The proposal is decoded by
  * `OrderProposal.decode`, so one it refuses comes back under `ChannelRejection`.
  *
@@ -386,7 +388,7 @@ internal fun RumorBuild.asJsBuildResult(): JsBuildResult = when (this) {
 }
 
 /**
- * `ListingOrderBuild`'s four cases. `private`, so it is no helper `JsSurfaceTest` has to count: it is
+ * `ListingOrderBuild`'s five cases. `private`, so it is no helper `JsSurfaceTest` has to count: it is
  * the two `…Against` entry points' shared tail and nothing else's.
  */
 private fun ListingOrderBuild.asListingOrderResult(): JsBuildResult = when (this) {
@@ -406,6 +408,14 @@ private fun ListingOrderBuild.asListingOrderResult(): JsBuildResult = when (this
         null,
         "§5.6: no order may be proposed or advanced against an expired listing, and the listing's " +
             "`expiration` either has passed or could not be judged against the injected clock",
+    )
+    is ListingOrderBuild.ProposalDeadlineRefused -> jsRefused(
+        reason.name,
+        "ProposalDeadlineRefusal",
+        null,
+        null,
+        "§7.5: the proposal's `expiration` is the deadline for acceptance, and it either has passed or " +
+            "could not be judged against the injected clock",
     )
     is ListingOrderBuild.Refused -> refusal.asJsBuildResult()
 }

@@ -7,15 +7,17 @@ import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.order.OrderTerms
 import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.seam.OrderId
+import dev.eryalabs.nenya.seam.SeamAnswer
 import dev.eryalabs.nenya.tag.ItemRef
 import dev.eryalabs.nenya.wire.WireEvent
 
 /**
  * What [ListingOrderWriter] answers: the unsigned rumor, a proposal naming another listing, §5.6's
- * deadline refusal, or the §7.4 rule that refused the message itself.
+ * deadline refusal, §7.5's deadline for acceptance, or the §7.4 rule that refused the message itself.
  *
- * [ForAnotherListing] is reachable only from [ListingOrderWriter.agreement]: `proposal` reads its
- * `item` off the listing it is handed, so it has no second coordinate to disagree with.
+ * [ForAnotherListing] and [ProposalDeadlineRefused] are reachable only from
+ * [ListingOrderWriter.agreement]: `proposal` reads its `item` off the listing it is handed, so it has
+ * no second coordinate to disagree with, and it is writing the deadline rather than answering one.
  *
  * More cases than [RumorBuild]'s two, because the refusals are different facts with different
  * fixes: [DeadlineRefused] is about the **listing** — its `expiration` has passed, or the
@@ -32,7 +34,8 @@ public sealed interface ListingOrderBuild {
      * `item` set to the listing's own coordinate, or, from [ListingOrderWriter.agreement], what
      * `RumorWriter.statusUpdate` builds with `status=accepted` and the proposal's own terms.
      *
-     * It claims that **§5.6's deadline did not refuse**, and nothing more. It is not "this listing is
+     * It claims that **§5.6's deadline did not refuse** — and, from `agreement`, that §7.5's deadline
+     * for acceptance did not either — and nothing more. It is not "this listing is
      * open for business": a listing carrying `["status", "sold"]`, or parked as `kind:30403`, and no
      * `expiration` builds here, because that is §5.1's and `Listing.status`'s question rather than
      * §5.6's deadline — the same limit `DeadlineGate.Permitted` records. And it advances nothing:
@@ -84,6 +87,29 @@ public sealed interface ListingOrderBuild {
         override fun toString(): String = "ListingOrderBuild.DeadlineRefused($reason)"
     }
 
+    /**
+     * §7.5: the proposal's own `expiration`, "the deadline for acceptance", refused, so no agreement
+     * was built at all.
+     *
+     * Reachable only from [ListingOrderWriter.agreement], and only after the listing's deadline
+     * permitted: a proposal is its buyer's deadline, a listing its author's, and §11.2 moves an order
+     * `proposed → expired` on the first of them. Separate from [DeadlineRefused] because it is about a
+     * different message — no change to the listing would build it.
+     */
+    public class ProposalDeadlineRefused internal constructor(
+
+        /** Whether the deadline has passed or the injected clock could not say. */
+        public val reason: ProposalDeadlineRefusal,
+    ) : ListingOrderBuild {
+
+        override fun equals(other: Any?): Boolean = other is ProposalDeadlineRefused && other.reason == reason
+
+        override fun hashCode(): Int = reason.hashCode()
+
+        /** Names the rule, and no order id, deadline or key (§12 item 11). */
+        override fun toString(): String = "ListingOrderBuild.ProposalDeadlineRefused($reason)"
+    }
+
     /** The deadline permitted it and `RumorWriter` refused the message, carried unchanged. */
     public class Refused internal constructor(
 
@@ -93,6 +119,21 @@ public sealed interface ListingOrderBuild {
 
         override fun toString(): String = "ListingOrderBuild.Refused(reason=${refusal.reason}, tag=${refusal.tag})"
     }
+}
+
+/**
+ * Why [ListingOrderWriter.agreement] refused on the proposal's own `expiration` (§7.5).
+ *
+ * Two constants for the reason `DeadlineRefusal` has two per side: one is a deadline this library
+ * evaluated and found passed, the other one it could not evaluate (§17). Both refuse.
+ */
+public enum class ProposalDeadlineRefusal {
+
+    /** The injected clock has reached the proposal's `expiration`, on `OrderMachine`'s `>=` boundary. */
+    PROPOSAL_EXPIRED,
+
+    /** The proposal carries an `expiration` and the injected clock was silent or negative. */
+    PROPOSAL_CANNOT_SAY,
 }
 
 /**
@@ -120,8 +161,9 @@ public sealed interface ListingOrderBuild {
  *
  * [agreement] is the provider's side of the same MUST, and only its acceptance arm: §7.6's
  * acceptance is what moves an order `proposed → accepted` (§11.2), so it too is refused once the
- * listing has expired. The other arms of "advance" would need the order machine to hold the listing,
- * and nothing here claims them.
+ * listing has expired, and once the proposal's own `expiration` — §7.5's deadline for acceptance —
+ * has. The other arms of "advance" would need the order machine to hold the listing, and nothing
+ * here claims them.
  *
  * Pure computation over the injected clock: no randomness and no I/O.
  */
@@ -161,7 +203,8 @@ public object ListingOrderWriter {
 
     /**
      * §7.6's acceptance of [proposal] — a `kind:16` `type=3` carrying `status=accepted` — refused when
-     * the proposal names another listing or when §5.6's deadline refuses.
+     * the proposal names another listing, when §5.6's deadline refuses, or when §7.5's deadline for
+     * acceptance does.
      *
      * Not named `accept…`: `OrderProposal.accepts` is §7.6's one answer to "were these terms
      * accepted", and `ChannelStructureTest` pins that name to it alone. This writes the message that
@@ -173,9 +216,17 @@ public object ListingOrderWriter {
      *    [ListingOrderBuild.ForAnotherListing], builds nothing and never reads the clock.
      * 2. `DeadlineGate.check(listing, null, clock)`, exactly as [proposal] makes it: anything but
      *    `Permitted` answers [ListingOrderBuild.DeadlineRefused] and builds nothing.
-     * 3. `RumorWriter.statusUpdate` with `OrderState.ACCEPTED` and the proposal's own `order`, `item`,
+     * 3. §7.5's deadline for acceptance: where [proposal]'s terms carry an `expiration`, a silent or
+     *    negative clock answers [ListingOrderBuild.ProposalDeadlineRefused] with `PROPOSAL_CANNOT_SAY`,
+     *    and a reading at or past it with `PROPOSAL_EXPIRED` — the `>=` boundary on which
+     *    `OrderMachine` expires the order and refuses its acceptance — and builds nothing. Terms with
+     *    no `expiration` add no clock read.
+     * 4. `RumorWriter.statusUpdate` with `OrderState.ACCEPTED` and the proposal's own `order`, `item`,
      *    `terms` and `feeRecipient`. None of the four is a parameter here, so §7.6's repeated terms
      *    come off the decoded proposal rather than being typed a second time.
+     *
+     * Steps 2 and 3 judge one reading: the clock is read at most once, so the two deadlines are never
+     * answered for two different instants.
      *
      * ### What it does not claim
      *
@@ -203,9 +254,21 @@ public object ListingOrderWriter {
         proposal: OrderProposal,
     ): ListingOrderBuild {
         if (proposal.item.coordinate != listing.coordinate) return ListingOrderBuild.ForAnotherListing
-        when (val gate = DeadlineGate.check(listing, null, clock)) {
+        val once = OneReading(clock)
+        when (val gate = DeadlineGate.check(listing, null, once)) {
             DeadlineGate.Permitted -> Unit
             is DeadlineGate.Refused -> return ListingOrderBuild.DeadlineRefused(gate.reason)
+        }
+        val deadline = proposal.terms.expiration
+        if (deadline != null) {
+            val refusal = when (val reading = once.now()) {
+                is SeamAnswer.Unavailable -> ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY
+                is SeamAnswer.Provided ->
+                    if (reading.value < 0L) ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY
+                    else if (reading.value >= deadline) ProposalDeadlineRefusal.PROPOSAL_EXPIRED
+                    else null
+            }
+            if (refusal != null) return ListingOrderBuild.ProposalDeadlineRefused(refusal)
         }
         return when (
             val built = RumorWriter.statusUpdate(
@@ -221,4 +284,14 @@ public object ListingOrderWriter {
             is RumorBuild.Refused -> ListingOrderBuild.Refused(built)
         }
     }
+}
+
+/** [clock], read on first use and never again, so both of `agreement`'s deadlines are judged at one instant. */
+private class OneReading(private val clock: NenyaClock) : NenyaClock {
+
+    private var reading: SeamAnswer<Long>? = null
+
+    override fun now(): SeamAnswer<Long> = reading ?: clock.now().also { reading = it }
+
+    override fun toString(): String = "OneReading(redacted)"
 }

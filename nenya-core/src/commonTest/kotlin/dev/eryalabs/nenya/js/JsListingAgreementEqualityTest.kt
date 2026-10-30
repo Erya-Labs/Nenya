@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
 import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.ProposalDeadlineRefusal
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorWriter
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
@@ -41,8 +42,13 @@ class JsListingAgreementEqualityTest {
 
         val EXPIRATIONS: List<Long?> = listOf(null, DEADLINE)
 
-        /** Readings either side of the deadline, `null` being the page that supplied no clock. */
-        val READINGS: List<Long?> = listOf(null, -1L, DEADLINE - 1, DEADLINE, DEADLINE + 1)
+        /**
+         * Readings either side of the deadline, `null` being the page that supplied no clock.
+         * `CREATED_AT` is before every proposal's own `expiration` (`RumorWriterFixtures.orderTerms`
+         * draws them after it), and `DEADLINE - 1` at or past every one, so both sides of T57's
+         * deadline for acceptance are drawn too.
+         */
+        val READINGS: List<Long?> = listOf(null, -1L, ListingFixtures.CREATED_AT, DEADLINE - 1, DEADLINE, DEADLINE + 1)
 
         fun listing(kind: Int, expiration: Long?, index: Int = 1): Listing {
             val tags = ListingFixtures.minimal(kind)
@@ -87,6 +93,7 @@ class JsListingAgreementEqualityTest {
         var built = 0
         var deadline = 0
         var elsewhere = 0
+        var proposalDeadline = 0
         for (kind in ListingFixtures.KINDS) {
             for (expiration in EXPIRATIONS) {
                 val proposedAgainst = listing(kind, expiration)
@@ -124,6 +131,16 @@ class JsListingAgreementEqualityTest {
                                     assertNull(answer.tag, what)
                                     deadline++
                                 }
+                                is ListingOrderBuild.ProposalDeadlineRefused -> {
+                                    assertFalse(answer.ok, what)
+                                    assertEquals("refused", answer.kind, what)
+                                    assertNull(answer.event, "$what: a proposal deadline refusal carries no event")
+                                    assertEquals(expected.reason.name, answer.reason, what)
+                                    assertEquals("ProposalDeadlineRefusal", answer.reasonVocabulary, what)
+                                    assertNull(answer.tag, what)
+                                    assertNotNull(answer.detail, what)
+                                    proposalDeadline++
+                                }
                                 ListingOrderBuild.ForAnotherListing -> {
                                     assertFalse(answer.ok, what)
                                     assertEquals("refused", answer.kind, what)
@@ -142,8 +159,9 @@ class JsListingAgreementEqualityTest {
             }
         }
         assertTrue(
-            built > 0 && deadline > 0 && elsewhere > 0,
-            "$built build(s), $deadline deadline refusal(s) and $elsewhere for another listing: all must be drawn",
+            built > 0 && deadline > 0 && elsewhere > 0 && proposalDeadline > 0,
+            "$built build(s), $deadline deadline refusal(s), $elsewhere for another listing and " +
+                "$proposalDeadline proposal deadline refusal(s): all must be drawn",
         )
     }
 
@@ -169,7 +187,29 @@ class JsListingAgreementEqualityTest {
         assertEquals("FOR_ANOTHER_LISTING", other.reason)
         assertNull(other.event)
 
-        assertTrue(crossed(expiring, DEADLINE - 1, case, rumor).ok, "a live listing agrees")
+        // Before the proposal's own `expiration` too, which `RumorWriterFixtures` draws after `CREATED_AT`.
+        assertTrue(crossed(expiring, ListingFixtures.CREATED_AT, case, rumor).ok, "a live listing agrees")
+    }
+
+    @JsName("a_live_listing_past_the_proposal_s_expiration_crosses_as_PROPOSAL_EXPIRED")
+    @Test
+    fun `a live listing past the proposal's expiration crosses as PROPOSAL_EXPIRED`() {
+        val open = listing(ListingFixtures.KINDS[0], null)
+        val (case, rumor) = PROPOSALS.firstNotNullOf { case ->
+            if (case.terms?.expiration == null) null else proposalRumor(open, case)?.let { case to it }
+        }
+        val expiration = case.terms!!.expiration!!
+
+        val expired = crossed(open, expiration, case, rumor)
+        assertEquals(ProposalDeadlineRefusal.PROPOSAL_EXPIRED.name, expired.reason)
+        assertEquals("ProposalDeadlineRefusal", expired.reasonVocabulary)
+        assertNull(expired.event)
+
+        val silent = crossed(open, null, case, rumor)
+        assertEquals(ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY.name, silent.reason)
+        assertNull(silent.event)
+
+        assertTrue(crossed(open, expiration - 1, case, rumor).ok, "one second before the deadline agrees")
     }
 
     @JsName("a_rumor_that_is_not_a_proposal_is_refused_as_a_value")

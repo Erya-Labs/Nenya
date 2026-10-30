@@ -1303,15 +1303,19 @@ class JsRefusalByValueTest {
         }
         assertTrue("LISTING_CANNOT_SAY" in reasons, "§5.6's refusal under a silent clock: $reasons")
 
-        val proposalRumor = RumorWriterFixtures.cases(64)
+        // A proposal carrying its own `expiration`, so T57's deadline for acceptance has a value to refuse on.
+        val (proposalRumor, proposalExpiration) = RumorWriterFixtures.cases(64)
             .filter { it.shape == RumorWriterFixtures.Shape.PROPOSAL }
             .firstNotNullOfOrNull { candidate ->
+                val expiration = candidate.terms?.expiration ?: return@firstNotNullOfOrNull null
                 val built = ListingOrderWriter.proposal(
                     expiring.listing, FakeClock(DEADLINE - 1), candidate.envelope, candidate.order!!,
                     candidate.terms!!, candidate.feeRecipient, candidate.amountSat,
                 )
-                (built as? ListingOrderBuild.Built)?.let { JsRumor(RumorWriterFixtures.attribute(it.event)) }
-            } ?: fail("one proposal must build against the expiring listing")
+                (built as? ListingOrderBuild.Built)?.let { JsRumor(RumorWriterFixtures.attribute(it.event)) to expiration }
+            } ?: fail("one proposal carrying an `expiration` must build against the expiring listing")
+        // Before the proposal's own deadline, so each hostile envelope is what the agreement refuses on.
+        val beforeEither = JsEnvironment(nowSeconds = clockSaying((proposalExpiration - 1).toString()))
         val providerEnvelope = JsRumorEnvelope(
             authorPubkey = SettlementFixtures.provider(0),
             createdAtSeconds = (DEADLINE - 1).toString(),
@@ -1322,9 +1326,12 @@ class JsRefusalByValueTest {
             call(::buildAgreementAgainst) { buildAgreementAgainst(expiring, env, with, proposalRumor) },
         )
         for (clock in HOSTILE_CLOCKS) agree("agreement against under a hostile clock", JsEnvironment(nowSeconds = clock))
-        for (hostile in hostileEnvelopes(providerEnvelope)) {
-            agree("agreement against envelope", JsEnvironment(nowSeconds = clockSaying((DEADLINE - 1).toString())), hostile)
-        }
+        for (hostile in hostileEnvelopes(providerEnvelope)) agree("agreement against envelope", beforeEither, hostile)
+        agree(
+            "agreement against at the proposal's own expiration",
+            JsEnvironment(nowSeconds = clockSaying(proposalExpiration.toString())),
+        )
+        assertTrue("PROPOSAL_EXPIRED" in reasons, "§7.5's deadline for acceptance: $reasons")
 
         val kinds = arrayOf(NenyaKind.REQUEST)
         for (bad in HOSTILE_HEX + HOSTILE_DECIMALS) {
@@ -1418,6 +1425,8 @@ class JsRefusalByValueTest {
             "ChannelRejection",
             "BidRejection",
             "DeadlineRefusal",
+            // T57's: §7.5's deadline for acceptance, answered only by `buildAgreementAgainst`.
+            "ProposalDeadlineRefusal",
         )) {
             assertTrue(vocabulary in vocabularies, "$vocabulary was not reached: $vocabularies")
         }
