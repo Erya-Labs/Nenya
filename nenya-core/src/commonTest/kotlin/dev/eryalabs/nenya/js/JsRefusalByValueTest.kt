@@ -1363,9 +1363,10 @@ class JsRefusalByValueTest {
             with: JsRumorEnvelope = buyerEnvelope,
             id: String = order,
             acceptBy: String? = null,
+            chosen: JsBid = bid,
         ) = record(
             what,
-            call(::buildProposalForBid) { buildProposalForBid(chosenOn, bid, env, with, id, acceptBy) },
+            call(::buildProposalForBid) { buildProposalForBid(chosenOn, chosen, env, with, id, acceptBy) },
         )
         for (clock in HOSTILE_CLOCKS) forBid("proposal for bid under a hostile clock", env = JsEnvironment(nowSeconds = clock))
         for (hostile in hostileEnvelopes(buyerEnvelope)) forBid("proposal for bid envelope", with = hostile)
@@ -1380,6 +1381,13 @@ class JsRefusalByValueTest {
             ),
         )
         assertTrue("WRONG_PARTIES" in reasons, "decision H's parties: $reasons")
+        // T62: the same bid with a `deliver_by` the default reading, `DEADLINE - 1`, has already reached.
+        val lateTags = BidFixtures.minimalBid()
+        lateTags += listOf(listOf("deliver_by", (DEADLINE - 100L).toString()))
+        val late = JsBid(BidFixtures.decode(lateTags))
+        forBid("proposal for bid past its deliver_by", chosen = late)
+        forBid("proposal for bid at its acceptBy", acceptBy = (DEADLINE - 1).toString())
+        assertTrue("DELIVERY_PASSED" in reasons, "§6's deliver_by against the clock: $reasons")
 
         val kinds = arrayOf(NenyaKind.REQUEST)
         for (bad in HOSTILE_HEX + HOSTILE_DECIMALS) {
@@ -1431,9 +1439,9 @@ class JsRefusalByValueTest {
 
         // 15 and 6 over T42's thirteen entry points; 59 and 15, measured, once T54 swept all thirty-three;
         // 61, measured, once T59's `decodePrivateBid` joined the sweep; 62, measured, once T61's
-        // `buildProposalForBid` added `WRONG_PARTIES`.
+        // `buildProposalForBid` added `WRONG_PARTIES`; 63, measured, once T62's added `DELIVERY_PASSED`.
         assertTrue(
-            reasons.size >= 62,
+            reasons.size >= 63,
             "only ${reasons.size} distinct refusal(s) were reached — $reasons — which is not the " +
                 "breadth these cases are written for",
         )

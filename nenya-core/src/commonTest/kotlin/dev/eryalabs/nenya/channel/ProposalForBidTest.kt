@@ -28,7 +28,8 @@ import kotlin.test.fail
  * Three things are proved: on a request and on an offer the built proposal decodes with the bid's own
  * price, `fee`, fee recipient and `deliver_by`, and its `BID` and `ORDER_PROPOSAL` fee sightings agree;
  * decision **H**'s parties are the only ones it builds for; and every deadline — the listing's, the
- * bid's and the `expiration` asked for — refuses as a value and builds nothing.
+ * bid's, and (T62) the bid's `deliver_by` and the `expiration` asked for, each against the clock —
+ * refuses as a value and builds nothing.
  */
 class ProposalForBidTest {
 
@@ -167,13 +168,18 @@ class ProposalForBidTest {
             val (buyer, provider) =
                 if (bid.listingKind == NenyaKind.REQUEST) listing.coordinate.pubkey to bidder
                 else bidder to listing.coordinate.pubkey
-            val reading = (bid.expiration ?: (BidFixtures.CREATED_AT + 1)) - 1
             val acceptBy = bid.deliverBy?.let { if (it == 0L) null else it - 1 }
+            // T62: below the bid's own deadline and below `acceptBy` — and so below `deliver_by`, which
+            // `acceptBy` is strictly before — since every one of them is now judged against this reading.
+            val reading = (listOfNotNull(bid.expiration, acceptBy).minOrNull() ?: (BidFixtures.CREATED_AT + 1)) - 1
             val answer = ListingOrderWriter.proposalForBid(
                 listing, bid, FakeClock(reading), RumorEnvelope(buyer, BEFORE, listOf(PubkeyRef(provider))), ORDER, acceptBy,
             )
             if (reading < 0L) {
-                assertEquals(ListingOrderBuild.DeadlineRefused(DeadlineRefusal.BID_CANNOT_SAY), answer, "bid ${fixture.index}")
+                val expected =
+                    if (bid.expiration != null) ListingOrderBuild.DeadlineRefused(DeadlineRefusal.BID_CANNOT_SAY)
+                    else ListingOrderBuild.ProposalDeadlineRefused(ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY)
+                assertEquals(expected, answer, "bid ${fixture.index}")
                 continue
             }
             val proposal = decoded(answer, "bid ${fixture.index}")
@@ -301,11 +307,13 @@ class ProposalForBidTest {
                 build(openEnded, bid(openEnded), clock = clock),
             )
         }
-        // Neither side carrying a deadline never consults the clock, so builds under FAIL_CLOSED.
+        // Neither side carrying a deadline never consults the clock, so builds under FAIL_CLOSED — and,
+        // since T62, nor may the proposal: no `deliver_by` on the bid and no `acceptBy`.
         val counting = CountingClock(Long.MAX_VALUE)
-        built(build(openEnded, bid(openEnded, expiration = null), clock = counting), "open-ended both sides")
+        val deadlineFree = bid(openEnded, deliverBy = null, expiration = null)
+        built(build(openEnded, deadlineFree, clock = counting, acceptBy = null), "open-ended both sides")
         assertEquals(0, counting.reads)
-        built(build(openEnded, bid(openEnded, expiration = null), clock = NenyaClock.FAIL_CLOSED), "FAIL_CLOSED")
+        built(build(openEnded, deadlineFree, clock = NenyaClock.FAIL_CLOSED, acceptBy = null), "FAIL_CLOSED")
     }
 
     @JsName("a_bid_on_another_listing_refuses_before_the_parties_or_the_clock")
@@ -360,15 +368,121 @@ class ProposalForBidTest {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // T62: the deadlines the proposal would carry, §6's `deliver_by` and §7.5's `expiration`
+    // ---------------------------------------------------------------------------------------------
+
+    @JsName("it_builds_one_second_before_deliver_by_and_one_second_before_acceptBy")
+    @Test
+    fun `it builds one second before deliver_by and one second before acceptBy`() {
+        val acceptBy = DELIVER_BY - 1_000L
+        for (kind in SIDES) {
+            // Open-ended listing and bid, so the bid's `deliver_by` and `acceptBy` are the only deadlines.
+            val listing = listing(kind, expiration = null)
+            val bid = bid(listing, expiration = null)
+            val atDelivery = decoded(build(listing, bid, clock = FakeClock(DELIVER_BY - 1), acceptBy = null), "kind $kind")
+            assertEquals(DELIVER_BY, atDelivery.terms.deliverBy, "kind $kind: the bid's deliver_by")
+            assertNull(atDelivery.terms.expiration, "kind $kind")
+            val atAccept = decoded(build(listing, bid, clock = FakeClock(acceptBy - 1), acceptBy = acceptBy), "kind $kind")
+            assertEquals(DELIVER_BY, atAccept.terms.deliverBy, "kind $kind")
+            assertEquals(acceptBy, atAccept.terms.expiration, "kind $kind: acceptBy")
+        }
+    }
+
+    @JsName("a_reading_at_deliver_by_refuses_as_DELIVERY_PASSED_and_one_at_acceptBy_as_PROPOSAL_EXPIRED")
+    @Test
+    fun `a reading at deliver_by refuses as DELIVERY_PASSED and one at acceptBy as PROPOSAL_EXPIRED`() {
+        val acceptBy = DELIVER_BY - 1_000L
+        for (kind in SIDES) {
+            val listing = listing(kind, expiration = null)
+            val bid = bid(listing, expiration = null)
+            for (reading in listOf(DELIVER_BY, DELIVER_BY + 1, Long.MAX_VALUE)) {
+                // §6's `deliver_by` is answered first: with `acceptBy` strictly before it, a reading past
+                // `deliver_by` is past both, and the bid's own deadline is the one the proposal cannot meet.
+                for (accept in listOf(null, acceptBy)) {
+                    assertEquals(
+                        ListingOrderBuild.ProposalDeadlineRefused(ProposalDeadlineRefusal.DELIVERY_PASSED),
+                        build(listing, bid, clock = FakeClock(reading), acceptBy = accept),
+                        "kind $kind at $reading, acceptBy $accept",
+                    )
+                }
+            }
+            for (reading in listOf(acceptBy, acceptBy + 1, DELIVER_BY - 1)) {
+                assertEquals(
+                    ListingOrderBuild.ProposalDeadlineRefused(ProposalDeadlineRefusal.PROPOSAL_EXPIRED),
+                    build(listing, bid, clock = FakeClock(reading), acceptBy = acceptBy),
+                    "kind $kind at $reading",
+                )
+            }
+            // `acceptBy` alone, on a bid with no `deliver_by`, is judged the same way.
+            val open = bid(listing, deliverBy = null, expiration = null)
+            assertEquals(
+                ListingOrderBuild.ProposalDeadlineRefused(ProposalDeadlineRefusal.PROPOSAL_EXPIRED),
+                build(listing, open, clock = FakeClock(acceptBy), acceptBy = acceptBy),
+                "kind $kind: acceptBy with no deliver_by",
+            )
+        }
+    }
+
+    @JsName("a_silent_clock_refuses_a_deliver_by_or_acceptBy_as_PROPOSAL_CANNOT_SAY")
+    @Test
+    fun `a silent clock refuses a deliver_by or acceptBy as PROPOSAL_CANNOT_SAY`() {
+        val listing = listing(NenyaKind.REQUEST, expiration = null)
+        val withDelivery = bid(listing, expiration = null)
+        val withoutDelivery = bid(listing, deliverBy = null, expiration = null)
+        for (clock in listOf(NenyaClock.FAIL_CLOSED, FakeClock(-1L), FakeClock(Long.MIN_VALUE))) {
+            assertEquals(
+                ListingOrderBuild.ProposalDeadlineRefused(ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY),
+                build(listing, withDelivery, clock = clock, acceptBy = null),
+                "a bid with deliver_by and no expiration, under $clock",
+            )
+            assertEquals(
+                ListingOrderBuild.ProposalDeadlineRefused(ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY),
+                build(listing, withoutDelivery, clock = clock, acceptBy = DELIVER_BY),
+                "acceptBy on a bid with no deliver_by, under $clock",
+            )
+        }
+    }
+
+    @JsName("every_combination_of_deadlines_reads_the_clock_at_most_once_and_none_never")
+    @Test
+    fun `every combination of deadlines reads the clock at most once and none never`() {
+        for (kind in SIDES) {
+            for (listingExpiration in listOf(null, DEADLINE)) {
+                for (bidExpiration in listOf(null, BID_DEADLINE)) {
+                    for (deliverBy in listOf(null, DELIVER_BY)) {
+                        for (acceptBy in listOf(null, BEFORE + 1_000L)) {
+                            for (reading in listOf(BEFORE, DELIVER_BY)) {
+                                val listing = listing(kind, expiration = listingExpiration)
+                                val bid = bid(listing, deliverBy = deliverBy, expiration = bidExpiration)
+                                val counting = CountingClock(reading)
+                                build(listing, bid, clock = counting, acceptBy = acceptBy)
+                                val what = "kind $kind: $listingExpiration/$bidExpiration/$deliverBy/$acceptBy at $reading"
+                                assertTrue(counting.reads <= 1, "$what read the clock ${counting.reads} times")
+                                val anyDeadline = listOf(listingExpiration, bidExpiration, deliverBy, acceptBy).any { it != null }
+                                assertEquals(if (anyDeadline) 1 else 0, counting.reads, what)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @JsName("a_refusal_names_no_key_and_no_value")
     @Test
     fun `a refusal names no key and no value`() {
         val listing = listing(NenyaKind.REQUEST)
         val bid = bid(listing)
+        val open = listing(NenyaKind.REQUEST, expiration = null)
+        val late = bid(open, expiration = null)
         val answers = listOf(
             build(listing, bid, envelope = envelope(STRANGER, BIDDER)),
             build(listing, bid, clock = FakeClock(BID_DEADLINE)),
             build(listing, bid, acceptBy = DELIVER_BY),
+            build(open, late, clock = FakeClock(DELIVER_BY), acceptBy = null),
+            build(open, late, clock = FakeClock(DELIVER_BY - 1), acceptBy = DELIVER_BY - 1),
+            build(open, late, clock = NenyaClock.FAIL_CLOSED, acceptBy = null),
         )
         for (answer in answers) {
             val text = answer.toString() + ((answer as? ListingOrderBuild.Refused)?.refusal?.detail ?: "")

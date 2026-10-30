@@ -18,10 +18,11 @@ import dev.eryalabs.nenya.wire.WireEvent
  * proposal sent between the wrong keys, §5.6's deadline refusal, §7.5's deadline for acceptance, or
  * the §7.4 rule that refused the message itself.
  *
- * [ForAnotherListing] and [ProposalDeadlineRefused] are reachable only from
- * [ListingOrderWriter.agreement]: `proposal` and `proposalForBid` read their `item` off the listing
- * they are handed, so they have no second coordinate to disagree with, and they write the deadline
- * for acceptance rather than answering one. [WrongParties] is reachable only from
+ * [ForAnotherListing] is reachable only from [ListingOrderWriter.agreement]: `proposal` and
+ * `proposalForBid` read their `item` off the listing they are handed, so they have no second
+ * coordinate to disagree with. [ProposalDeadlineRefused] is never `proposal`'s, which judges only the
+ * listing; `proposalForBid` answers it for the `deliver_by` and `expiration` it would write, and
+ * `agreement` for the proposal's own `expiration`. [WrongParties] is reachable only from
  * [ListingOrderWriter.proposalForBid], the one writer handed a bid, and so the one that can say who
  * the buyer and the provider are.
  *
@@ -41,7 +42,9 @@ public sealed interface ListingOrderBuild {
      * `RumorWriter.statusUpdate` builds with `status=accepted` and the proposal's own terms.
      *
      * It claims that **§5.6's deadline did not refuse** — and, from `agreement`, that §7.5's deadline
-     * for acceptance did not either — and nothing more. It is not "this listing is
+     * for acceptance did not either; from `proposalForBid`, that neither the bid's §4.6 deadline, its
+     * `deliver_by` nor the `expiration` written had been reached at the one reading taken — and
+     * nothing more. It is not "this listing is
      * open for business": a listing carrying `["status", "sold"]`, or parked as `kind:30403`, and no
      * `expiration` builds here, because that is §5.1's and `Listing.status`'s question rather than
      * §5.6's deadline — the same limit `DeadlineGate.Permitted` records. And it advances nothing:
@@ -119,10 +122,13 @@ public sealed interface ListingOrderBuild {
      * §7.5: the proposal's own `expiration`, "the deadline for acceptance", refused, so no agreement
      * was built at all.
      *
-     * Reachable only from [ListingOrderWriter.agreement], and only after the listing's deadline
-     * permitted: a proposal is its buyer's deadline, a listing its author's, and §11.2 moves an order
-     * `proposed → expired` on the first of them. Separate from [DeadlineRefused] because it is about a
-     * different message — no change to the listing would build it.
+     * From [ListingOrderWriter.agreement], only after the listing's deadline permitted: a proposal is
+     * its buyer's deadline, a listing its author's, and §11.2 moves an order `proposed → expired` on
+     * the first of them. From [ListingOrderWriter.proposalForBid], only after the listing's and the
+     * bid's deadlines permitted, and about the proposal that would be built: its `deliver_by` — the
+     * bid's own, §6's deadline — has passed, or its `expiration` ([ListingOrderWriter.proposalForBid]'s
+     * `acceptBy`) has, or the clock could not say. Separate from [DeadlineRefused] because it is about
+     * a different message — no change to the listing would build it.
      */
     public class ProposalDeadlineRefused internal constructor(
 
@@ -150,18 +156,30 @@ public sealed interface ListingOrderBuild {
 }
 
 /**
- * Why [ListingOrderWriter.agreement] refused on the proposal's own `expiration` (§7.5).
+ * Why [ListingOrderWriter.agreement] refused on the proposal's own `expiration` (§7.5), or
+ * [ListingOrderWriter.proposalForBid] on the `deliver_by` or `expiration` the proposal would carry.
  *
- * Two constants for the reason `DeadlineRefusal` has two per side: one is a deadline this library
- * evaluated and found passed, the other one it could not evaluate (§17). Both refuse.
+ * `PROPOSAL_EXPIRED` and `DELIVERY_PASSED` are deadlines this library evaluated and found passed, and
+ * `PROPOSAL_CANNOT_SAY` is one it could not evaluate (§17) — the reason `DeadlineRefusal` has an
+ * evaluated and an unevaluated constant per side. All three refuse.
  */
 public enum class ProposalDeadlineRefusal {
 
     /** The injected clock has reached the proposal's `expiration`, on `OrderMachine`'s `>=` boundary. */
     PROPOSAL_EXPIRED,
 
-    /** The proposal carries an `expiration` and the injected clock was silent or negative. */
+    /**
+     * The proposal carries an `expiration`, or from `proposalForBid` a `deliver_by`, and the injected
+     * clock was silent or negative.
+     */
     PROPOSAL_CANNOT_SAY,
+
+    /**
+     * From `proposalForBid` only: the injected clock has reached the bid's `deliver_by`, which §6 makes
+     * a deadline "evaluated against the injected clock" and §7.5 carries into the proposal — on the
+     * `>=` boundary on which `OrderMachine` reads `deliver_by` as passed.
+     */
+    DELIVERY_PASSED,
 }
 
 /**
@@ -195,7 +213,8 @@ public enum class ProposalDeadlineRefusal {
  *
  * [proposalForBid] is [proposal] for the buyer who chose a public bid (§6 → §7.5): the price, `fee`,
  * fee recipient and `deliver_by` are copied off the decoded bid rather than typed a second time, so
- * the terms the bidder signed are the terms proposed.
+ * the terms the bidder signed are the terms proposed — and never once the clock has reached that
+ * `deliver_by` (§6's MUST) or the `expiration` the buyer asks for.
  *
  * Pure computation over the injected clock: no randomness and no I/O.
  */
@@ -250,27 +269,40 @@ public object ListingOrderWriter {
      *    are different keys, the answer is [ListingOrderBuild.WrongParties] and the clock is not read.
      * 3. `DeadlineGate.check(listing, bid, clock)`: anything but `Permitted` answers
      *    [ListingOrderBuild.DeadlineRefused] — the listing's §5.6 deadline first, then the bid's §4.6
-     *    one — and builds nothing. The clock is read at most once.
+     *    one — and builds nothing.
      * 4. [acceptBy], §7.5's deadline for acceptance: a negative one is refused as
      *    `ChannelRejection.MALFORMED_TAG` and one at or after the bid's `deliver_by` as
      *    `ChannelRejection.DEADLINES_INVERTED` — §7.5's "strictly earlier" — both naming `expiration`
      *    and both as [ListingOrderBuild.Refused], never thrown.
-     * 5. `RumorWriter.proposal` with `item` = the listing's coordinate, and the bid's price, `fee`,
+     * 5. The two deadlines the proposal would carry, against the clock. Where the bid carries a
+     *    `deliver_by` or [acceptBy] is set: a silent or negative clock answers
+     *    [ListingOrderBuild.ProposalDeadlineRefused] with `PROPOSAL_CANNOT_SAY`; a reading at or past
+     *    the bid's `deliver_by` — §6's "MUST be evaluated against the injected clock", on
+     *    `OrderMachine`'s `>=` boundary — with `DELIVERY_PASSED`; then one at or past [acceptBy] with
+     *    `PROPOSAL_EXPIRED`. Nothing is built. With neither set, no clock read is added.
+     * 6. `RumorWriter.proposal` with `item` = the listing's coordinate, and the bid's price, `fee`,
      *    fee recipient and `deliver_by` (§7.5: "`deliver_by` is the bid's own … carried across
      *    byte-identically from §6"), `expiration` = [acceptBy], and no `amount` tag.
+     *
+     * Steps 3 and 5 judge one reading: the clock is read at most once, so the four deadlines are never
+     * answered for two different instants.
      *
      * ### What it does not claim
      *
      * The bid's `expiration` is judged and never copied: it is the bidder's deadline for being taken
      * up, not the buyer's deadline for acceptance, and §6's own example bid expires after its
-     * `deliver_by`, which §7.5 would refuse as a proposal's. It does not check the bid's `p`/`P`
+     * `deliver_by`, which §7.5 would refuse as a proposal's. A proposal built here was live at the one
+     * reading taken; whether it is still live when the provider answers is `agreement`'s question,
+     * and §11.2's. It does not check the bid's `p`/`P`
      * against anything beyond what `Bid.decode` already checked, nor that the listing is still
      * `active` (§5.1's `status`). And it advances nothing: a bid binds nobody (§6), and nothing in
      * `dev.eryalabs.nenya.order` calls this writer.
      *
      * @param listing the listing [bid] was made on; its §4.2 coordinate becomes §7.5's `item`.
      * @param bid the §6 public bid the buyer chose, as `Bid.decode` answered it.
-     * @param clock §3's clock seam, read at most once, and only once the parties are right.
+     * @param clock §3's clock seam, read at most once, only once the parties are right, and not at all
+     *   when neither the listing nor the bid carries an `expiration`, the bid no `deliver_by`, and
+     *   [acceptBy] is `null`.
      * @param envelope §7.4's envelope: the buyer's key, its `created_at`, and the provider as `p`.
      * @param order §7.4's order id, drawn by the buyer.
      * @param acceptBy §7.5's `expiration`, the deadline for acceptance, in unix seconds, or `null` for none.
@@ -299,7 +331,8 @@ public object ListingOrderWriter {
         ) {
             return ListingOrderBuild.WrongParties
         }
-        when (val gate = DeadlineGate.check(listing, bid, clock)) {
+        val once = OneReading(clock)
+        when (val gate = DeadlineGate.check(listing, bid, once)) {
             DeadlineGate.Permitted -> Unit
             is DeadlineGate.Refused -> return ListingOrderBuild.DeadlineRefused(gate.reason)
         }
@@ -324,6 +357,17 @@ public object ListingOrderWriter {
                         "or after the `${ChannelVocabulary.DELIVER_BY}` the bid carries",
                 ),
             )
+        }
+        if (deliverBy != null || acceptBy != null) {
+            val refusal = when (val reading = once.now()) {
+                is SeamAnswer.Unavailable -> ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY
+                is SeamAnswer.Provided ->
+                    if (reading.value < 0L) ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY
+                    else if (deliverBy != null && reading.value >= deliverBy) ProposalDeadlineRefusal.DELIVERY_PASSED
+                    else if (acceptBy != null && reading.value >= acceptBy) ProposalDeadlineRefusal.PROPOSAL_EXPIRED
+                    else null
+            }
+            if (refusal != null) return ListingOrderBuild.ProposalDeadlineRefused(refusal)
         }
         val terms = OrderTerms(bid.fee.splitOn(bid.price), acceptBy, deliverBy)
         return when (
@@ -419,7 +463,10 @@ public object ListingOrderWriter {
     }
 }
 
-/** [clock], read on first use and never again, so both of `agreement`'s deadlines are judged at one instant. */
+/**
+ * [clock], read on first use and never again, so every deadline `agreement` or `proposalForBid` judges
+ * is judged at one instant.
+ */
 private class OneReading(private val clock: NenyaClock) : NenyaClock {
 
     private var reading: SeamAnswer<Long>? = null

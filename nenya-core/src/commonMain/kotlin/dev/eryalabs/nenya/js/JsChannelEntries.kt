@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
 import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.ProposalDeadlineRefusal
 import dev.eryalabs.nenya.channel.RumorBuild
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorWriter
@@ -224,8 +225,11 @@ public fun buildProposalAgainst(
  * not the buyer or its counterparties are not exactly the provider (decision **H**: on a request the
  * listing's author buys from the bidder, on an offer the bidder buys from the offer's author); with
  * `"DeadlineRefusal"` when the listing's or the bid's deadline refuses against [environment]'s clock;
- * and under `ChannelRejection` — `MALFORMED_TAG` or `DEADLINES_INVERTED`, tag `expiration` — when
- * [acceptBy] is negative or not strictly before the bid's `deliver_by`.
+ * under `ChannelRejection` — `MALFORMED_TAG` or `DEADLINES_INVERTED`, tag `expiration` — when
+ * [acceptBy] is negative or not strictly before the bid's `deliver_by`; and with
+ * `"ProposalDeadlineRefusal"` when that same clock has reached the bid's `deliver_by`
+ * (`DELIVERY_PASSED`, §6) or [acceptBy] (`PROPOSAL_EXPIRED`), or was silent or negative while either
+ * is set (`PROPOSAL_CANNOT_SAY`).
  *
  * @param acceptBy §7.5's `expiration`, the deadline for acceptance, unix seconds as a decimal string,
  *   or `null` for none.
@@ -465,8 +469,17 @@ private fun ListingOrderBuild.asListingOrderResult(): JsBuildResult = when (this
         "ProposalDeadlineRefusal",
         null,
         null,
-        "§7.5: the proposal's `expiration` is the deadline for acceptance, and it either has passed or " +
-            "could not be judged against the injected clock",
+        when (reason) {
+            ProposalDeadlineRefusal.PROPOSAL_EXPIRED ->
+                "§7.5: the proposal's `expiration` is the deadline for acceptance, and the injected clock " +
+                    "has reached it"
+            ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY ->
+                "§4.6: the proposal carries a deadline, and the injected clock was silent or negative, so " +
+                    "it could not be judged"
+            ProposalDeadlineRefusal.DELIVERY_PASSED ->
+                "§6: the bid's `deliver_by` is a deadline evaluated against the injected clock, and the " +
+                    "clock has reached it, so no proposal carries it"
+        },
     )
     is ListingOrderBuild.Refused -> refusal.asJsBuildResult()
 }

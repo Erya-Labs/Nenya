@@ -216,7 +216,7 @@ client builds and sends its own messages at the matching steps.
    bid's price, `fee`, fee recipient and `deliver_by`, so do not type them again. It is refused unless
    the buyer sends it to the provider — on a request, the request's author to the bidder; on an
    offer, the bidder to the offer's author. Its `acceptBy` is the proposal's `expiration`, and must
-   be before the bid's `deliver_by`. The buyer then starts its order with `openOrder`, giving the
+   be before the bid's `deliver_by`; once the clock has reached either, nothing is built. The buyer then starts its order with `openOrder`, giving the
    same order id and terms (for a bid, the bid's price, fee and `deliver_by`, and `acceptBy`). That
    call *is* the proposal step: the order starts in `proposed`, and stepping it again with a
    `proposal` event is refused.

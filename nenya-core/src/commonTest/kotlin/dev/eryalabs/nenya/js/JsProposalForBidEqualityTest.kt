@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.bid.BidFixtures
 import dev.eryalabs.nenya.bid.DeadlineRefusal
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
+import dev.eryalabs.nenya.channel.ProposalDeadlineRefusal
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.listing.Listing
@@ -26,8 +27,8 @@ import kotlin.test.fail
 /**
  * T61's crossing, [buildProposalForBid], held equal to `ListingOrderWriter.proposalForBid` field by
  * field, under the same clock handed in once as a `NenyaClock` and once as the page's decimal-string
- * function, over both sides of decision **H**, the right and the wrong parties, and every `acceptBy`
- * shape.
+ * function, over both sides of decision **H**, the right and the wrong parties, every `acceptBy`
+ * shape, and — T62 — readings either side of the bid's `deliver_by` and of `acceptBy`.
  */
 class JsProposalForBidEqualityTest {
 
@@ -90,56 +91,7 @@ class JsProposalForBidEqualityTest {
             val bid = bid(listing)
             for (envelope in envelopes(listing)) {
                 for (reading in READINGS) {
-                    for (acceptBy in ACCEPT_BY) {
-                        val what = "kind $kind, author ${envelope.authorPubkey.take(8)}, reading $reading, acceptBy $acceptBy"
-                        val answer = buildProposalForBid(
-                            JsListing(listing), JsBid(bid), environment(reading),
-                            JsBoundaryFixtures.crossed(envelope), ORDER_HEX, JsBoundaryFixtures.decimalOrNull(acceptBy),
-                        )
-                        when (
-                            val expected = ListingOrderWriter.proposalForBid(
-                                listing, bid, kotlinClock(reading), envelope, RumorWriterFixtures.orderFor(0), acceptBy,
-                            )
-                        ) {
-                            is ListingOrderBuild.Built -> {
-                                JsBoundaryFixtures.assertSameAnswer(
-                                    answer,
-                                    JsBoundaryFixtures.Answer(true, expected.event, null, null, null, null, null),
-                                    what,
-                                )
-                                drawn += "built"
-                            }
-                            is ListingOrderBuild.Refused -> {
-                                JsBoundaryFixtures.assertSameAnswer(answer, JsBoundaryFixtures.answerOf(expected.refusal), what)
-                                drawn += expected.refusal.reason.name
-                            }
-                            is ListingOrderBuild.DeadlineRefused -> {
-                                assertFalse(answer.ok, what)
-                                assertEquals("refused", answer.kind, what)
-                                assertNull(answer.event, "$what: a deadline refusal carries no event")
-                                assertEquals(expected.reason.name, answer.reason, what)
-                                assertEquals("DeadlineRefusal", answer.reasonVocabulary, what)
-                                assertNull(answer.tag, what)
-                                assertNotNull(answer.detail, what)
-                                drawn += expected.reason.name
-                            }
-                            ListingOrderBuild.WrongParties -> {
-                                assertFalse(answer.ok, what)
-                                assertEquals("refused", answer.kind, what)
-                                assertNull(answer.event, "$what: a proposal between the wrong keys carries no event")
-                                assertEquals("WRONG_PARTIES", answer.reason, what)
-                                assertEquals("ListingOrderBuild", answer.reasonVocabulary, what)
-                                assertNull(answer.tag, what)
-                                assertNull(answer.tagReason, what)
-                                assertNotNull(answer.detail, what)
-                                drawn += "WRONG_PARTIES"
-                            }
-                            ListingOrderBuild.ForAnotherListing ->
-                                fail("$what: `proposalForBid` reads its item off the listing and has no other to name")
-                            is ListingOrderBuild.ProposalDeadlineRefused ->
-                                fail("$what: `proposalForBid` writes a deadline for acceptance and answers none")
-                        }
-                    }
+                    for (acceptBy in ACCEPT_BY) drawn += crossedEqualsKotlin(listing, bid, envelope, reading, acceptBy)
                 }
             }
         }
@@ -151,6 +103,105 @@ class JsProposalForBidEqualityTest {
             drawn,
             "every answer the grid is written to reach",
         )
+    }
+
+    /**
+     * T62's answers: an open-ended listing and a bid with a `deliver_by` and no `expiration`, so the
+     * only deadlines left are the two the proposal would carry, at readings either side of each.
+     */
+    @JsName("buildProposalForBid_crosses_the_proposal_s_own_deadlines_as_ProposalDeadlineRefusal")
+    @Test
+    fun `buildProposalForBid crosses the proposal's own deadlines as ProposalDeadlineRefusal`() {
+        val acceptBy = DELIVER_BY - 1_000L
+        val drawn = mutableSetOf<String>()
+        for (kind in listOf(NenyaKind.REQUEST, NenyaKind.OFFER)) {
+            val listing = ListingFixtures.decode(ListingFixtures.minimal(kind), kind, index = LISTING_AUTHOR_INDEX)
+            val tags = BidFixtures.minimalBid(kind, LISTING_AUTHOR_INDEX, listing.dValue)
+            tags += listOf(listOf("deliver_by", DELIVER_BY.toString()))
+            val bid = BidFixtures.decode(tags, index = BIDDER_INDEX)
+            val envelope = envelopes(listing).first()
+            for (reading in listOf(null, -1L, acceptBy - 1, acceptBy, DELIVER_BY - 1, DELIVER_BY)) {
+                for (accept in listOf(null, acceptBy)) drawn += crossedEqualsKotlin(listing, bid, envelope, reading, accept)
+            }
+        }
+        assertEquals(
+            setOf(
+                "built",
+                ProposalDeadlineRefusal.PROPOSAL_CANNOT_SAY.name,
+                ProposalDeadlineRefusal.PROPOSAL_EXPIRED.name,
+                ProposalDeadlineRefusal.DELIVERY_PASSED.name,
+            ),
+            drawn,
+            "every answer the grid is written to reach",
+        )
+    }
+
+    /** One crossing held equal to its Kotlin call field by field; answers the name of what both drew. */
+    private fun crossedEqualsKotlin(
+        listing: Listing,
+        bid: Bid,
+        envelope: RumorEnvelope,
+        reading: Long?,
+        acceptBy: Long?,
+    ): String {
+        val what = "kind ${listing.kind}, author ${envelope.authorPubkey.take(8)}, reading $reading, acceptBy $acceptBy"
+        val answer = buildProposalForBid(
+            JsListing(listing), JsBid(bid), environment(reading),
+            JsBoundaryFixtures.crossed(envelope), ORDER_HEX, JsBoundaryFixtures.decimalOrNull(acceptBy),
+        )
+        return when (
+            val expected = ListingOrderWriter.proposalForBid(
+                listing, bid, kotlinClock(reading), envelope, RumorWriterFixtures.orderFor(0), acceptBy,
+            )
+        ) {
+            is ListingOrderBuild.Built -> {
+                JsBoundaryFixtures.assertSameAnswer(
+                    answer,
+                    JsBoundaryFixtures.Answer(true, expected.event, null, null, null, null, null),
+                    what,
+                )
+                "built"
+            }
+            is ListingOrderBuild.Refused -> {
+                JsBoundaryFixtures.assertSameAnswer(answer, JsBoundaryFixtures.answerOf(expected.refusal), what)
+                expected.refusal.reason.name
+            }
+            is ListingOrderBuild.DeadlineRefused -> {
+                assertFalse(answer.ok, what)
+                assertEquals("refused", answer.kind, what)
+                assertNull(answer.event, "$what: a deadline refusal carries no event")
+                assertEquals(expected.reason.name, answer.reason, what)
+                assertEquals("DeadlineRefusal", answer.reasonVocabulary, what)
+                assertNull(answer.tag, what)
+                assertNotNull(answer.detail, what)
+                expected.reason.name
+            }
+            ListingOrderBuild.WrongParties -> {
+                assertFalse(answer.ok, what)
+                assertEquals("refused", answer.kind, what)
+                assertNull(answer.event, "$what: a proposal between the wrong keys carries no event")
+                assertEquals("WRONG_PARTIES", answer.reason, what)
+                assertEquals("ListingOrderBuild", answer.reasonVocabulary, what)
+                assertNull(answer.tag, what)
+                assertNull(answer.tagReason, what)
+                assertNotNull(answer.detail, what)
+                "WRONG_PARTIES"
+            }
+            ListingOrderBuild.ForAnotherListing ->
+                fail("$what: `proposalForBid` reads its item off the listing and has no other to name")
+            // T62: the `deliver_by` and `expiration` the proposal would carry, judged against the clock.
+            is ListingOrderBuild.ProposalDeadlineRefused -> {
+                assertFalse(answer.ok, what)
+                assertEquals("refused", answer.kind, what)
+                assertNull(answer.event, "$what: a deadline refusal carries no event")
+                assertEquals(expected.reason.name, answer.reason, what)
+                assertEquals("ProposalDeadlineRefusal", answer.reasonVocabulary, what)
+                assertNull(answer.tag, what)
+                assertNull(answer.tagReason, what)
+                assertNotNull(answer.detail, what)
+                expected.reason.name
+            }
+        }
     }
 
     @JsName("a_bid_on_another_listing_crosses_as_BID_FOR_ANOTHER_LISTING")

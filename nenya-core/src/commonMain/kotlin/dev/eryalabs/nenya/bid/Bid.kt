@@ -169,10 +169,12 @@ public class Bid internal constructor(
      *
      * §6: "A bid's `deliver_by`, when present, is a deadline in the same sense as every other
      * deadline in this document (§4.6), and MUST be evaluated against the injected clock."
-     * Evaluating it is the caller's, because a bid binds nothing: the deadline becomes load-bearing
-     * only once it is copied into accepted terms (§5.3, §7.4), and that is where the clock belongs.
-     * What this codec owes the rule is that the value is never compared against [createdAt], and it
-     * is not — nothing here evaluates it, and [activity] reads only [expiration].
+     * This codec does not evaluate it, because a bid binds nothing: [activity] reads only
+     * [expiration], and a bid whose `deliver_by` has passed is still a bid on the board. The clock is
+     * read where the deadline is carried into an order: `ListingOrderWriter.proposalForBid` refuses
+     * to propose once the injected clock has reached it (`ProposalDeadlineRefusal.DELIVERY_PASSED`),
+     * and the order machine reads the copy in the accepted terms (§5.3, §7.4). What this codec owes
+     * the rule is that the value is never compared against [createdAt], and it is not.
      */
     public val deliverBy: Long? get() = tags.deliverBy
 
