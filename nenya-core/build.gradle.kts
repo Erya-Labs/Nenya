@@ -212,6 +212,9 @@ tasks.named("compileTestKotlinJs") { dependsOn(generateVendoredTestFiles) }
 tasks.named<Test>("jvmTest") {
     useJUnit()
     testLogging { events("failed") }
+    // IntegrationGuideTest reads the guide from disk. Declared so an edit to the guide alone
+    // re-runs the suite instead of leaving jvmTest UP-TO-DATE over a stale index.
+    inputs.file(rootProject.file("docs/INTEGRATING.md")).withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // ---------------------------------------------------------------------------------

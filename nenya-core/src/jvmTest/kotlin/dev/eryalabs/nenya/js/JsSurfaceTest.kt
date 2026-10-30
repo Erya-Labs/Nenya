@@ -57,7 +57,8 @@ import kotlin.test.fail
  */
 class JsSurfaceTest {
 
-    private companion object {
+    /** `internal` rather than `private` so `IntegrationGuideTest` can hold the guide to [ENTRY_POINTS]. */
+    internal companion object {
 
         const val PACKAGE: String = "dev.eryalabs.nenya.js"
 

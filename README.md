@@ -14,6 +14,10 @@ trades end to end against the JavaScript build of this library — listings, bid
 Lightning-settled deliveries inside a real nostr client, with a
 [step-by-step trade guide](https://github.com/Erya-Labs/coracle/blob/marketplace/MARKETPLACE.md).
 
+**Adding Nenya to your own web client?** [`docs/INTEGRATING.md`](docs/INTEGRATING.md) covers loading
+the JavaScript build, the seams your client supplies, and the order of calls in one trade. A JVM
+test holds its entry-point index equal to the library's exported functions.
+
 The contract is the microstandard in [`spec/NENYA-1.md`](spec/NENYA-1.md); `nenya-core` is
 its first reference implementation. Anything in the spec can be implemented in TypeScript,
 Rust or Swift against any nostr stack, and it will interoperate with `nenya-core` without
