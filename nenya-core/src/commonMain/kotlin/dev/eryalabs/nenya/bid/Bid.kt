@@ -57,9 +57,10 @@ import dev.eryalabs.nenya.wire.WireEvent
  * bid, it carries no independent terms, and reading one as a bid would put a price on the board
  * that nobody offered. Threading bids into a conversation is a client's business, not this codec's.
  *
- * **Private bids (§6.1) are not here.** A `kind:16` `type=6` rumor arrives only through gift-wrap
- * machinery this library does not build, T7 already refuses `type=6` from all eleven states, and
- * §6.1 with §17 item 3 makes an implementation supporting public bidding only fully conformant.
+ * **Private bids (§6.1) are not here.** A `kind:16` `type=6` rumor is not a relay event: it arrives
+ * sealed (§7.1) and is read by `dev.eryalabs.nenya.channel.PrivateBid` off the attributed rumor
+ * `GiftWrap.open` hands back. T7 refuses `type=6` from all eleven states, and §6.1 with §17 item 3
+ * makes public bidding the path a conformant implementation cannot omit.
  *
  * ### One narrowing stated rather than papered over: exactly one of each scope tag
  *

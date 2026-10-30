@@ -124,6 +124,9 @@ class ChannelStructureTest {
             // T57's §7.5 deadline for acceptance, refusing an agreement past the proposal's `expiration`.
             "ListingOrderBuild\$ProposalDeadlineRefused",
             "ProposalDeadlineRefusal",
+            // T59's §6.1 private bid, read back.
+            "PrivateBid",
+            "PrivateBid\$Companion",
         )
 
         /**

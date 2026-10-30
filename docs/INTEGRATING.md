@@ -208,7 +208,8 @@ client builds and sends its own messages at the matching steps.
    filter, so re-check each result with `matchesBoard`. Before acting on a listing, ask
    `listingActivity` or `checkDeadlines`.
 3. **Bid** (§6), where the listing invites it: `buildBid` for a public bid, or `buildPrivateBid`
-   sealed to the listing's author. Read public bids with `decodeBid`.
+   sealed to the listing's author. Read public bids with `decodeBid`, and open private bids and
+   read them with `decodePrivateBid`. A bid binds nobody and does not move an order.
 4. **Propose** (§7.5). The buyer draws a new order id — 32 bytes from a secure random source, as
    64 hex characters (§7.4) — builds the proposal with `buildProposalAgainst`, then seals and sends
    it. The buyer then starts its order with `openOrder`, giving the same order id and terms. That
@@ -294,6 +295,7 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `openAsync` — `open`, for a signer that answers later (§7.1).
 - `decodeProposal` — reads an order proposal from an opened rumor (§7.5).
 - `decodeStatusUpdate` — reads a status update from an opened rumor (§7.4).
+- `decodePrivateBid` — reads a private bid from an opened rumor (§6.1).
 - `checkAcceptance` — compares a status update with the proposal it answers: acceptance, counter-proposal or neither (§7.6).
 - `decodeCommitment` — reads a delivery commitment from an opened rumor (§10.1).
 - `decodeRelease` — reads a deliverable release from an opened rumor (§10.3).

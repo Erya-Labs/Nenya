@@ -9,7 +9,9 @@ import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
 import dev.eryalabs.nenya.channel.DeliveryTags
 import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.PrivateBid
 import dev.eryalabs.nenya.channel.ProposalFixtures
+import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.tag.NenyaKind
 import kotlin.js.JsName
 import kotlin.test.Test
@@ -68,6 +70,54 @@ class JsMessageEqualityTest {
         // is asserted to reach both sides of it rather than assumed to.
         assertTrue(feeAbsent > 0, "the corpus must carry a proposal with no `fee` tag at all (§8.1)")
         assertTrue(feeStated > 0, "the corpus must carry a proposal with a stated `fee` term (§8.1)")
+    }
+
+    /** §6.1's private bids, decoded both ways — every field, over the writer's corpus. T59. */
+    @Test
+    @JsName("decodePrivateBid_crosses_section_6_1_s_private_bid")
+    fun `decodePrivateBid crosses §6_1's private bid`() {
+        var decoded = 0
+        for (case in RumorWriterFixtures.cases(CORPUS * 8)) {
+            if (case.shape != RumorWriterFixtures.Shape.PRIVATE_BID) continue
+            val rumor = RumorWriterFixtures.bound(RumorWriterFixtures.build(case))
+            val crossed = privateBidBothWays("$case", rumor)
+            assertTrue(crossed.ok, "$case: a written private bid must decode: ${crossed.reason}")
+            decoded++
+        }
+        assertEquals(CORPUS, decoded, "one private bid per eight cases")
+    }
+
+    /** §6.1's refusals cross as values equal to the Kotlin decoder's: a `type=1`, and no `price`. */
+    @Test
+    @JsName("decodePrivateBid_refuses_a_proposal_and_a_bid_without_price_as_values")
+    fun `decodePrivateBid refuses a proposal and a bid without price as values`() {
+        val fixture = ProposalFixtures.pairs(1).single()
+        val proposal = privateBidBothWays(
+            "a type=1",
+            ProposalFixtures.bound(fixture.proposalTags, fixture.index),
+        )
+        assertEquals(ChannelRejection.NOT_A_PRIVATE_BID.name, proposal.reason, "§6.1's decoder")
+        assertEquals("ChannelRejection", proposal.reasonVocabulary)
+
+        val bid = RumorWriterFixtures.cases(8).single { it.shape == RumorWriterFixtures.Shape.PRIVATE_BID }
+        val tags = RumorWriterFixtures.build(bid).tags.filter { it[0] != "price" }
+        val noPrice = privateBidBothWays("a type=6 without price", ProposalFixtures.bound(tags))
+        assertEquals(ChannelRejection.MISSING_REQUIRED_TAG.name, noPrice.reason, "§6.1: it MUST carry `price`")
+        assertEquals("price", noPrice.tag)
+    }
+
+    /** A bid open past its own `deliver_by`, as §6's example is, crosses decoded and not refused. */
+    @Test
+    @JsName("decodePrivateBid_crosses_a_bid_whose_expiration_follows_its_deliver_by")
+    fun `decodePrivateBid crosses a bid whose expiration follows its deliver_by`() {
+        val case = RumorWriterFixtures.cases(CORPUS * 8)
+            .first { it.shape == RumorWriterFixtures.Shape.PRIVATE_BID && it.terms?.deliverBy != null }
+        val deliverBy = case.terms?.deliverBy ?: fail("$case carries a deliver_by")
+        val tags = RumorWriterFixtures.build(case).tags.filter { it[0] != "expiration" } +
+            listOf(listOf("expiration", (deliverBy + 1).toString()))
+        val crossed = privateBidBothWays("$case, expiring after deliver_by", ProposalFixtures.bound(tags))
+        assertTrue(crossed.ok, "§6.1 applies §6's term rules unchanged: ${crossed.reason}")
+        assertEquals(JsBoundaryFixtures.decimal(deliverBy + 1), crossed.privateBid?.expirationSeconds)
     }
 
     /** §10.1's commitments, decoded both ways — every field, over the generated corpus. */
@@ -242,6 +292,14 @@ class JsMessageEqualityTest {
         val expected = JsMessageFixtures.answerOf { OrderProposal.decode(rumor) }
         val crossed = decodeProposal(JsRumor(rumor))
         JsMessageFixtures.assertSameProposal(crossed, expected, what)
+        return crossed
+    }
+
+    /** One rumor through `PrivateBid.decode` and through [decodePrivateBid]. */
+    private fun privateBidBothWays(what: String, rumor: AttributedRumor.Bound): JsPrivateBidResult {
+        val expected = JsMessageFixtures.answerOf { PrivateBid.decode(rumor) }
+        val crossed = decodePrivateBid(JsRumor(rumor))
+        JsMessageFixtures.assertSamePrivateBid(crossed, expected, what)
         return crossed
     }
 

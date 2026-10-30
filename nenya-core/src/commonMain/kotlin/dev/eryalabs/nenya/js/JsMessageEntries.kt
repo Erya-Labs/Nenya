@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
+import dev.eryalabs.nenya.channel.PrivateBid
 import dev.eryalabs.nenya.money.FeeTerm
 import kotlin.js.ExperimentalJsExport
 import kotlin.js.JsExport
@@ -124,6 +125,27 @@ public fun decodeStatusUpdate(rumor: JsRumor): JsStatusUpdateResult =
         )
     }
 
+/**
+ * §6.1's `kind:16` `type=6` private bid, decoded — the terms a listing author was reading out of raw
+ * tags. T59.
+ *
+ * One call to `PrivateBid.decode`. §6.1's `order` prohibition already ran inside [open]'s
+ * attribution; §6.1's `price` requirement and §5.3's satoshi-denominated `price` row run in this one,
+ * and neither is restated here.
+ *
+ * **A decoded bid binds nobody and moves nothing** (§6.1). It is not an order event, and no order id
+ * crosses with it, because a `type=6` carries none (§7.4).
+ *
+ * @param rumor the `kind:16` `type=6` as [open] handed it back. A rumor of another bound kind
+ *   reaches the decoder and gets its own `NOT_A_PRIVATE_BID`.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun decodePrivateBid(rumor: JsRumor): JsPrivateBidResult =
+    jsGuarded({ JsPrivateBidResult(null, it) }) {
+        JsPrivateBidResult(PrivateBid.decode(rumor.asBoundRumor("kind:16 type=6 private bid")), null)
+    }
+
 // =================================================================================================
 // The boundary types. Each holds the Kotlin value and publishes every value that value publishes,
 // as strings, ints and arrays of strings — the same shape `JsListing` and `JsRumor` take.
@@ -230,6 +252,104 @@ public class JsProposalResult internal constructor(
 
     override fun toString(): String =
         if (ok) "JsProposalResult(proposal)" else "JsProposalResult(refused: $reason)"
+}
+
+/**
+ * §6.1's private bid as the page reads it: who bid, on which listing, and on what terms.
+ *
+ * The fee crosses as [feeMsat], [feeBasisPoints] and [feePayeeRequired], as on [JsOrderProposal] and
+ * for the same reason: an absent fee term and a stated zero are different signed statements (§8.1).
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsPrivateBid internal constructor(private val bid: PrivateBid) {
+
+    /** §7.2's author: the key the seal carrying this bid was signed by, lowercase. */
+    public val bidder: String get() = bid.bidder
+
+    /** §4.1's `id`, recomputed by this library from the rumor's own five fields. */
+    public val idHex: String get() = bid.id.toHex()
+
+    /** §4.1's `created_at`, unix seconds as a decimal string. A counterparty's claim (§4.6). */
+    public val createdAtSeconds: String get() = JsDecimal.of(bid.createdAt)
+
+    /** §6.1's `item` coordinate — the listing this bid names (§4.2). */
+    public val itemCoordinate: String get() = bid.item.coordinate.toTagValue()
+
+    /** §5.3's `item` quantity. Exactly `"1"` in Nenya v1; `ItemRef` refuses any other. */
+    public val itemQuantity: String get() = bid.item.quantity
+
+    /** §5.3's `price` in millisatoshis — what the provider receives (§8.2) — as an exact decimal string. */
+    public val priceMsat: String get() = JsDecimal.of(bid.price.millisatoshis)
+
+    /** §8.3's fee on that price, computed by this library's own arithmetic, as an exact decimal string. */
+    public val feeMsat: String get() = JsDecimal.of(bid.split.fee.millisatoshis)
+
+    /** §8.3's `total_msat` — price plus fee — as an exact decimal string. */
+    public val totalMsat: String get() = JsDecimal.of(bid.split.total.millisatoshis)
+
+    /** §8.1's fee in basis points, or `null` for an absent fee term. See [JsListing.feeBasisPoints]. */
+    public val feeBasisPoints: Int? get() = when (val fee = bid.fee) {
+        is FeeTerm.Stated -> fee.basisPoints
+        FeeTerm.Absent -> null
+    }
+
+    /** True exactly when §8.3's split on these terms would require a `payee=fee` invoice at all. */
+    public val feePayeeRequired: Boolean get() = bid.split.feePayeeRequired
+
+    /** §8.1's fee recipient — the third `fee` element `FeeTerm` does not hold — or `null`. */
+    public val feeRecipient: String? get() = bid.feeRecipient
+
+    /** §5.3's `expiration` — the bid's own deadline (§4.6) — unix seconds as a decimal string, or `null`. */
+    public val expirationSeconds: String? get() = JsDecimal.ofOrNull(bid.expiration)
+
+    /** §5.3's `deliver_by`, unix seconds as a decimal string, or `null`. */
+    public val deliverBySeconds: String? get() = JsDecimal.ofOrNull(bid.deliverBy)
+
+    /** §7.4's `p` rows, each `[pubkey]` or `[pubkey, relay]`. A fresh array on every read. */
+    public val counterparties: Array<Array<String>>
+        get() = bid.counterparties.map { ref ->
+            if (ref.relay == null) arrayOf(ref.pubkey) else arrayOf(ref.pubkey, ref.relay!!)
+        }.toTypedArray()
+
+    /** The rumor this was decoded from, byte for byte — same tags, same order, same id (§4.3). */
+    public val event: JsWireEvent get() = JsWireEvent(bid.encode())
+
+    /** Names nothing: §12 items 1, 2 and 11 cover every value this type holds. */
+    override fun toString(): String = "JsPrivateBid(redacted)"
+}
+
+/** What [decodePrivateBid] answered, with [kind] as the discriminator. */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsPrivateBidResult internal constructor(
+    private val decoded: PrivateBid?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"private_bid"` or `"refused"`. */
+    public val kind: String get() = if (decoded != null) "private_bid" else "refused"
+
+    /** True exactly when [kind] is `"private_bid"`. Says it decoded — never that it binds anyone. */
+    public val ok: Boolean get() = decoded != null
+
+    /** The bid, when [ok]. */
+    public val privateBid: JsPrivateBid? get() = decoded?.let { JsPrivateBid(it) }
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `ChannelRejection` for §6.1's own refusals. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = refusal?.detail
+
+    override fun toString(): String =
+        if (ok) "JsPrivateBidResult(private_bid)" else "JsPrivateBidResult(refused: $reason)"
 }
 
 /**

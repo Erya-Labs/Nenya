@@ -307,14 +307,18 @@ public object Capabilities {
             number = 3,
             status = ConformanceStatus.PERFORMED_HERE,
             specSections = setOf("6", "6.1"),
-            evidenceClasses = setOf("dev.eryalabs.nenya.bid.Bid"),
+            evidenceClasses = setOf(
+                "dev.eryalabs.nenya.bid.Bid",
+                "dev.eryalabs.nenya.channel.PrivateBid",
+            ),
             notPerformed = emptySet(),
-            note = "Public bidding is implemented and is the only bidding there is, which is " +
-                "what §17 asks for: `A`/`a`, `K`/`k` and `P`/`p` all REQUIRED, all cross-checked " +
-                "against the coordinate they scope to, and `E`/`e` scoping refused by name. " +
-                "§6.1's private bidding is OPTIONAL and is not implemented; §17 says in as many " +
-                "words that only the reverse omission is non-conformant, so this item is not " +
-                "PARTIAL on account of it.",
+            note = "Public bidding is implemented and is the default, which is what §17 asks " +
+                "for: `A`/`a`, `K`/`k` and `P`/`p` all REQUIRED, all cross-checked against the " +
+                "coordinate they scope to, and `E`/`e` scoping refused by name. §6.1's OPTIONAL " +
+                "private bid is written by RumorWriter.privateBid and read by PrivateBid: a " +
+                "`type=6` carrying an `order` tag or no `price` is refused by name, and its terms " +
+                "are read under §6's rules unchanged. Choosing public or private per bid is the " +
+                "client's: this library never turns one into the other.",
         ),
         ConformanceItem(
             number = 4,

@@ -123,6 +123,9 @@ public enum class ChannelRejection {
     /** §10.3's decoder was handed a rumor that is not a `kind:15`. See [NOT_A_PROPOSAL]. */
     NOT_A_RELEASE,
 
+    /** §6.1's decoder was handed a rumor that is not a `kind:16` `type=6`. See [NOT_A_PROPOSAL]. */
+    NOT_A_PRIVATE_BID,
+
     /**
      * §10.1: "The commitment message MUST NOT contain `decryption-key` or `decryption-nonce`. An
      * implementation MUST reject a commitment that does."

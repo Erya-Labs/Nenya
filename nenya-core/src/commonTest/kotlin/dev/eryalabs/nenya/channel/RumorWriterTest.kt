@@ -923,10 +923,12 @@ class RumorWriterTest {
         // §11.1's `status`, which `OrderStatusMessage.decode` requires by name, plus §7.4's.
         RumorWriterFixtures.Shape.ORDER_UPDATE ->
             AttributedRumor.requiredTags() + ChannelVocabulary.TYPE + ChannelVocabulary.STATUS
-        // §7.4's two survivors on a type=6, plus `type`. `item` is §5.3's, enforced by the tag
-        // codec under the context T13 declares rather than by §7.4's set.
+        // §7.4's two survivors on a type=6, plus `type`, plus §6.1's `item` and `price`. `item` is
+        // §5.3's, enforced by the tag codec under the context T13 declares; `price` is
+        // `PrivateBid.decode`'s.
         RumorWriterFixtures.Shape.PRIVATE_BID ->
-            AttributedRumor.requiredTags() - ChannelVocabulary.ORDER + ChannelVocabulary.TYPE
+            AttributedRumor.requiredTags() - ChannelVocabulary.ORDER + ChannelVocabulary.TYPE +
+                ChannelVocabulary.ITEM + ChannelVocabulary.PRICE
         // §8.6's and §9.2's are `PaymentWriterTest`'s, which runs the same loop over them.
         RumorWriterFixtures.Shape.PAYMENT_REQUEST, RumorWriterFixtures.Shape.RECEIPT -> null
     }
@@ -935,9 +937,9 @@ class RumorWriterTest {
      * The tag the decoder for [shape] names when it refuses [event], through the decoder §7.4 gives
      * that message.
      *
-     * A `kind:15`, a `type=1`, a `type=3` and a `type=5` each have their own decoder and a `type=6`
-     * has none beyond §7.2's attribution, so the dispatch is explicit rather than derived — which is
-     * also what makes the loop's assertion about the right refusal.
+     * A `kind:15`, a `type=1`, a `type=3`, a `type=5` and a `type=6` each have their own decoder,
+     * so the dispatch is explicit rather than derived — which is also what makes the loop's
+     * assertion about the right refusal.
      */
     private fun refusalFrom(shape: RumorWriterFixtures.Shape, event: WireEvent): String? {
         val thrown = runCatching {
@@ -947,9 +949,9 @@ class RumorWriterTest {
                 RumorWriterFixtures.Shape.ORDER_UPDATE -> OrderStatusMessage.decode(rumor)
                 RumorWriterFixtures.Shape.COMMITMENT -> DeliveryCommitmentMessage.decode(rumor)
                 RumorWriterFixtures.Shape.RELEASE -> DeliverableReleaseMessage.decode(rumor)
-                // §7.2's attribution IS the decoder for a type=6: §7.4's envelope, its `order`
-                // prohibition and its version-collision rule all run there and nowhere else.
-                RumorWriterFixtures.Shape.PRIVATE_BID -> rumor
+                // §7.4's envelope, its `order` prohibition and its version-collision rule run in
+                // §7.2's attribution above; §6.1's `price` is `PrivateBid.decode`'s.
+                RumorWriterFixtures.Shape.PRIVATE_BID -> PrivateBid.decode(rumor)
                 else -> fail("$shape has no decoder in this package")
             }
         }.exceptionOrNull()

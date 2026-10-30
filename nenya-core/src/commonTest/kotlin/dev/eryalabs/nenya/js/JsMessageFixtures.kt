@@ -5,6 +5,7 @@ import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
+import dev.eryalabs.nenya.channel.PrivateBid
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.fail
@@ -151,6 +152,91 @@ internal object JsMessageFixtures {
         val decoded = expected.value ?: return
         val value = crossed.proposal ?: fail("$what: the crossed answer carries no proposal")
         JsBoundaryFixtures.assertSameFields(proposalFields(value, decoded), "$what: the proposal")
+        assertNull(crossed.reason, "$what: an answer must name no reason")
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // §6.1's private bid. T59.
+    // -----------------------------------------------------------------------------------------
+
+    /** Every value `JsPrivateBid` publishes, paired with the same value off [expected]. */
+    fun privateBidFields(
+        crossed: JsPrivateBid,
+        expected: PrivateBid,
+    ): List<JsBoundaryFixtures.Field> = listOf(
+        JsBoundaryFixtures.Field("bidder", crossed.bidder, expected.bidder),
+        JsBoundaryFixtures.Field("idHex", crossed.idHex, expected.id.toHex()),
+        JsBoundaryFixtures.Field(
+            "createdAtSeconds",
+            crossed.createdAtSeconds,
+            JsBoundaryFixtures.decimal(expected.createdAt),
+        ),
+        JsBoundaryFixtures.Field(
+            "itemCoordinate",
+            crossed.itemCoordinate,
+            expected.item.coordinate.toTagValue(),
+        ),
+        JsBoundaryFixtures.Field("itemQuantity", crossed.itemQuantity, expected.item.quantity),
+        JsBoundaryFixtures.Field(
+            "priceMsat",
+            crossed.priceMsat,
+            JsBoundaryFixtures.decimal(expected.price.millisatoshis),
+        ),
+        JsBoundaryFixtures.Field(
+            "feeMsat",
+            crossed.feeMsat,
+            JsBoundaryFixtures.decimal(expected.split.fee.millisatoshis),
+        ),
+        JsBoundaryFixtures.Field(
+            "totalMsat",
+            crossed.totalMsat,
+            JsBoundaryFixtures.decimal(expected.split.total.millisatoshis),
+        ),
+        JsBoundaryFixtures.Field(
+            "feeBasisPoints",
+            crossed.feeBasisPoints,
+            JsBoundaryFixtures.basisPointsOf(expected.fee),
+        ),
+        JsBoundaryFixtures.Field(
+            "feePayeeRequired",
+            crossed.feePayeeRequired,
+            expected.split.feePayeeRequired,
+        ),
+        JsBoundaryFixtures.Field("feeRecipient", crossed.feeRecipient, expected.feeRecipient),
+        JsBoundaryFixtures.Field(
+            "expirationSeconds",
+            crossed.expirationSeconds,
+            JsBoundaryFixtures.decimalOrNull(expected.expiration),
+        ),
+        JsBoundaryFixtures.Field(
+            "deliverBySeconds",
+            crossed.deliverBySeconds,
+            JsBoundaryFixtures.decimalOrNull(expected.deliverBy),
+        ),
+        JsBoundaryFixtures.Field(
+            "counterparties",
+            crossed.counterparties.map { it.toList() },
+            expected.counterparties.map { listOfNotNull(it.pubkey, it.relay) },
+        ),
+        JsBoundaryFixtures.Field(
+            "event",
+            crossed.event.unsignedJson().value,
+            JsBoundaryFixtures.json(expected.encode()),
+        ),
+    )
+
+    /** [crossed] is [expected]: the same refusal, or the same bid field for field. */
+    fun assertSamePrivateBid(crossed: JsPrivateBidResult, expected: Decoded<PrivateBid>, what: String) {
+        assertSameShape(crossed.ok, crossed.kind, "private_bid", expected, what) {
+            assertNull(crossed.privateBid, "$what: a refusal must carry no bid")
+            assertEquals(expected.reason, crossed.reason, "$what: the refusals differ")
+            assertEquals(expected.vocabulary, crossed.reasonVocabulary, "$what: the vocabularies differ")
+            assertEquals(expected.tag, crossed.tag, "$what: the tags the refusals are about differ")
+            assertEquals(expected.detail, crossed.detail, "$what: the details differ")
+        }
+        val decoded = expected.value ?: return
+        val value = crossed.privateBid ?: fail("$what: the crossed answer carries no bid")
+        JsBoundaryFixtures.assertSameFields(privateBidFields(value, decoded), "$what: the private bid")
         assertNull(crossed.reason, "$what: an answer must name no reason")
     }
 

@@ -5,7 +5,9 @@ import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
+import dev.eryalabs.nenya.channel.PrivateBid
 import dev.eryalabs.nenya.channel.ProposalFixtures
+import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.conformance.MainClasses
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingWriterFixtures
@@ -149,6 +151,9 @@ class JsSurfaceTest {
             // passed back.
             "JsCapabilities",
             "JsConformanceItem",
+            // T59's two: §6.1's decoded private bid and its result, read by a page and never passed back.
+            "JsPrivateBid",
+            "JsPrivateBidResult",
         )
 
         /**
@@ -286,8 +291,9 @@ class JsSurfaceTest {
         )
 
         /**
-         * The thirty-six entry points this package exports: T42's thirteen, T43's six, T44's five,
-         * T47's one, T48's two, T49's three, T50's one, T51's one, T52's one, T53's one and T55's two.
+         * The thirty-seven entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * T47's one, T48's two, T49's three, T50's one, T51's one, T52's one, T53's one, T55's two and
+         * T59's one.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -341,6 +347,8 @@ class JsSurfaceTest {
             // T55 — §7.1's two procedures driven by NIP-07's promise-returning signer.
             "sealAsync",
             "openAsync",
+            // T59 — §6.1's private bid, which the library wrote and could not read.
+            "decodePrivateBid",
         )
 
         /**
@@ -357,6 +365,9 @@ class JsSurfaceTest {
             val covered = pinned + REFUSAL_BY_VALUE_EXEMPT
             return (ENTRY_POINTS - covered) to (covered - ENTRY_POINTS)
         }
+
+        /** T59's one, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T59_ENTRY_POINTS: Set<String> = setOf("decodePrivateBid")
 
         /** T55's two, for the same reason [T42_ENTRY_POINTS] exists. */
         val T55_ENTRY_POINTS: Set<String> = setOf("sealAsync", "openAsync")
@@ -528,11 +539,13 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            36,
+            37,
             ENTRY_POINTS.size,
-            "T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
+            "T59's one on top of T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
                 "on top of T43's six on top of T42's thirteen",
         )
+        assertEquals(1, T59_ENTRY_POINTS.size, "T59's text crosses one")
+        assertTrue(T59_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T59's `decodePrivateBid` is exported")
         assertEquals(2, T55_ENTRY_POINTS.size, "T55's text crosses two")
         assertTrue(T55_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T55's `sealAsync` and `openAsync` are exported")
         assertEquals(1, T53_ENTRY_POINTS.size, "T53's text crosses one")
@@ -552,7 +565,7 @@ class JsSurfaceTest {
             6,
             (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS -
                 T49_ENTRY_POINTS - T50_ENTRY_POINTS - T51_ENTRY_POINTS - T52_ENTRY_POINTS -
-                T53_ENTRY_POINTS - T55_ENTRY_POINTS).size,
+                T53_ENTRY_POINTS - T55_ENTRY_POINTS - T59_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -583,7 +596,7 @@ class JsSurfaceTest {
             pinned.none { it in REFUSAL_BY_VALUE_EXEMPT },
             "an exempt entry point is also pinned as swept, so one of the two lists is not what it says",
         )
-        assertEquals(35, pinned.size, "thirty-six entry points less `capabilities`")
+        assertEquals(36, pinned.size, "thirty-seven entry points less `capabilities`")
     }
 
     /** The control for the test above: a pin missing any one entry point fails the equality. */
@@ -907,6 +920,19 @@ class JsSurfaceTest {
             JsMessageFixtures.releaseFields(release, DeliverableReleaseMessage.decode(releaseRumor))
                 .map { it.name }.toSet(),
             "JsMessageFixtures.releaseFields must name every value JsReleaseMessage publishes",
+        )
+
+        // T59's §6.1 private bid, on the same terms: fifteen values, the proposal's sixteen less the
+        // order id a `type=6` does not carry.
+        val bidCase = RumorWriterFixtures.cases(RumorWriterFixtures.Shape.entries.size)
+            .single { it.shape == RumorWriterFixtures.Shape.PRIVATE_BID }
+        val bidRumor = RumorWriterFixtures.bound(RumorWriterFixtures.build(bidCase))
+        val bid = decodePrivateBid(JsRumor(bidRumor)).privateBid
+            ?: fail("the generated private bid must decode")
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsPrivateBid"), floor = 15),
+            JsMessageFixtures.privateBidFields(bid, PrivateBid.decode(bidRumor)).map { it.name }.toSet(),
+            "JsMessageFixtures.privateBidFields must name every value JsPrivateBid publishes",
         )
     }
 

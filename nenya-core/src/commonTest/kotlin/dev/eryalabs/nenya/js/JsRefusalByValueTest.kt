@@ -88,7 +88,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Thirty-five of `JsSurfaceTest.ENTRY_POINTS`' thirty-six: `capabilities` takes nothing, so it
+         * Thirty-six of `JsSurfaceTest.ENTRY_POINTS`' thirty-seven: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -127,6 +127,7 @@ class JsRefusalByValueTest {
             "matchesBoard",
             "sealAsync",
             "openAsync",
+            "decodePrivateBid",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1126,7 +1127,7 @@ class JsRefusalByValueTest {
     }
 
     /**
-     * The four §7 message decoders take a handle and no string, so each is handed a rumor it is not
+     * The five §6.1 and §7 message decoders take a handle and no string, so each is handed a rumor it is not
      * for — §7.4's `kind:14`, which no bound decoder can be given, and a bound message of the wrong
      * `type`.
      */
@@ -1147,6 +1148,8 @@ class JsRefusalByValueTest {
             record("decodeStatusUpdate of $what", update.ok, update.kind, update.reason, update.reasonVocabulary, update.detail)
             val release = call(::decodeRelease) { decodeRelease(rumor) }
             record("decodeRelease of $what", release.ok, release.kind, release.reason, release.reasonVocabulary, release.detail)
+            val bid = call(::decodePrivateBid) { decodePrivateBid(rumor) }
+            record("decodePrivateBid of $what", bid.ok, bid.kind, bid.reason, bid.reasonVocabulary, bid.detail)
         }
         for ((what, rumor) in listOf("a chat" to chat, "a proposal" to proposal)) {
             val decoded = call(::decodeCommitment) { decodeCommitment(rumor) }
@@ -1381,9 +1384,10 @@ class JsRefusalByValueTest {
 
         assertSweptExactly(returned)
 
-        // 15 and 6 over T42's thirteen entry points; 59 and 15, measured, once T54 swept all thirty-three.
+        // 15 and 6 over T42's thirteen entry points; 59 and 15, measured, once T54 swept all thirty-three;
+        // 61, measured, once T59's `decodePrivateBid` joined the sweep.
         assertTrue(
-            reasons.size >= 59,
+            reasons.size >= 61,
             "only ${reasons.size} distinct refusal(s) were reached — $reasons — which is not the " +
                 "breadth these cases are written for",
         )

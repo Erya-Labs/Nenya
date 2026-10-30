@@ -486,25 +486,26 @@ internal object RumorWriterFixtures {
         }
         Shape.PRIVATE_BID -> {
             val rumor = bound(event)
-            // §7.4 gives a `type=6` no decoder of its own — it advances no state, so there is
-            // nothing for one to produce — and `AttributedRumor.attribute` IS the decoder that
-            // reads it: §7.4's envelope, §7.4's `order` prohibition, §7.4's version-collision rule
-            // and §5.3's Encoding column over `item`, `price` and `fee` all run there.
+            // §7.4's envelope, its `order` prohibition, its version-collision rule and §5.3's
+            // Encoding column over `item`, `price` and `fee` run in `AttributedRumor.attribute`;
+            // §6.1's `price` requirement is `PrivateBid.decode`'s, and the rebuild takes its values.
             assertEquals(
                 OrderMessageKind.PRIVATE_BID,
                 rumor.type,
                 "${case}: §6.1's bid is a kind:16 type=6",
             )
             assertEquals(null, rumor.order, "§7.4: a type=6 MUST NOT carry an `order` tag")
+            val bid = PrivateBid.decode(rumor)
             build(
                 Case(
                     case.shape,
                     case.index,
                     envelopeOf(rumor, spelledBy(case.shape)),
                     null,
-                    item = rumor.tags.item,
-                    terms = bidTermsOf(rumor),
-                    feeRecipient = rumor.tags.feeRecipient,
+                    item = bid.item,
+                    // The writer takes an `OrderTerms`; the decoder reports a bid's terms as §6 does.
+                    terms = OrderTerms.of(bid.price, bid.fee, bid.expiration, bid.deliverBy),
+                    feeRecipient = bid.feeRecipient,
                 ),
             )
         }
@@ -600,14 +601,6 @@ internal object RumorWriterFixtures {
             rumor.tags.deliverBy,
         )
     }
-
-    /** §6.1's four terms, whose price is §5.3's satoshi-denominated `price` row. */
-    private fun bidTermsOf(rumor: AttributedRumor.Bound): OrderTerms = OrderTerms.of(
-        assertNotNull(rumor.tags.price, "§6.1 gives a private bid a `price` row"),
-        rumor.tags.fee,
-        rumor.tags.expiration,
-        rumor.tags.deliverBy,
-    )
 
     private fun requireOrder(case: Case): OrderId =
         assertNotNull(case.order, "$case must carry §7.4's order id")
