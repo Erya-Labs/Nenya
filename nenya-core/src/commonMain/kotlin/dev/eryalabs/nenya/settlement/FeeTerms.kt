@@ -1,7 +1,9 @@
 package dev.eryalabs.nenya.settlement
 
+import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
+import dev.eryalabs.nenya.channel.PrivateBid
 import dev.eryalabs.nenya.collections.readOnlyListOf
 import dev.eryalabs.nenya.collections.readOnlySetOf
 import dev.eryalabs.nenya.order.OrderState
@@ -252,14 +254,34 @@ public class FeeTermSighting internal constructor(
         )
 
         /**
+         * §8.4's OPTIONAL [FeeTermPoint.BID], off a §6 public `kind:1111` bid T11 decoded.
+         *
+         * "A bid that carried a `fee` tag binds the bidder to that term (§6, §6.1)." A bid
+         * carrying none gives a sighting whose [term] is `null`, and that is §8.4's MUST NOT and
+         * not a missing operand: [FeeTermAgreement.across] drops it rather than comparing it, so a
+         * fee-less bid never aborts an order whose proposal states a fee.
+         */
+        public fun onBid(bid: Bid): FeeTermSighting =
+            FeeTermSighting(FeeTermPoint.BID, feeTag(bid.encode()))
+
+        /**
+         * §8.4's OPTIONAL [FeeTermPoint.BID], off a §6.1 `kind:16` `type=6` private bid T59
+         * decoded. The same point as [onBid] — §8.4 names one bid point and §6.1 applies §6's term
+         * rules unchanged — and the same treatment of a bid carrying no `fee` tag.
+         */
+        public fun onPrivateBid(bid: PrivateBid): FeeTermSighting =
+            FeeTermSighting(FeeTermPoint.BID, feeTag(bid.encode()))
+
+        /**
          * A sighting at [point] from a `fee` tag the caller read itself, or `null` for a
          * deliberate absence.
          *
-         * The door for §8.4's [FeeTermPoint.BID], which this library has no order-thread codec
-         * for — a public `kind:1111` bid is §6's, and the `fee` tag on one is read through the tag
-         * layer rather than through this package. A caller using this door owns the parse: §4.4's
-         * strict decimal form is what makes the byte comparison below honest, and a tag that never
-         * went through it can carry `["fee", "0250", …]` into a comparison T9 would have refused.
+         * Every point §8.4 names has a decoded door above — [onProposal], [onAcceptance],
+         * [onPaymentRequest], [onReceipt], [onBid] and [onPrivateBid] — and those are the doors
+         * to use. This one is for a tag that reached the caller some other way, such as across
+         * the JavaScript boundary, and a caller using it owns the parse: §4.4's strict decimal
+         * form is what makes the byte comparison below honest, and a tag that never went through
+         * it can carry `["fee", "0250", …]` into a comparison T9 would have refused.
          *
          * @throws SettlementException [SettlementRejection.MALFORMED_FEE_TERM] when [feeTag] is
          *   not a `fee` tag at one of §8.1's two legal arities. A comparison over something else

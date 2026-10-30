@@ -25,6 +25,7 @@ import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.seam.FakeClock
 import dev.eryalabs.nenya.seam.Nip44PayloadEphemeralSigners
 import dev.eryalabs.nenya.seam.RecordingRandomness
+import dev.eryalabs.nenya.settlement.FeeTermPoint
 import dev.eryalabs.nenya.settlement.FeeTermSighting
 import dev.eryalabs.nenya.settlement.SettlementFixtures
 import dev.eryalabs.nenya.tag.NenyaKind
@@ -88,7 +89,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Thirty-six of `JsSurfaceTest.ENTRY_POINTS`' thirty-seven: `capabilities` takes nothing, so it
+         * Thirty-eight of `JsSurfaceTest.ENTRY_POINTS`' thirty-nine: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -128,6 +129,8 @@ class JsRefusalByValueTest {
             "sealAsync",
             "openAsync",
             "decodePrivateBid",
+            "bidFeeSighting",
+            "privateBidFeeSighting",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1150,6 +1153,9 @@ class JsRefusalByValueTest {
             record("decodeRelease of $what", release.ok, release.kind, release.reason, release.reasonVocabulary, release.detail)
             val bid = call(::decodePrivateBid) { decodePrivateBid(rumor) }
             record("decodePrivateBid of $what", bid.ok, bid.kind, bid.reason, bid.reasonVocabulary, bid.detail)
+            val fee = call(::privateBidFeeSighting) { privateBidFeeSighting(rumor) }
+            assertNull(fee.sighting, "privateBidFeeSighting of $what: a refusal carries no sighting")
+            record("privateBidFeeSighting of $what", fee.ok, fee.kind, fee.reason, fee.reasonVocabulary, fee.detail)
         }
         for ((what, rumor) in listOf("a chat" to chat, "a proposal" to proposal)) {
             val decoded = call(::decodeCommitment) { decodeCommitment(rumor) }
@@ -1254,6 +1260,9 @@ class JsRefusalByValueTest {
         val bidTags = BidFixtures.minimalBid()
         bidTags += listOf(listOf("expiration", (BidFixtures.CREATED_AT + 10_000L).toString()))
         val bid = JsBid(BidFixtures.decode(bidTags))
+        // §8.4's bid point takes a decoded bid and nothing else, so it has no hostile value left to be
+        // handed: the hostile bid is `decodeBid`'s refusal above. It must still answer, not throw.
+        assertEquals(FeeTermPoint.BID.name, call(::bidFeeSighting) { bidFeeSighting(bid) }.point)
 
         for (clock in HOSTILE_CLOCKS) {
             val environment = JsEnvironment(nowSeconds = clock)

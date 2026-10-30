@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.channel.PrivateBid
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.settlement.AcceptedPaymentRequest
@@ -190,6 +191,40 @@ public fun acceptPaymentRequest(
         null,
     )
 }
+
+/**
+ * §8.4's OPTIONAL `BID` point, read off a §6 public bid by the library rather than copied out of its
+ * tags by the page. T60.
+ *
+ * One call to `FeeTermSighting.onBid`, over the bid [decodeBid] already decoded — so the `fee` row
+ * went through §4.4's strict decimal form and §4.3's duplicate rule before it got here, and this
+ * function performs no check of its own. A bid carrying no `fee` tag answers a sighting with no
+ * [JsFeeTermSighting.feeTag], which §8.4 forbids requiring at this point; the comparison drops it.
+ *
+ * Answers the sighting itself and not a result: a decoded bid has nothing left to refuse.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun bidFeeSighting(bid: JsBid): JsFeeTermSighting = crossedSighting(FeeTermSighting.onBid(bid.bid))
+
+/**
+ * §8.4's OPTIONAL `BID` point, read off a §6.1 private bid. T60.
+ *
+ * One call to `PrivateBid.decode`, as [decodePrivateBid] makes, then one to
+ * `FeeTermSighting.onPrivateBid`. The decode can refuse — a rumor that is not a `type=6`, or one
+ * carrying no `price` — so the answer is a result with the refusal as a value (decision **P**).
+ *
+ * @param rumor the `kind:16` `type=6` as [open] handed it back.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun privateBidFeeSighting(rumor: JsRumor): JsFeeTermSightingResult =
+    jsGuarded({ JsFeeTermSightingResult(null, it) }) {
+        JsFeeTermSightingResult(
+            FeeTermSighting.onPrivateBid(PrivateBid.decode(rumor.asBoundRumor("kind:16 type=6 private bid"))),
+            null,
+        )
+    }
 
 // =================================================================================================
 // The boundary types.
@@ -488,6 +523,39 @@ public class JsFeeTermSighting public constructor(
     override fun toString(): String = "JsFeeTermSighting(point=$point)"
 }
 
+/** What [privateBidFeeSighting] answered, with [kind] as the discriminator. */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsFeeTermSightingResult internal constructor(
+    private val read: FeeTermSighting?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"fee_term_sighting"` or `"refused"`. */
+    public val kind: String get() = if (read != null) "fee_term_sighting" else "refused"
+
+    /** True exactly when [kind] is `"fee_term_sighting"`. Says the bid decoded — never that its fee agrees. */
+    public val ok: Boolean get() = read != null
+
+    /** The sighting, when [ok], in the shape the settlement checks' `earlierPoints` take. */
+    public val sighting: JsFeeTermSighting? get() = read?.let { crossedSighting(it) }
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `ChannelRejection` for §6.1's own refusals. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = refusal?.detail
+
+    override fun toString(): String =
+        if (ok) "JsFeeTermSightingResult(fee_term_sighting)" else "JsFeeTermSightingResult(refused: $reason)"
+}
+
 // =================================================================================================
 // Translation.
 // =================================================================================================
@@ -519,6 +587,10 @@ private class CrossedPaymentRequestStore(private val js: JsPaymentRequestStore) 
     /** Names no record (§12 item 11). */
     override fun toString(): String = "CrossedPaymentRequestStore(redacted)"
 }
+
+/** A sighting the library read, as the page's [JsFeeTermSighting]: the point's name and the row verbatim. */
+private fun crossedSighting(sighting: FeeTermSighting): JsFeeTermSighting =
+    JsFeeTermSighting(sighting.point.name, sighting.term?.toTypedArray())
 
 /** This sighting as the `FeeTermSighting` §8.4's comparison takes, through that type's own factory. */
 internal fun JsFeeTermSighting.asFeeTermSighting(): FeeTermSighting = FeeTermSighting.of(

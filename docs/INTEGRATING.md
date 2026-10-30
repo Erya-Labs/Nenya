@@ -227,7 +227,10 @@ client builds and sends its own messages at the matching steps.
    `acceptPaymentRequest` its `earlierPoints` parameter: a `JsFeeTermSighting` for each earlier point
    where the `fee` tag appeared, or was absent (§8.4). At least the proposal (`ORDER_PROPOSAL`) and
    the acceptance (`ACCEPTANCE`) must be among them, or the request is refused
-   `FEE_TERM_POINT_MISSING`. Then the buyer steps the order with `payment_requests_received`,
+   `FEE_TERM_POINT_MISSING`. If the order came from a bid, add the bid's point too: get it from
+   `bidFeeSighting` for a public bid or `privateBidFeeSighting` for a private one, rather than
+   copying the bid's `fee` tag yourself. A bid with no `fee` tag gives a sighting with no `feeTag`,
+   which the comparison skips (§8.4). Then the buyer steps the order with `payment_requests_received`,
    passing the accepted records.
 8. **Pay and check the receipts** (§9). The buyer pays each invoice with its own wallet, builds
    `buildReceipt` for each payment, then seals and sends it. The buyer opens its own `toSelf` copy of
@@ -302,6 +305,8 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `acceptPaymentRequest` — accepts a payment request against the proposal and acceptance, and stores it (§8.6).
 - `verifySettlement` — checks a payment receipt against the stored payment request (§9.2).
 - `verifyFeeReceipt` — the same, for the fee recipient's payment (§8.5, §9.2).
+- `bidFeeSighting` — the `fee` tag of a decoded public bid, as a `BID` sighting for `earlierPoints` (§8.4).
+- `privateBidFeeSighting` — the same, for a private bid read from an opened rumor (§6.1, §8.4).
 - `verifyServedBytes` — compares the bytes a provider served with the commitment (§10.4).
 - `openOrder` — starts an order in the state machine (§11).
 - `stepOrder` — applies one event to an order and answers the new order or the refusal (§11.2).
