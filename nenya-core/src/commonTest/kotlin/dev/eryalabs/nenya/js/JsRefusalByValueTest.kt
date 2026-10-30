@@ -89,7 +89,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Thirty-eight of `JsSurfaceTest.ENTRY_POINTS`' thirty-nine: `capabilities` takes nothing, so it
+         * Thirty-nine of `JsSurfaceTest.ENTRY_POINTS`' forty: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -131,6 +131,7 @@ class JsRefusalByValueTest {
             "decodePrivateBid",
             "bidFeeSighting",
             "privateBidFeeSighting",
+            "buildProposalForBid",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1345,6 +1346,41 @@ class JsRefusalByValueTest {
         )
         assertTrue("PROPOSAL_EXPIRED" in reasons, "§7.5's deadline for acceptance: $reasons")
 
+        // T61's proposal from the chosen bid. `bid` is scoped to the request authored at index 1, not to
+        // `expiring`, so it gets its own expiring copy of that request: on a request the buyer is the
+        // listing's author and the provider the bidder.
+        val requestTags = ListingFixtures.minimal(NenyaKind.REQUEST)
+        requestTags += listOf(listOf("expiration", DEADLINE.toString()))
+        val chosenOn = JsListing(ListingFixtures.decode(requestTags, NenyaKind.REQUEST, index = 1))
+        val buyerEnvelope = JsRumorEnvelope(
+            authorPubkey = bid.bid.listingAuthorPubkey,
+            createdAtSeconds = (DEADLINE - 1).toString(),
+            counterparties = arrayOf(arrayOf(bid.bid.bidderPubkey)),
+        )
+        fun forBid(
+            what: String,
+            env: JsEnvironment = JsEnvironment(nowSeconds = clockSaying((DEADLINE - 1).toString())),
+            with: JsRumorEnvelope = buyerEnvelope,
+            id: String = order,
+            acceptBy: String? = null,
+        ) = record(
+            what,
+            call(::buildProposalForBid) { buildProposalForBid(chosenOn, bid, env, with, id, acceptBy) },
+        )
+        for (clock in HOSTILE_CLOCKS) forBid("proposal for bid under a hostile clock", env = JsEnvironment(nowSeconds = clock))
+        for (hostile in hostileEnvelopes(buyerEnvelope)) forBid("proposal for bid envelope", with = hostile)
+        for (bad in HOSTILE_HEX) forBid("proposal for bid orderIdHex=`$bad`", id = bad)
+        for (bad in HOSTILE_DECIMALS) forBid("proposal for bid acceptBy=`$bad`", acceptBy = bad)
+        forBid(
+            "proposal for bid sealed by the provider",
+            with = JsRumorEnvelope(
+                authorPubkey = bid.bid.bidderPubkey,
+                createdAtSeconds = (DEADLINE - 1).toString(),
+                counterparties = arrayOf(arrayOf(bid.bid.listingAuthorPubkey)),
+            ),
+        )
+        assertTrue("WRONG_PARTIES" in reasons, "decision H's parties: $reasons")
+
         val kinds = arrayOf(NenyaKind.REQUEST)
         for (bad in HOSTILE_HEX + HOSTILE_DECIMALS) {
             for (query in listOf(
@@ -1394,9 +1430,10 @@ class JsRefusalByValueTest {
         assertSweptExactly(returned)
 
         // 15 and 6 over T42's thirteen entry points; 59 and 15, measured, once T54 swept all thirty-three;
-        // 61, measured, once T59's `decodePrivateBid` joined the sweep.
+        // 61, measured, once T59's `decodePrivateBid` joined the sweep; 62, measured, once T61's
+        // `buildProposalForBid` added `WRONG_PARTIES`.
         assertTrue(
-            reasons.size >= 61,
+            reasons.size >= 62,
             "only ${reasons.size} distinct refusal(s) were reached — $reasons — which is not the " +
                 "breadth these cases are written for",
         )

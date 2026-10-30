@@ -152,6 +152,8 @@ class JsListingAgreementEqualityTest {
                                     assertNotNull(answer.detail, what)
                                     elsewhere++
                                 }
+                                ListingOrderBuild.WrongParties ->
+                                    fail("$what: `agreement` is handed no bid, so it cannot say who the parties are")
                             }
                         }
                     }

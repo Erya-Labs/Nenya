@@ -212,7 +212,12 @@ client builds and sends its own messages at the matching steps.
    read them with `decodePrivateBid`. A bid binds nobody and does not move an order.
 4. **Propose** (§7.5). The buyer draws a new order id — 32 bytes from a secure random source, as
    64 hex characters (§7.4) — builds the proposal with `buildProposalAgainst`, then seals and sends
-   it. The buyer then starts its order with `openOrder`, giving the same order id and terms. That
+   it. If the buyer chose a public bid, build it with `buildProposalForBid` instead: it copies the
+   bid's price, `fee`, fee recipient and `deliver_by`, so do not type them again. It is refused unless
+   the buyer sends it to the provider — on a request, the request's author to the bidder; on an
+   offer, the bidder to the offer's author. Its `acceptBy` is the proposal's `expiration`, and must
+   be before the bid's `deliver_by`. The buyer then starts its order with `openOrder`, giving the
+   same order id and terms (for a bid, the bid's price, fee and `deliver_by`, and `acceptBy`). That
    call *is* the proposal step: the order starts in `proposed`, and stepping it again with a
    `proposal` event is refused.
 5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
@@ -285,6 +290,7 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `buildChat` — builds a chat rumor, `kind:14` (§7.4).
 - `buildProposal` — builds an order proposal rumor, `kind:16` `type=1`, from a coordinate (§7.5).
 - `buildProposalAgainst` — the same, against a decoded listing, refused if the listing has expired (§5.6).
+- `buildProposalForBid` — the same, from the decoded public bid the buyer chose, with the bid's terms copied (§6, §7.5).
 - `buildAgreementAgainst` — builds the provider's acceptance of a proposal against a decoded listing (§7.6).
 - `buildStatusUpdate` — builds a status update rumor, `kind:16` `type=3` (§11.1).
 - `buildCommitment` — builds a delivery commitment rumor, `kind:16` `type=5` (§10.1).

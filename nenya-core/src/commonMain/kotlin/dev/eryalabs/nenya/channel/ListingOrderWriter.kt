@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.channel
 
+import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.bid.DeadlineGate
 import dev.eryalabs.nenya.bid.DeadlineRefusal
 import dev.eryalabs.nenya.listing.Listing
@@ -9,15 +10,20 @@ import dev.eryalabs.nenya.seam.NenyaClock
 import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.seam.SeamAnswer
 import dev.eryalabs.nenya.tag.ItemRef
+import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.wire.WireEvent
 
 /**
- * What [ListingOrderWriter] answers: the unsigned rumor, a proposal naming another listing, §5.6's
- * deadline refusal, §7.5's deadline for acceptance, or the §7.4 rule that refused the message itself.
+ * What [ListingOrderWriter] answers: the unsigned rumor, a proposal naming another listing, a
+ * proposal sent between the wrong keys, §5.6's deadline refusal, §7.5's deadline for acceptance, or
+ * the §7.4 rule that refused the message itself.
  *
  * [ForAnotherListing] and [ProposalDeadlineRefused] are reachable only from
- * [ListingOrderWriter.agreement]: `proposal` reads its `item` off the listing it is handed, so it has
- * no second coordinate to disagree with, and it is writing the deadline rather than answering one.
+ * [ListingOrderWriter.agreement]: `proposal` and `proposalForBid` read their `item` off the listing
+ * they are handed, so they have no second coordinate to disagree with, and they write the deadline
+ * for acceptance rather than answering one. [WrongParties] is reachable only from
+ * [ListingOrderWriter.proposalForBid], the one writer handed a bid, and so the one that can say who
+ * the buyer and the provider are.
  *
  * More cases than [RumorBuild]'s two, because the refusals are different facts with different
  * fixes: [DeadlineRefused] is about the **listing** — its `expiration` has passed, or the
@@ -68,10 +74,32 @@ public sealed interface ListingOrderBuild {
     }
 
     /**
-     * §5.6: the listing's deadline refused, so no message was built at all.
+     * §7.4's proposal is the buyer's, sent to the provider, and this one was not: [RumorEnvelope]'s
+     * author is not the buyer the listing and the bid name, or its `p` counterparties are not exactly
+     * the provider they name, or the two are one key. Nothing was built and the clock was never read.
      *
-     * [reason] is always one of `DeadlineRefusal`'s two **listing** constants — `LISTING_EXPIRED` or
-     * `LISTING_CANNOT_SAY` — because this writer hands the gate no bid.
+     * Decision **H**'s resolution of the two parties: on a request the listing's author is the buyer
+     * and the bidder the provider; on an offer, where §6 makes the bid a counter-offer, the bidder is
+     * the buyer and the offer's author the provider. A proposal sealed by anyone else would carry the
+     * bid's terms to an order its author never asked for.
+     *
+     * Carries no value — neither which key was wrong nor what was expected — because §12 item 11
+     * keeps a counterparty pubkey out of a diagnostic.
+     */
+    public object WrongParties : ListingOrderBuild {
+
+        override fun toString(): String = "ListingOrderBuild.WrongParties"
+    }
+
+    /**
+     * §5.6: the listing's deadline refused, so no message was built at all — or, from
+     * [ListingOrderWriter.proposalForBid], §4.6's deadline on the bid did, or the bid is scoped to
+     * another listing.
+     *
+     * From [ListingOrderWriter.proposal] and [ListingOrderWriter.agreement], [reason] is always one of
+     * `DeadlineRefusal`'s two **listing** constants — `LISTING_EXPIRED` or `LISTING_CANNOT_SAY` —
+     * because they hand the gate no bid. `proposalForBid` hands it one, so any of the five is possible
+     * there, and `reason.side` says which message refused.
      */
     public class DeadlineRefused internal constructor(
 
@@ -165,6 +193,10 @@ public enum class ProposalDeadlineRefusal {
  * has. The other arms of "advance" would need the order machine to hold the listing, and nothing
  * here claims them.
  *
+ * [proposalForBid] is [proposal] for the buyer who chose a public bid (§6 → §7.5): the price, `fee`,
+ * fee recipient and `deliver_by` are copied off the decoded bid rather than typed a second time, so
+ * the terms the bidder signed are the terms proposed.
+ *
  * Pure computation over the injected clock: no randomness and no I/O.
  */
 public object ListingOrderWriter {
@@ -195,6 +227,107 @@ public object ListingOrderWriter {
         }
         return when (
             val built = RumorWriter.proposal(envelope, order, ItemRef(listing.coordinate), terms, feeRecipient, amountSat)
+        ) {
+            is RumorBuild.Built -> ListingOrderBuild.Built(built.event)
+            is RumorBuild.Refused -> ListingOrderBuild.Refused(built)
+        }
+    }
+
+    /**
+     * §7.5's `kind:16` `type=1` order proposal made from [bid], the public bid on [listing] the buyer
+     * chose, with the bid's terms carried across and never retyped.
+     *
+     * ### In the order the checks are made
+     *
+     * 1. [bid]'s coordinate against [listing]'s. A bid on another listing answers
+     *    [ListingOrderBuild.DeadlineRefused] with `BID_FOR_ANOTHER_LISTING` — the answer
+     *    `DeadlineGate.check` gives for the same pair — and never reads the clock: the parties below
+     *    are read off the listing, and would say nothing about a bid on some other one.
+     * 2. The parties, per decision **H** and §7.4: on a request (`kind:30404`) the buyer is the
+     *    listing's author and the provider the bidder; on an offer, where §6 makes the bid a
+     *    counter-offer, the buyer is the bidder and the provider the offer's author. Unless
+     *    [envelope]'s author is that buyer, its counterparties are exactly that provider, and the two
+     *    are different keys, the answer is [ListingOrderBuild.WrongParties] and the clock is not read.
+     * 3. `DeadlineGate.check(listing, bid, clock)`: anything but `Permitted` answers
+     *    [ListingOrderBuild.DeadlineRefused] — the listing's §5.6 deadline first, then the bid's §4.6
+     *    one — and builds nothing. The clock is read at most once.
+     * 4. [acceptBy], §7.5's deadline for acceptance: a negative one is refused as
+     *    `ChannelRejection.MALFORMED_TAG` and one at or after the bid's `deliver_by` as
+     *    `ChannelRejection.DEADLINES_INVERTED` — §7.5's "strictly earlier" — both naming `expiration`
+     *    and both as [ListingOrderBuild.Refused], never thrown.
+     * 5. `RumorWriter.proposal` with `item` = the listing's coordinate, and the bid's price, `fee`,
+     *    fee recipient and `deliver_by` (§7.5: "`deliver_by` is the bid's own … carried across
+     *    byte-identically from §6"), `expiration` = [acceptBy], and no `amount` tag.
+     *
+     * ### What it does not claim
+     *
+     * The bid's `expiration` is judged and never copied: it is the bidder's deadline for being taken
+     * up, not the buyer's deadline for acceptance, and §6's own example bid expires after its
+     * `deliver_by`, which §7.5 would refuse as a proposal's. It does not check the bid's `p`/`P`
+     * against anything beyond what `Bid.decode` already checked, nor that the listing is still
+     * `active` (§5.1's `status`). And it advances nothing: a bid binds nobody (§6), and nothing in
+     * `dev.eryalabs.nenya.order` calls this writer.
+     *
+     * @param listing the listing [bid] was made on; its §4.2 coordinate becomes §7.5's `item`.
+     * @param bid the §6 public bid the buyer chose, as `Bid.decode` answered it.
+     * @param clock §3's clock seam, read at most once, and only once the parties are right.
+     * @param envelope §7.4's envelope: the buyer's key, its `created_at`, and the provider as `p`.
+     * @param order §7.4's order id, drawn by the buyer.
+     * @param acceptBy §7.5's `expiration`, the deadline for acceptance, in unix seconds, or `null` for none.
+     */
+    public fun proposalForBid(
+        listing: Listing,
+        bid: Bid,
+        clock: NenyaClock,
+        envelope: RumorEnvelope,
+        order: OrderId,
+        acceptBy: Long? = null,
+    ): ListingOrderBuild {
+        if (bid.listing != listing.coordinate) {
+            return ListingOrderBuild.DeadlineRefused(DeadlineRefusal.BID_FOR_ANOTHER_LISTING)
+        }
+        // Both keys normalised as §4.3 normalises a key this client compares: the coordinate's already
+        // is, and a bidder's is the event's own spelling.
+        val author = listing.coordinate.pubkey
+        val bidder = bid.bidderPubkey.lowercase()
+        val buyer = if (listing.coordinate.kind == NenyaKind.REQUEST) author else bidder
+        val provider = if (listing.coordinate.kind == NenyaKind.REQUEST) bidder else author
+        if (
+            buyer == provider ||
+            envelope.authorPubkey.lowercase() != buyer ||
+            envelope.counterparties.map { it.pubkey } != listOf(provider)
+        ) {
+            return ListingOrderBuild.WrongParties
+        }
+        when (val gate = DeadlineGate.check(listing, bid, clock)) {
+            DeadlineGate.Permitted -> Unit
+            is DeadlineGate.Refused -> return ListingOrderBuild.DeadlineRefused(gate.reason)
+        }
+        val deliverBy = bid.deliverBy
+        if (acceptBy != null && acceptBy < 0L) {
+            return ListingOrderBuild.Refused(
+                RumorBuild.Refused(
+                    ChannelRejection.MALFORMED_TAG,
+                    ChannelVocabulary.EXPIRATION,
+                    "§4.3 fixes a timestamp as a non-negative integer of unix seconds, and §7.5's " +
+                        "`${ChannelVocabulary.EXPIRATION}` is one",
+                ),
+            )
+        }
+        if (acceptBy != null && deliverBy != null && acceptBy >= deliverBy) {
+            return ListingOrderBuild.Refused(
+                RumorBuild.Refused(
+                    ChannelRejection.DEADLINES_INVERTED,
+                    ChannelVocabulary.EXPIRATION,
+                    "§7.5 requires a proposal's `${ChannelVocabulary.EXPIRATION}` to fall **strictly** " +
+                        "before its `${ChannelVocabulary.DELIVER_BY}`, and the one asked for here is at " +
+                        "or after the `${ChannelVocabulary.DELIVER_BY}` the bid carries",
+                ),
+            )
+        }
+        val terms = OrderTerms(bid.fee.splitOn(bid.price), acceptBy, deliverBy)
+        return when (
+            val built = RumorWriter.proposal(envelope, order, ItemRef(listing.coordinate), terms, bid.feeRecipient)
         ) {
             is RumorBuild.Built -> ListingOrderBuild.Built(built.event)
             is RumorBuild.Refused -> ListingOrderBuild.Refused(built)

@@ -127,6 +127,8 @@ class ChannelStructureTest {
             // T59's §6.1 private bid, read back.
             "PrivateBid",
             "PrivateBid\$Companion",
+            // T61's proposal from a chosen bid, refusing one sent between the wrong keys.
+            "ListingOrderBuild\$WrongParties",
         )
 
         /**

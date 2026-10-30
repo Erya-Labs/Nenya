@@ -86,6 +86,8 @@ class JsListingOrderEqualityTest {
                             }
                             ListingOrderBuild.ForAnotherListing ->
                                 fail("$what: `proposal` reads its item off the listing and has no other to name")
+                            ListingOrderBuild.WrongParties ->
+                                fail("$what: `proposal` is handed no bid, so it cannot say who the parties are")
                             is ListingOrderBuild.ProposalDeadlineRefused ->
                                 fail("$what: `proposal` writes a deadline for acceptance and answers none")
                             is ListingOrderBuild.Refused -> JsBoundaryFixtures.assertSameAnswer(

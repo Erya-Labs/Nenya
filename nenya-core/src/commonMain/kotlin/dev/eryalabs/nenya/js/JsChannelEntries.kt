@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.bid.DeadlineSide
 import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
@@ -214,6 +215,42 @@ public fun buildProposalAgainst(
 }
 
 /**
+ * §7.5's proposal made from [bid], the public bid on [listing] the buyer chose, through
+ * `ListingOrderWriter.proposalForBid`: the price, `fee`, fee recipient and `deliver_by` are the bid's
+ * own, so the page passes no terms.
+ *
+ * Refused with `reasonVocabulary` `"DeadlineRefusal"` and `BID_FOR_ANOTHER_LISTING` when the bid is
+ * on a different listing; with `"ListingOrderBuild"` and `WRONG_PARTIES` when [envelope]'s author is
+ * not the buyer or its counterparties are not exactly the provider (decision **H**: on a request the
+ * listing's author buys from the bidder, on an offer the bidder buys from the offer's author); with
+ * `"DeadlineRefusal"` when the listing's or the bid's deadline refuses against [environment]'s clock;
+ * and under `ChannelRejection` — `MALFORMED_TAG` or `DEADLINES_INVERTED`, tag `expiration` — when
+ * [acceptBy] is negative or not strictly before the bid's `deliver_by`.
+ *
+ * @param acceptBy §7.5's `expiration`, the deadline for acceptance, unix seconds as a decimal string,
+ *   or `null` for none.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun buildProposalForBid(
+    listing: JsListing,
+    bid: JsBid,
+    environment: JsEnvironment,
+    envelope: JsRumorEnvelope,
+    orderIdHex: String,
+    acceptBy: String? = null,
+): JsBuildResult = jsBuild {
+    ListingOrderWriter.proposalForBid(
+        listing = listing.listing,
+        bid = bid.bid,
+        clock = environment.asClock(),
+        envelope = envelope.asRumorEnvelope(),
+        order = OrderId.ofHex(orderIdHex),
+        acceptBy = crossedSecondsOrNull("expiration", acceptBy),
+    ).asListingOrderResult()
+}
+
+/**
  * §7.6's acceptance of [proposalRumor] against [listing], through `ListingOrderWriter.agreement`.
  *
  * Refused with `reasonVocabulary` `"ListingOrderBuild"` and `reason` `FOR_ANOTHER_LISTING` when the
@@ -388,8 +425,8 @@ internal fun RumorBuild.asJsBuildResult(): JsBuildResult = when (this) {
 }
 
 /**
- * `ListingOrderBuild`'s five cases. `private`, so it is no helper `JsSurfaceTest` has to count: it is
- * the two `…Against` entry points' shared tail and nothing else's.
+ * `ListingOrderBuild`'s six cases. `private`, so it is no helper `JsSurfaceTest` has to count: it is
+ * the two `…Against` entry points' and [buildProposalForBid]'s shared tail and nothing else's.
  */
 private fun ListingOrderBuild.asListingOrderResult(): JsBuildResult = when (this) {
     is ListingOrderBuild.Built -> jsBuilt(event)
@@ -401,13 +438,27 @@ private fun ListingOrderBuild.asListingOrderResult(): JsBuildResult = when (this
         "§7.5's `item` names the listing a proposal derives from, and this proposal's names a different " +
             "listing from the one handed in, so that listing's §5.6 deadline says nothing about it",
     )
+    ListingOrderBuild.WrongParties -> jsRefused(
+        "WRONG_PARTIES",
+        "ListingOrderBuild",
+        null,
+        null,
+        "§7.4's proposal is the buyer's, sent to the provider: the envelope's author must be the buyer and " +
+            "its counterparties exactly the provider the listing and the bid name, and they were not",
+    )
     is ListingOrderBuild.DeadlineRefused -> jsRefused(
         reason.name,
         "DeadlineRefusal",
         null,
         null,
-        "§5.6: no order may be proposed or advanced against an expired listing, and the listing's " +
-            "`expiration` either has passed or could not be judged against the injected clock",
+        when (reason.side) {
+            DeadlineSide.LISTING ->
+                "§5.6: no order may be proposed or advanced against an expired listing, and the listing's " +
+                    "`expiration` either has passed or could not be judged against the injected clock"
+            DeadlineSide.BID ->
+                "§4.6: the bid's `expiration` either has passed or could not be judged against the injected " +
+                    "clock, or the bid is on a different listing from the one handed in"
+        },
     )
     is ListingOrderBuild.ProposalDeadlineRefused -> jsRefused(
         reason.name,
