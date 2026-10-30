@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.conformance
 
 import dev.eryalabs.nenya.JdkRandom
 import dev.eryalabs.nenya.bid.BidFixtures
+import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.tag.TagLimits
@@ -138,6 +139,30 @@ internal object HostileCorpus {
     private val SINGLE_OCCURRENCE: List<String> = listOf("d", "title", "price", "status", "nenya")
 
     /**
+     * The same, for a §7.4 rumor: §7.4's own `order` and `type`, the §5.3 rows the order messages
+     * carry, §7.5's `amount_msat`, §8.6's `payee` and `payment`, and §10's `x`. A name the base does
+     * not carry is appended once rather than duplicated — still hostile, as an unexpected row.
+     */
+    private val RUMOR_SINGLE_OCCURRENCE: List<String> =
+        listOf("nenya", "order", "type", "item", "price", "fee", "amount_msat", "payee", "payment", "x")
+
+    /** §7.4's two discriminators, which the rumor corpus's decimal mutations leave alone ([numbers]). */
+    private val RUMOR_DISCRIMINATORS: Set<String> = setOf("nenya", "type")
+
+    /**
+     * One rumor corpus entry: the `RumorWriterFixtures` case its base event was built from, and that
+     * event with one [Mutation] applied.
+     *
+     * The case is carried so a [Mutation.WELL_FORMED] entry can be held field for field against the
+     * values it was written from, and so a floor can be counted per message shape.
+     */
+    internal class RumorInput(val case: RumorWriterFixtures.Case, val input: Input) {
+
+        /** Names the shape, the mutation and the index, and no value at all — as [Input] does. */
+        override fun toString(): String = "RumorInput(${case.shape}, ${input.mutation}, #${input.index})"
+    }
+
+    /**
      * [count] inputs from one seeded run, cycling [Mutation] so every constant is drawn roughly
      * equally.
      *
@@ -150,6 +175,39 @@ internal object HostileCorpus {
         val random = JdkRandom(SEED)
         val mutations = Mutation.entries
         return List(count) { index -> input(random, index, mutations[index % mutations.size]) }
+    }
+
+    /**
+     * [count] §7.4 rumors from one seeded run: the event `RumorWriterFixtures` builds for each of its
+     * cases — every [RumorWriterFixtures.Shape], cycled — with one [Mutation] applied, the mutations
+     * cycled as in [corpus].
+     *
+     * The same [SEED] drives the mutations, from a [JdkRandom] of its own, so [corpus]'s output does
+     * not move. Wrong-length hex and the three decimal mutations break **one** value here rather
+     * than every one — see [numbers] for what breaking them all did to a rumor. Eight shapes and thirteen mutations are coprime, so a count that is a multiple of
+     * their product draws every (shape, mutation) pair equally; and five, [breachesTheWire]'s
+     * modulus, is coprime with both, for the reason that function gives.
+     */
+    fun rumorCorpus(count: Int): List<RumorInput> {
+        val random = JdkRandom(SEED)
+        val mutations = Mutation.entries
+        return RumorWriterFixtures.cases(count).mapIndexed { index, case ->
+            val event = RumorWriterFixtures.build(case)
+            val draft = Input(
+                mutation = mutations[index % mutations.size],
+                index = index,
+                kind = event.kind,
+                pubkey = event.pubkey,
+                createdAt = event.createdAt,
+                tags = event.tags,
+                content = event.content,
+                text = "nenya-rumor-$index",
+                hex = event.pubkey,
+                coordinate = "${event.kind}:${event.pubkey}:listing-$index",
+                decimal = index.toString(),
+            )
+            RumorInput(case, mutate(random, draft, RUMOR_SINGLE_OCCURRENCE, oneAtATime = true))
+        }
     }
 
     private fun input(random: JdkRandom, index: Int, mutation: Mutation): Input {
@@ -188,7 +246,12 @@ internal object HostileCorpus {
         else -> TagFixtures.minimalOffer()
     }.also { tags -> tags += listOf("x-nenya-unknown-$index", "preserved verbatim (§4.3)") }
 
-    private fun mutate(random: JdkRandom, draft: Input): Input = when (draft.mutation) {
+    private fun mutate(
+        random: JdkRandom,
+        draft: Input,
+        singleOccurrence: List<String> = SINGLE_OCCURRENCE,
+        oneAtATime: Boolean = false,
+    ): Input = when (draft.mutation) {
         Mutation.WELL_FORMED -> draft
 
         Mutation.TRUNCATED -> draft.copy(
@@ -239,7 +302,7 @@ internal object HostileCorpus {
         )
 
         Mutation.DUPLICATED_TAG -> {
-            val name = SINGLE_OCCURRENCE[random.nextInt(SINGLE_OCCURRENCE.size)]
+            val name = singleOccurrence[random.nextInt(singleOccurrence.size)]
             val existing = draft.tags.firstOrNull { it[0] == name }
             draft.copy(tags = draft.tags + listOf(existing ?: listOf(name, "a second occurrence")))
         }
@@ -268,7 +331,15 @@ internal object HostileCorpus {
         Mutation.HEX_WRONG_LENGTH -> {
             val wrong = if (random.nextBoolean()) draft.pubkey.dropLast(1) else draft.pubkey + "a"
             draft.copy(
-                tags = replaceHex(draft.tags, wrong),
+                tags = if (oneAtATime) {
+                    replaceOne(random, draft.tags, { _, value -> isHex64(value) || isCoordinate(value) }) { value ->
+                        val cut = wrong.length < draft.pubkey.length
+                        if (isCoordinate(value)) {
+                            val fields = value.split(":", limit = 3)
+                            "${fields[0]}:${if (cut) fields[1].dropLast(1) else fields[1] + "a"}:${fields[2]}"
+                        } else if (cut) value.dropLast(1) else value + "a"
+                    }
+                } else replaceHex(draft.tags, wrong),
                 // Same split, same reason: a wrong-length event pubkey dies at the wire layer, so
                 // only a fifth of these carry one and the rest reach the tag codec with
                 // wrong-length hex inside a `p`, an `a` and a `P` tag.
@@ -296,17 +367,17 @@ internal object HostileCorpus {
                 2 -> "1_000"
                 else -> " ${draft.index} "
             }
-            draft.copy(tags = replaceNumbers(draft.tags, value), decimal = value, coordinate = "0$value:${draft.pubkey}:d")
+            draft.copy(tags = numbers(random, draft.tags, value, oneAtATime), decimal = value, coordinate = "0$value:${draft.pubkey}:d")
         }
 
         Mutation.SIGNED_DECIMAL -> {
             val value = if (random.nextBoolean()) "-${1 + draft.index}" else "+${1 + draft.index}"
-            draft.copy(tags = replaceNumbers(draft.tags, value), decimal = value, coordinate = "$value:${draft.pubkey}:d")
+            draft.copy(tags = numbers(random, draft.tags, value, oneAtATime), decimal = value, coordinate = "$value:${draft.pubkey}:d")
         }
 
         Mutation.EXPONENTIAL_DECIMAL -> {
             val value = if (random.nextBoolean()) "1e${1 + random.nextInt(9)}" else "1.5E2"
-            draft.copy(tags = replaceNumbers(draft.tags, value), decimal = value, coordinate = "$value:${draft.pubkey}:d")
+            draft.copy(tags = numbers(random, draft.tags, value, oneAtATime), decimal = value, coordinate = "$value:${draft.pubkey}:d")
         }
 
         // Chosen by index rather than drawn, so the count of each variant is **fixed**. Three of
@@ -381,6 +452,51 @@ internal object HostileCorpus {
                 }
             }
         }
+
+    /**
+     * [replaceNumbers], or — for the rumor corpus — the same replacement in **one** all-digit value
+     * chosen at random, never §7.4's `nenya` or `type`.
+     *
+     * Measured before this existed: replacing every number on a rumor rewrote §7.4's `nenya` and
+     * `type` too, `attribute` refused all 240 decimal-mutated rumors as `MALFORMED_TAG` or
+     * `MALFORMED_TYPE`, and no decoder above it ever saw a non-canonical `amount_msat` or `size` —
+     * which is where an unhardened `toInt()` would sit. Those two discriminators' strictness is
+     * `attribute`'s own and is swept by the wrong-length, empty and truncated mutations here.
+     */
+    private fun numbers(
+        random: JdkRandom,
+        tags: List<List<String>>,
+        replacement: String,
+        oneAtATime: Boolean,
+    ): List<List<String>> = if (!oneAtATime) replaceNumbers(tags, replacement) else {
+        replaceOne(random, tags, { name, value ->
+            name !in RUMOR_DISCRIMINATORS && value.isNotEmpty() && value.all { it.isDigit() }
+        }) { replacement }
+    }
+
+    /**
+     * [tags] with **one** value, chosen at random among those [eligible] accepts by tag name and
+     * value — never a tag name — rewritten by [edit]. Unchanged when no value is eligible.
+     */
+    private fun replaceOne(
+        random: JdkRandom,
+        tags: List<List<String>>,
+        eligible: (name: String, value: String) -> Boolean,
+        edit: (String) -> String,
+    ): List<List<String>> {
+        val spots = tags.flatMapIndexed { at, tag ->
+            (1 until tag.size).filter { eligible(tag[0], tag[it]) }.map { at to it }
+        }
+        if (spots.isEmpty()) return tags
+        val (target, position) = spots[random.nextInt(spots.size)]
+        return tags.mapIndexed { at, tag ->
+            if (at != target) tag else tag.mapIndexed { place, value -> if (place == position) edit(value) else value }
+        }
+    }
+
+    private fun isHex64(value: String): Boolean = value.length == 64 && value.all { it in "0123456789abcdef" }
+
+    private fun isCoordinate(value: String): Boolean = value.count { it == ':' } >= 2
 
     /** Every all-digit value in [tags] replaced by [replacement] — timestamps, amounts, kinds. */
     private fun replaceNumbers(tags: List<List<String>>, replacement: String): List<List<String>> =

@@ -1,7 +1,23 @@
 package dev.eryalabs.nenya.conformance
 
 import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.channel.AttributedRumor
+import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
+import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
+import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.OrderStatusMessage
+import dev.eryalabs.nenya.channel.PrivateBid
+import dev.eryalabs.nenya.channel.RumorWriterFixtures
+import dev.eryalabs.nenya.channel.RumorWriterFixtures.Shape
 import dev.eryalabs.nenya.listing.Listing
+import dev.eryalabs.nenya.money.FeeSplit
+import dev.eryalabs.nenya.money.Msat
+import dev.eryalabs.nenya.order.OrderTerms
+import dev.eryalabs.nenya.payment.Payee
+import dev.eryalabs.nenya.payment.Preimage
+import dev.eryalabs.nenya.settlement.PaymentMedium
+import dev.eryalabs.nenya.settlement.PaymentReceipt
+import dev.eryalabs.nenya.settlement.PaymentRequest
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagContext
 import dev.eryalabs.nenya.tag.TagSet
@@ -11,6 +27,8 @@ import dev.eryalabs.nenya.wire.WireEvent
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -29,6 +47,116 @@ abstract class PortableHostileInputSweepTest {
 
         /** Thirteen mutation kinds, so each is drawn a hundred times. */
         const val CORPUS: Int = 1_300
+
+        /**
+         * Thirteen mutation kinds by eight `RumorWriterFixtures` shapes, each pair drawn ten times —
+         * and no larger than [CORPUS], which is sized to JavaScript's 30-second per-test budget.
+         */
+        const val RUMOR_CORPUS: Int = 1_040
+
+        /**
+         * Mutated inputs of its own shape each decoder must see past `attribute`. Measured at
+         * [HostileCorpus.SEED]: 28 for `PrivateBid` (the fewest) to 79 for the commitment and the
+         * release, of 120 mutated per shape — so this sits well below the smallest, for a reviewer
+         * who changes the seed.
+         */
+        const val RUMOR_REACH_FLOOR: Int = 20
+    }
+
+    /**
+     * One rumor corpus entry, plus whatever of it survived the layers below the seven decoders:
+     * the wire event, T8's id check, and §7.2/§7.4's [AttributedRumor.attribute] under the rumor's
+     * own claimed pubkey as the seal's — §7.2's positive case, so what refuses is the mutation.
+     */
+    internal class RumorContext(
+        val rumor: HostileCorpus.RumorInput,
+        val event: WireEvent?,
+        val checked: CheckedEvent?,
+        val attributed: AttributedRumor?,
+    ) {
+
+        val input: HostileCorpus.Input get() = rumor.input
+
+        val case: RumorWriterFixtures.Case get() = rumor.case
+
+        /** The four hostile strings, as [Context.strings]. */
+        val strings: List<String>
+            get() = listOf(input.text, input.hex, input.coordinate, input.decimal)
+    }
+
+    internal fun rumorContextOf(rumor: HostileCorpus.RumorInput): RumorContext {
+        val event = runCatching { build(rumor.input) }.getOrNull()
+        val checked = event?.let {
+            runCatching { CheckedEvent.checkEventId(EventId.of(it).toHex(), it) }.getOrNull()
+        }
+        val attributed = checked?.let {
+            runCatching { AttributedRumor.attribute(rumor.input.pubkey, it) }.getOrNull()
+        }
+        return RumorContext(rumor, event, checked, attributed)
+    }
+
+    /**
+     * One of §7's seven decoders over an [AttributedRumor.Bound]: the label the JVM reflection check
+     * names it by, the fixture shape whose rumors are its own, and the call.
+     */
+    internal class RumorDecoder(
+        val label: String,
+        val shape: Shape,
+        val decode: (AttributedRumor.Bound, RumorWriterFixtures.Case) -> Any,
+    )
+
+    /**
+     * The seven, in one list both halves of the sweep read: the reach floor here, and the JVM
+     * sweep and its reflection equality in `HostileInputSweepTest`. `kind:14` has none — §7.4 puts
+     * chat outside the required set, and `attribute` answers it as [AttributedRumor.Chat].
+     */
+    internal val rumorDecoders: List<RumorDecoder> = listOf(
+        RumorDecoder("PrivateBid\$Companion.decode", Shape.PRIVATE_BID) { rumor, _ -> PrivateBid.decode(rumor) },
+        RumorDecoder("OrderProposal\$Companion.decode", Shape.PROPOSAL) { rumor, _ -> OrderProposal.decode(rumor) },
+        RumorDecoder("OrderStatusMessage\$Companion.decode", Shape.ORDER_UPDATE) { rumor, _ ->
+            OrderStatusMessage.decode(rumor)
+        },
+        RumorDecoder("DeliveryCommitmentMessage\$Companion.decode", Shape.COMMITMENT) { rumor, _ ->
+            DeliveryCommitmentMessage.decode(rumor)
+        },
+        RumorDecoder("DeliverableReleaseMessage\$Companion.decode", Shape.RELEASE) { rumor, _ ->
+            DeliverableReleaseMessage.decode(rumor)
+        },
+        RumorDecoder("PaymentRequest\$Companion.decode", Shape.PAYMENT_REQUEST) { rumor, case ->
+            PaymentRequest.decode(rumor, splitFor(case))
+        },
+        RumorDecoder("PaymentReceipt\$Companion.decode", Shape.RECEIPT) { rumor, _ -> PaymentReceipt.decode(rumor) },
+    )
+
+    /**
+     * §8.3's split `PaymentRequest.decode` takes, which no message carries: the case's own where it
+     * has terms, otherwise a fixed fee-less one, so the decoder is reached on every bound rumor.
+     */
+    internal fun splitFor(case: RumorWriterFixtures.Case): FeeSplit =
+        (case.terms ?: OrderTerms.of(Msat.ofSat(90_000L))).split
+
+    /**
+     * The decoders reached by fewer than [floor] **mutated** inputs of their own shape past
+     * `attribute`, with the count each was reached by. Empty when every decoder was swept.
+     *
+     * Counted over mutated inputs only, for the reason the listing floor gives: the well-formed
+     * thirteenth of each shape would meet a small floor on its own. And only over inputs whose event
+     * the mutation actually changed — a one-value-at-a-time mutation that found no value to break
+     * leaves the fixture's event as it was, and is the writers' own output under another name.
+     */
+    internal fun rumorReachShortfalls(corpus: List<HostileCorpus.RumorInput>, floor: Int): Map<String, Int> {
+        val reached = rumorDecoders.associate { it.label to 0 }.toMutableMap()
+        for (rumor in corpus) {
+            if (rumor.input.mutation == HostileCorpus.Mutation.WELL_FORMED) continue
+            val base = RumorWriterFixtures.build(rumor.case)
+            val input = rumor.input
+            if (input.tags == base.tags && input.content == base.content && input.pubkey == base.pubkey) continue
+            if (rumorContextOf(rumor).attributed !is AttributedRumor.Bound) continue
+            for (decoder in rumorDecoders) {
+                if (decoder.shape == rumor.case.shape) reached[decoder.label] = reached.getValue(decoder.label) + 1
+            }
+        }
+        return reached.filterValues { it < floor }
     }
 
     /** One corpus entry, plus whatever of it survived the layers below the entry point. */
@@ -201,6 +329,168 @@ abstract class PortableHostileInputSweepTest {
                     "no $mutation input of kind:$kind got past the wire layer, so that mutation " +
                         "is swept on two kinds out of three and nobody would notice: $reached",
                 )
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // §7's rumor decoders.
+    // ---------------------------------------------------------------------------------------------
+
+    /** The rumor corpus floor: every (shape, mutation) pair drawn, reproducibly, within budget. */
+    @JsName("the_rumor_corpus_carries_every_shape_and_mutation_kind")
+    @Test
+    fun `the rumor corpus carries every shape and mutation kind`() {
+        val corpus = HostileCorpus.rumorCorpus(RUMOR_CORPUS)
+
+        assertTrue(RUMOR_CORPUS <= CORPUS, "the rumor corpus must stay within the listing corpus's budget")
+        assertEquals(RUMOR_CORPUS, corpus.size)
+        for (shape in Shape.entries) {
+            for (mutation in HostileCorpus.Mutation.entries) {
+                assertTrue(
+                    corpus.any { it.case.shape == shape && it.input.mutation == mutation },
+                    "the rumor corpus never drew $mutation on a $shape, so nothing swept it there",
+                )
+            }
+        }
+        // Reproducible from the seed, compared as values for the reason the listing floor gives.
+        assertEquals(corpus.map { it.input }, HostileCorpus.rumorCorpus(RUMOR_CORPUS).map { it.input })
+        // The well-formed entries are exactly the fixtures' events, so the floor below is about
+        // mutated input and the field-for-field test about the writers' own output.
+        for (rumor in corpus.filter { it.input.mutation == HostileCorpus.Mutation.WELL_FORMED }) {
+            val event = RumorWriterFixtures.build(rumor.case)
+            assertEquals(event.tags, rumor.input.tags, "$rumor is not its fixture's event")
+            assertEquals(event.content, rumor.input.content, "$rumor is not its fixture's event")
+        }
+    }
+
+    /**
+     * Every one of the seven decoders is reached, past §7.2/§7.4's attribution, by mutated input of
+     * its own message shape.
+     *
+     * Without it the sweep in `HostileInputSweepTest` could be green because every mutated rumor died
+     * in `attribute` and no decoder ever saw one.
+     */
+    @JsName("every_rumor_decoder_is_reached_past_attribution_by_mutated_input")
+    @Test
+    fun `every rumor decoder is reached past attribution by mutated input`() {
+        assertEquals(
+            emptyMap(),
+            rumorReachShortfalls(HostileCorpus.rumorCorpus(RUMOR_CORPUS), RUMOR_REACH_FLOOR),
+            "these decoders were reached by fewer than $RUMOR_REACH_FLOOR mutated inputs past `attribute`",
+        )
+    }
+
+    /** The floor's control: a corpus with one shape's inputs cut to zero fails that decoder's floor. */
+    @JsName("a_rumor_corpus_missing_one_shape_fails_that_decoder_s_floor")
+    @Test
+    fun `a rumor corpus missing one shape fails that decoder's floor`() {
+        val corpus = HostileCorpus.rumorCorpus(RUMOR_CORPUS)
+        for (decoder in rumorDecoders) {
+            val cut = corpus.filter { it.case.shape != decoder.shape }
+            assertEquals(
+                mapOf(decoder.label to 0),
+                rumorReachShortfalls(cut, RUMOR_REACH_FLOOR),
+                "cutting every ${decoder.shape} input must fail ${decoder.label}'s floor and no other",
+            )
+        }
+    }
+
+    /**
+     * Every well-formed rumor attributes, and decodes **field for field** to the values its fixture
+     * case was written from — so the sweep's decoders are the working ones, not decoders refusing
+     * everything by name.
+     */
+    @JsName("well_formed_rumors_decode_field_for_field_to_their_fixture_s_inputs")
+    @Test
+    fun `well-formed rumors decode field for field to their fixture's inputs`() {
+        val wellFormed = HostileCorpus.rumorCorpus(RUMOR_CORPUS)
+            .filter { it.input.mutation == HostileCorpus.Mutation.WELL_FORMED }
+        assertEquals(Shape.entries.toSet(), wellFormed.map { it.case.shape }.toSet())
+
+        for (rumor in wellFormed) {
+            val case = rumor.case
+            val attributed = assertNotNull(rumorContextOf(rumor).attributed, "$rumor did not attribute")
+            assertEquals(case.envelope.authorPubkey, attributed.author, "$rumor: author")
+            assertEquals(case.envelope.createdAt, attributed.createdAt, "$rumor: created_at")
+            assertEquals(case.envelope.content, attributed.content, "$rumor: content")
+            assertEquals(case.envelope.counterparties, attributed.counterparties, "$rumor: counterparties")
+            assertEquals(case.envelope.nenyaVersion, attributed.nenyaVersion, "$rumor: version")
+            if (case.shape == Shape.CHAT) {
+                assertTrue(attributed is AttributedRumor.Chat, "$rumor: a kind:14 attributes as chat")
+                continue
+            }
+            val bound = assertIs<AttributedRumor.Bound>(attributed, "$rumor")
+            when (case.shape) {
+                Shape.CHAT -> Unit
+                Shape.PRIVATE_BID -> {
+                    val bid = PrivateBid.decode(bound)
+                    val terms = assertNotNull(case.terms)
+                    assertEquals(case.item, bid.item, "$rumor: item")
+                    assertEquals(terms.split.price, bid.price, "$rumor: price")
+                    assertEquals(terms.split.term, bid.fee, "$rumor: fee")
+                    assertEquals(case.feeRecipient, bid.feeRecipient, "$rumor: fee recipient")
+                    assertEquals(terms.expiration, bid.expiration, "$rumor: expiration")
+                    assertEquals(terms.deliverBy, bid.deliverBy, "$rumor: deliver_by")
+                }
+                Shape.PROPOSAL -> {
+                    val proposal = OrderProposal.decode(bound)
+                    assertEquals(case.order, proposal.order, "$rumor: order")
+                    assertEquals(case.item, proposal.item, "$rumor: item")
+                    assertEquals(case.terms, proposal.terms, "$rumor: terms")
+                    assertEquals(case.feeRecipient, proposal.feeRecipient, "$rumor: fee recipient")
+                }
+                Shape.ORDER_UPDATE -> {
+                    val update = OrderStatusMessage.decode(bound)
+                    assertEquals(case.order, update.order, "$rumor: order")
+                    assertEquals(case.status, update.status, "$rumor: status")
+                }
+                Shape.COMMITMENT -> {
+                    val message = DeliveryCommitmentMessage.decode(bound)
+                    val commitment = assertNotNull(case.commitment)
+                    assertEquals(case.order, message.order, "$rumor: order")
+                    assertEquals(commitment.x, message.commitment.x, "$rumor: x")
+                    assertEquals(commitment.ox, message.commitment.ox, "$rumor: ox")
+                    assertEquals(commitment.mimeType, message.commitment.mimeType, "$rumor: m")
+                    assertEquals(commitment.sizeBytes, message.commitment.sizeBytes, "$rumor: size")
+                    assertEquals(case.url, message.url, "$rumor: url")
+                }
+                Shape.RELEASE -> {
+                    val message = DeliverableReleaseMessage.decode(bound)
+                    val release = assertNotNull(case.release)
+                    assertEquals(case.order, message.order, "$rumor: order")
+                    assertEquals(release.x, message.release.x, "$rumor: x")
+                    assertEquals(release.ox, message.release.ox, "$rumor: ox")
+                    assertEquals(release.fileType, message.release.fileType, "$rumor: file-type")
+                    assertEquals(release.sizeBytes, message.release.sizeBytes, "$rumor: size")
+                }
+                Shape.PAYMENT_REQUEST -> {
+                    val request = PaymentRequest.decode(bound, splitFor(case))
+                    assertEquals(case.order, request.order, "$rumor: order")
+                    assertEquals(case.payee, request.payee, "$rumor: payee")
+                    assertEquals(case.invoice, request.invoice, "$rumor: invoice")
+                    // §8.6's third `payee` element: the order's fee recipient on a `payee=fee`
+                    // request, and none on a provider request.
+                    assertEquals(
+                        if (case.payee == Payee.FEE) case.feeRecipient else null,
+                        request.feeRecipient,
+                        "$rumor: payee's fee recipient",
+                    )
+                }
+                Shape.RECEIPT -> {
+                    val receipt = PaymentReceipt.decode(bound)
+                    assertEquals(case.order, receipt.order, "$rumor: order")
+                    assertEquals(case.payee, receipt.payee, "$rumor: payee")
+                    assertEquals(case.medium, receipt.medium, "$rumor: medium")
+                    assertEquals(case.reference, receipt.reference, "$rumor: reference")
+                    // §9.2 check 2's preimage on the `lightning` rail; the other two rails' proofs
+                    // are not preimages and decode to none.
+                    assertEquals(
+                        if (case.medium == PaymentMedium.LIGHTNING) Preimage.ofHex(assertNotNull(case.proof)) else null,
+                        receipt.preimage,
+                        "$rumor: preimage",
+                    )
+                }
             }
         }
     }

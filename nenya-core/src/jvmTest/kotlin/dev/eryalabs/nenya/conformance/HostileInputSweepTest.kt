@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.conformance
 import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.bid.BidWriter
+import dev.eryalabs.nenya.channel.AttributedRumor
 import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
@@ -57,6 +58,11 @@ import kotlin.test.fail
  * function in `wire`, `tag`, `listing` and `bid` that takes a `CheckedEvent`, a tag list, a
  * `String` or a `WireEvent` is asserted to be in it. So a decoder added by a later task is not
  * silently outside the sweep; it turns this red until somebody sweeps it.
+ *
+ * §7's private channel is swept the same way over its own corpus, `HostileCorpus.rumorCorpus`:
+ * `AttributedRumor.attribute` and the seven `decode(AttributedRumor.Bound…)`, through the same
+ * [problemWith], with its own unhardened-probe control, and with the published set of those
+ * decoders — in every package, found by reflection — held **equal** to the swept one.
  *
  * Following T5's rule, the sweep **fails hard** on an entry point it never managed to invoke and
  * never skips one: a sweep that quietly passed over what it could not build arguments for would
@@ -457,6 +463,144 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
                 "rather than appearing.",
         )
     }
+
+    // -----------------------------------------------------------------------------------------
+    // §7's private channel: `attribute` and the seven rumor decoders.
+    // -----------------------------------------------------------------------------------------
+
+    /** One swept §7 entry point: its label, and the calls it makes for one rumor corpus entry. */
+    private class RumorTarget(val label: String, val calls: (RumorContext) -> List<() -> Unit>)
+
+    /**
+     * `AttributedRumor.attribute`, under the rumor's own claimed pubkey and under each hostile string
+     * as the seal's; then every one of [rumorDecoders] over **every** bound rumor — a decoder handed
+     * another message's rumor must refuse it by name too, so none is fed only its own shape.
+     */
+    private fun rumorSwept(): List<RumorTarget> = listOf(
+        RumorTarget("AttributedRumor\$Companion.attribute") { c ->
+            val checked = c.checked ?: return@RumorTarget emptyList()
+            listOf<() -> Unit>({ AttributedRumor.attribute(c.input.pubkey, checked); Unit }) +
+                c.strings.map { text -> { AttributedRumor.attribute(text, checked); Unit } }
+        },
+    ) + rumorDecoders.map { decoder ->
+        RumorTarget(decoder.label) { c ->
+            val bound = c.attributed as? AttributedRumor.Bound ?: return@RumorTarget emptyList()
+            listOf { decoder.decode(bound, c.case); Unit }
+        }
+    }
+
+    /** The rumor sweep's harness: each target over [HostileCorpus.rumorCorpus], every call through [problemWith]. */
+    private fun rumorSweep(targets: List<RumorTarget>): Pair<Map<String, Int>, List<String>> {
+        val invocations = targets.associate { it.label to 0 }.toMutableMap()
+        val problems = mutableListOf<String>()
+        for (rumor in HostileCorpus.rumorCorpus(RUMOR_CORPUS)) {
+            val context = rumorContextOf(rumor)
+            for (target in targets) {
+                for (call in target.calls(context)) {
+                    invocations[target.label] = invocations.getValue(target.label) + 1
+                    problemWith(target.label, rumor.input, call)?.let { problems += "$it ($rumor)" }
+                }
+            }
+        }
+        return invocations to problems
+    }
+
+    @Test
+    fun `every rumor decoder refuses hostile input by name, never by unhandled exception`() {
+        val (invocations, problems) = rumorSweep(rumorSwept())
+
+        val never = invocations.filterValues { it == 0 }.keys
+        assertTrue(never.isEmpty(), "these §7 entry points were never invoked, so the sweep proves nothing about them: $never")
+        assertTrue(
+            invocations.values.all { it > 200 },
+            "a §7 entry point ran too few times to have seen every mutation kind: " +
+                invocations.filterValues { it <= 200 },
+        )
+        assertEquals(
+            emptyList(),
+            problems.take(20),
+            "`attribute` or a rumor decoder threw something that is not a named rejection (§4.3). " +
+                "${problems.size} failure(s) in total.",
+        )
+    }
+
+    /**
+     * The rumor harness's control: an unhardened decoder — `toInt()` on a tag value, no digit or
+     * length check — swept beside the real ones through [rumorSweep], must be reported; its hardened
+     * twin, over the same corpus, must not.
+     */
+    @Test
+    fun `an unhardened rumor decoder fails the rumor sweep harness`() {
+        val probe = "probe.unhardenedAmount"
+        val unhardened = RumorTarget(probe) { c ->
+            val bound = c.attributed as? AttributedRumor.Bound ?: return@RumorTarget emptyList()
+            listOf { amountOf(bound)?.let(::unhardenedProbe); Unit }
+        }
+        val (_, problems) = rumorSweep(rumorSwept() + unhardened)
+
+        assertTrue(problems.isNotEmpty(), "the unhardened rumor probe passed the rumor harness, so it cannot fail")
+        assertTrue(problems.all { it.startsWith("$probe ") }, "only the probe may be reported: ${problems.take(5)}")
+        assertTrue(
+            problems.any { "NumberFormatException" in it },
+            "the harness must name the shape it saw; it reported ${problems.first()}",
+        )
+        assertTrue(
+            problems.none { "WELL_FORMED" in it },
+            "the probe must fail on hostile input, not on the writers' own output: ${problems.take(5)}",
+        )
+
+        val hardened = RumorTarget("probe.hardenedAmount") { c ->
+            val bound = c.attributed as? AttributedRumor.Bound ?: return@RumorTarget emptyList()
+            listOf { amountOf(bound)?.let(::hardenedProbe); Unit }
+        }
+        assertEquals(emptyList(), rumorSweep(listOf(hardened)).second, "the hardened twin must pass the same harness")
+    }
+
+    /**
+     * Every published `decode` taking an `AttributedRumor$Bound`, in every package, **equals** the
+     * swept set — so a §7 decoder added later is not outside the sweep, and the sweep names none that
+     * does not exist.
+     */
+    @Test
+    fun `every published rumor decode is swept, and nothing else is`() {
+        val reflected = reflectedRumorDecoders()
+
+        assertEquals(7, reflected.size, "§7 has seven decoders over a bound rumor: $reflected")
+        assertEquals(emptySet(), rumorDecodeGap(rumorDecoders.map { it.label }.toSet()))
+    }
+
+    /** The equality's control: any one decoder dropped from the swept set is named by the gap. */
+    @Test
+    fun `a rumor decoder dropped from the swept set fails the equality`() {
+        val swept = rumorDecoders.map { it.label }.toSet()
+        for (label in swept) {
+            assertEquals(setOf(label), rumorDecodeGap(swept - label), "dropping $label must fail the equality")
+        }
+    }
+
+    /** The two sets' symmetric difference: published rumor decoders not swept, and swept labels not published. */
+    private fun rumorDecodeGap(swept: Set<String>): Set<String> {
+        val reflected = reflectedRumorDecoders()
+        return (reflected - swept) + (swept - reflected)
+    }
+
+    private fun reflectedRumorDecoders(): Set<String> {
+        val found = mutableSetOf<String>()
+        for (packageName in MainClasses.allPackages()) {
+            for (type in MainClasses.published(packageName)) {
+                for (method in MainClasses.methods(type)) {
+                    if (method.name != "decode") continue
+                    if (method.genericParameterTypes.none { it.typeName == AttributedRumor.Bound::class.java.typeName }) continue
+                    found += MainClasses.label(packageName, type, method)
+                }
+            }
+        }
+        return found
+    }
+
+    /** §7.5's `amount_msat` as the rumor carries it, read the way the probes above need it. */
+    private fun amountOf(rumor: AttributedRumor.Bound): String? =
+        rumor.encode().tags.firstOrNull { it[0] == "amount_msat" }?.getOrNull(1)
 
     // -----------------------------------------------------------------------------------------
     // Helpers.

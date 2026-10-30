@@ -221,10 +221,13 @@ class ErasedReflectionSweepTest {
             // (STOP RULE 1) and this is it — declared rather than silenced, and the sweep asserting
             // every pin is still found is what forced it. T47 moved them again, to 492 and 597, by
             // adding the `BidWriter.bid` target and its `bidWith` helper — the same two reads,
-            // unchanged, declared as a fixture change on the same terms.
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:492" to
+            // unchanged, declared as a fixture change on the same terms. T64 moved them to 636 and 741
+            // by adding §7's rumor sweep above them — again the same two reads, unchanged, and a
+            // fixture change on the same terms; that sweep's own reflection reads
+            // `genericParameterTypes` and needs no pin.
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:636" to
                 "dispatches through Enum::class.java.isAssignableFrom",
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:597" to
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:741" to
                 "tests membership in hostileShapes(), a set of Class objects; its KDoc says the " +
                 "erasure is deliberate, because a filter written against the parameterised type " +
                 "would see nothing at all",
