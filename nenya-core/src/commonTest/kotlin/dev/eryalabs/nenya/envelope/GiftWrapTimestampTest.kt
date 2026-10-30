@@ -59,15 +59,42 @@ class GiftWrapTimestampTest {
      * The mutation this is aimed at is `now + r` in place of `now − r`, and a window of 172 801:
      * either puts a timestamp outside the interval, and the first also puts it in the future, which
      * §7.1 step 5 forbids outright.
+     *
+     * The ten thousand run as four tests of [QUARTER_RUNS] because one test holding all of them
+     * twice outlived mocha's 30-second per-test budget on a loaded machine (2026-10-29 and -30,
+     * `loop/webtest.log`). The four seed ranges tile `[SEED, SEED + RUNS)` exactly, so together
+     * they are the same ten thousand seals the single test drew.
      */
-    @JsName("over_ten_thousand_seals_every_timestamp_lies_in_the_window")
+    @JsName("over_ten_thousand_seals_every_timestamp_lies_in_the_window_seeds_0_to_2499")
     @Test
-    fun `over ten thousand seals every timestamp lies in the window`() {
+    fun `over ten thousand seals every timestamp lies in the window - first quarter`() {
+        everyTimestampInTheWindow(quarter = 0)
+    }
+
+    @JsName("over_ten_thousand_seals_every_timestamp_lies_in_the_window_seeds_2500_to_4999")
+    @Test
+    fun `over ten thousand seals every timestamp lies in the window - second quarter`() {
+        everyTimestampInTheWindow(quarter = 1)
+    }
+
+    @JsName("over_ten_thousand_seals_every_timestamp_lies_in_the_window_seeds_5000_to_7499")
+    @Test
+    fun `over ten thousand seals every timestamp lies in the window - third quarter`() {
+        everyTimestampInTheWindow(quarter = 2)
+    }
+
+    @JsName("over_ten_thousand_seals_every_timestamp_lies_in_the_window_seeds_7500_to_9999")
+    @Test
+    fun `over ten thousand seals every timestamp lies in the window - fourth quarter`() {
+        everyTimestampInTheWindow(quarter = 3)
+    }
+
+    private fun everyTimestampInTheWindow(quarter: Int) {
         val now = EnvelopeFixtures.NOW
         val floor = now - GiftWrap.RANDOMISATION_WINDOW_SECONDS
         var counted = 0
 
-        for (run in 0 until RUNS) {
+        for (run in quarter * QUARTER_RUNS until (quarter + 1) * QUARTER_RUNS) {
             for (value in timestampsOf(randomness = RecordingRandomness(seed = SEED + run)).all()) {
                 counted++
                 assertTrue(
@@ -77,7 +104,11 @@ class GiftWrapTimestampTest {
             }
         }
 
-        assertEquals(RUNS * TIMESTAMPS_PER_MESSAGE, counted, "every message must yield four values")
+        assertEquals(
+            QUARTER_RUNS * TIMESTAMPS_PER_MESSAGE,
+            counted,
+            "every message must yield four values",
+        )
     }
 
     /**
@@ -237,6 +268,9 @@ class GiftWrapTimestampTest {
         const val SEED: Long = 20260924L
 
         const val RUNS: Int = 10_000
+
+        /** [RUNS] split over four tests, each inside mocha's 30-second budget with room to spare. */
+        const val QUARTER_RUNS: Int = RUNS / 4
 
         const val INDEPENDENCE_RUNS: Int = 500
 
