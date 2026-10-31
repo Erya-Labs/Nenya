@@ -3,6 +3,10 @@ package dev.eryalabs.nenya.conformance
 import dev.eryalabs.nenya.JdkRandom
 import dev.eryalabs.nenya.bid.BidFixtures
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
+import dev.eryalabs.nenya.settlement.Bolt11Composer
+import dev.eryalabs.nenya.settlement.Bolt11Examples
+import dev.eryalabs.nenya.settlement.Bolt11Parts
+import dev.eryalabs.nenya.settlement.Bolt11TaggedField
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagFixtures
 import dev.eryalabs.nenya.tag.TagLimits
@@ -208,6 +212,162 @@ internal object HostileCorpus {
             )
             RumorInput(case, mutate(random, draft, RUMOR_SINGLE_OCCURRENCE, oneAtATime = true))
         }
+    }
+
+    /**
+     * The [Mutation]s that have no meaning on an invoice string, each with the reason — skipped by
+     * name rather than applied to something they were not written for.
+     *
+     * Every other mutation is applied to the string: the case, empty, truncated, oversized and
+     * control-character ones to the whole string as it arrives, and the three decimal ones to
+     * Appendix C's amount in the human-readable part, the one decimal an invoice carries in the clear.
+     */
+    val INVOICE_SKIPPED: Map<Mutation, String> = mapOf(
+        Mutation.WRONG_ARITY to "a tag's element count; an invoice is one string, and its tagged fields' " +
+            "own lengths are the FieldMutation constants",
+        Mutation.DUPLICATED_TAG to "§4.3's duplicate rule is about an event's tag list; a repeated tagged " +
+            "field is FieldMutation.DUPLICATED",
+        Mutation.HEX_WRONG_LENGTH to "a 64-character hex value; an invoice carries none in the clear, and a " +
+            "wrong-length payment hash is FieldMutation.TRUNCATED or LENGTHENED on a `p` field",
+        Mutation.JUST_OVER_BOUND to "§4.3's event bounds — tags, tag bytes, content, images — none of which " +
+            "an invoice string has",
+    )
+
+    /** One tagged field of a vendored invoice changed, and the invoice recomposed with its checksum recomputed. */
+    internal enum class FieldMutation {
+
+        /** The field removed — a `p`, `s` or `d` gone is what Appendix C requires be refused. */
+        DROPPED,
+
+        /** A second copy straight after the first — two `p` fields, two `x`, a `d` beside a `d`. */
+        DUPLICATED,
+
+        /** The field's groups cut to half, so its `data_length` and its value are both short. */
+        TRUNCATED,
+
+        /** One to eight drawn groups appended, so a fixed-length field is no longer that length. */
+        LENGTHENED,
+
+        /** The field's type character replaced by another drawn from the bech32 alphabet. */
+        RETYPED,
+    }
+
+    /**
+     * One invoice corpus entry: which vendored example it came from, the one change made to it, and
+     * the string.
+     *
+     * [composed] is whether `Bolt11Composer` put it back together with the bech32 checksum recomputed —
+     * every [FieldMutation] entry and the three decimal ones. Those are the entries that reach past
+     * `Bolt11Invoice.parse`'s checksum; a raw string edit almost never does.
+     */
+    internal data class InvoiceInput(
+        val index: Int,
+        val example: String,
+        val mutation: Mutation?,
+        val fieldMutation: FieldMutation?,
+        val composed: Boolean,
+        val invoice: String,
+    ) {
+
+        /**
+         * Names the index, the example and the change, and no character of the invoice: §12 item 2
+         * bars an invoice string from every public event, this library redacts one from anything it
+         * prints for the reason `Bolt11Reference.toString` gives, and a failure is reproducible from
+         * [SEED] anyway.
+         */
+        override fun toString(): String = "InvoiceInput(#$index, ${fieldMutation ?: mutation}, $example)"
+    }
+
+    /** Draws per (example, [FieldMutation]) pair: each draw picks its own field and, where it needs one, its own groups. */
+    const val FIELD_DRAWS: Int = 3
+
+    /**
+     * Every all-lowercase valid example in the vendored BOLT-11 document, under every [Mutation] not in
+     * [INVOICE_SKIPPED] and [FIELD_DRAWS] times under every [FieldMutation], from one seeded run.
+     *
+     * Only the lowercase valid examples, because they are the ones `Bolt11Composer` is held to
+     * (`compose(decompose(x)) == x`); the uppercase one and the invalid ones are already parser
+     * vectors of their own in `Bolt11InvoiceTest`. Nothing here is typed: every string is a vendored
+     * one, a raw edit of one, or one recomposed by the composer (decision **D**).
+     */
+    fun invoiceCorpus(): List<InvoiceInput> {
+        val random = JdkRandom(SEED)
+        val examples = Bolt11Examples.extract().filter {
+            it.group == Bolt11Examples.Group.VALID && it.invoice == it.invoice.lowercase()
+        }
+        val out = ArrayList<InvoiceInput>()
+        for (example in examples) {
+            val name = "line ${example.headingLine}"
+            for (mutation in Mutation.entries) {
+                if (mutation in INVOICE_SKIPPED) continue
+                val (invoice, composed) = mutatedInvoice(random, example.invoice, mutation)
+                out += InvoiceInput(out.size, name, mutation, null, composed, invoice)
+            }
+            for (fieldMutation in FieldMutation.entries) {
+                repeat(FIELD_DRAWS) {
+                    val invoice = Bolt11Composer.compose(mutatedField(random, Bolt11Composer.decompose(example.invoice), fieldMutation))
+                    out += InvoiceInput(out.size, name, null, fieldMutation, true, invoice)
+                }
+            }
+        }
+        return out
+    }
+
+    /** [invoice] under [mutation], and whether it was recomposed with its checksum recomputed. */
+    private fun mutatedInvoice(random: JdkRandom, invoice: String, mutation: Mutation): Pair<String, Boolean> =
+        when (mutation) {
+            Mutation.WELL_FORMED -> invoice to false
+            Mutation.TRUNCATED -> invoice.take(invoice.length / 2) to false
+            Mutation.OVERSIZED -> invoice + "q".repeat(4_096 + random.nextInt(1_024)) to false
+            Mutation.EMPTY -> "" to false
+            Mutation.CONTROL_CHARACTERS -> {
+                val at = random.nextInt(invoice.length + 1)
+                invoice.substring(0, at) + CONTROL_PIECES[random.nextInt(CONTROL_PIECES.size)] + invoice.substring(at) to false
+            }
+            Mutation.HEX_MIXED_CASE ->
+                invoice.mapIndexed { at, ch -> if (at % 2 == 0) ch.uppercaseChar() else ch }.joinToString("") to false
+            Mutation.NON_CANONICAL_DECIMAL, Mutation.SIGNED_DECIMAL, Mutation.EXPONENTIAL_DECIMAL -> {
+                val parts = Bolt11Composer.decompose(invoice)
+                val written = parts.amount.ifEmpty { "1" }
+                val digits = written.takeWhile { it in '0'..'9' }
+                val letter = written.substring(digits.length)
+                val amount = when (mutation) {
+                    Mutation.NON_CANONICAL_DECIMAL -> when (random.nextInt(4)) {
+                        0 -> "00$digits$letter"
+                        1 -> "0x$digits$letter"
+                        2 -> "1_000$letter"
+                        else -> " $digits$letter "
+                    }
+                    Mutation.SIGNED_DECIMAL -> (if (random.nextBoolean()) "-" else "+") + digits + letter
+                    else -> (if (random.nextBoolean()) "1e${1 + random.nextInt(9)}" else "1.5E2") + letter
+                }
+                // Built rather than `withAmount`, which refuses exactly these spellings: the composer
+                // puts any human-readable part into the checksum, so the refusal has to come from Nenya.
+                Bolt11Composer.compose(
+                    Bolt11Parts(parts.networkPrefix + amount, parts.timestamp, parts.fields, parts.signature, parts.checksum),
+                ) to true
+            }
+            Mutation.WRONG_ARITY, Mutation.DUPLICATED_TAG, Mutation.HEX_WRONG_LENGTH, Mutation.JUST_OVER_BOUND ->
+                error("$mutation is skipped on an invoice: ${INVOICE_SKIPPED[mutation]}")
+        }
+
+    /** [parts] with one drawn tagged field changed by [mutation]. */
+    private fun mutatedField(random: JdkRandom, parts: Bolt11Parts, mutation: FieldMutation): Bolt11Parts {
+        val fields = parts.fields
+        val at = random.nextInt(fields.size)
+        val field = fields[at]
+        val changed: List<Bolt11TaggedField> = when (mutation) {
+            FieldMutation.DROPPED -> emptyList()
+            FieldMutation.DUPLICATED -> listOf(field, field)
+            FieldMutation.TRUNCATED -> listOf(Bolt11TaggedField(field.type, field.groups.take(field.groups.size / 2)))
+            FieldMutation.LENGTHENED ->
+                listOf(Bolt11TaggedField(field.type, field.groups + List(1 + random.nextInt(8)) { random.nextInt(32) }))
+            FieldMutation.RETYPED -> {
+                val others = Bolt11Composer.ALPHABET.filter { it != field.type }
+                listOf(Bolt11TaggedField(others[random.nextInt(others.length)], field.groups))
+            }
+        }
+        return parts.withFields(fields.subList(0, at) + changed + fields.subList(at + 1, fields.size))
     }
 
     private fun input(random: JdkRandom, index: Int, mutation: Mutation): Input {

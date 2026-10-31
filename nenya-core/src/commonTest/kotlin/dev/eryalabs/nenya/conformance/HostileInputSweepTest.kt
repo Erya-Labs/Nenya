@@ -15,9 +15,14 @@ import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.order.OrderTerms
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.Preimage
+import dev.eryalabs.nenya.settlement.Bolt11Examples
+import dev.eryalabs.nenya.settlement.Bolt11Invoice
+import dev.eryalabs.nenya.settlement.Bolt11Reference
 import dev.eryalabs.nenya.settlement.PaymentMedium
 import dev.eryalabs.nenya.settlement.PaymentReceipt
 import dev.eryalabs.nenya.settlement.PaymentRequest
+import dev.eryalabs.nenya.settlement.SettlementException
+import dev.eryalabs.nenya.settlement.SettlementRejection
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagContext
 import dev.eryalabs.nenya.tag.TagSet
@@ -61,6 +66,14 @@ abstract class PortableHostileInputSweepTest {
          * who changes the seed.
          */
         const val RUMOR_REACH_FLOOR: Int = 20
+
+        /**
+         * Mutated invoice corpus entries `Bolt11Invoice.parse` must accept, or refuse for a reason other
+         * than its checksum. Measured at [HostileCorpus.SEED]: 227 of the 345 mutated entries, every one of
+         * them composed (the 75 raw string edits reach none) — so this sits well below it, for a
+         * reviewer who changes the seed.
+         */
+        const val INVOICE_REACH_FLOOR: Int = 100
     }
 
     /**
@@ -493,5 +506,108 @@ abstract class PortableHostileInputSweepTest {
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The money path's string decoders: the BOLT-11 reader.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Whether [invoice] gets past `Bolt11Invoice.parse`'s checksum: recognised, and then either
+     * accepted or refused for a reason other than [SettlementRejection.CHECKSUM_INVALID].
+     *
+     * Only a [SettlementException] is caught. Anything else thrown is the defect the JVM sweep names,
+     * and here it fails the floor test outright — on JavaScript as well, which that sweep cannot reach.
+     */
+    internal fun reachesPastTheChecksum(invoice: String): Boolean {
+        val reference = try {
+            Bolt11Reference.recognise(invoice)
+        } catch (refused: SettlementException) {
+            return false
+        }
+        return try {
+            Bolt11Invoice.parse(reference)
+            true
+        } catch (refused: SettlementException) {
+            refused.reason != SettlementRejection.CHECKSUM_INVALID
+        }
+    }
+
+    /** How many **mutated** entries of [corpus] reach past the checksum. */
+    internal fun invoiceReach(corpus: List<HostileCorpus.InvoiceInput>): Int = corpus.count {
+        it.mutation != HostileCorpus.Mutation.WELL_FORMED && reachesPastTheChecksum(it.invoice)
+    }
+
+    /** The invoice corpus floor: every lowercase valid example, every applicable change, reproducibly, within budget. */
+    @JsName("the_invoice_corpus_carries_every_applicable_change_on_every_lowercase_valid_example")
+    @Test
+    fun `the invoice corpus carries every applicable change on every lowercase valid example`() {
+        val corpus = HostileCorpus.invoiceCorpus()
+        val examples = Bolt11Examples.extract().filter {
+            it.group == Bolt11Examples.Group.VALID && it.invoice == it.invoice.lowercase()
+        }
+
+        assertTrue(examples.size > 10, "only ${examples.size} lowercase valid BOLT-11 examples were found")
+        assertTrue(corpus.size <= CORPUS / 2, "the invoice corpus must stay well under the listing corpus's budget: ${corpus.size}")
+        val applicable = HostileCorpus.Mutation.entries.filter { it !in HostileCorpus.INVOICE_SKIPPED }
+        assertEquals(
+            examples.size * (applicable.size + HostileCorpus.FieldMutation.entries.size * HostileCorpus.FIELD_DRAWS),
+            corpus.size,
+        )
+        for (example in examples) {
+            val own = corpus.filter { it.example == "line ${example.headingLine}" }
+            assertEquals(applicable.toSet(), own.mapNotNull { it.mutation }.toSet(), "the mutations on $example")
+            for (fieldMutation in HostileCorpus.FieldMutation.entries) {
+                assertEquals(
+                    HostileCorpus.FIELD_DRAWS,
+                    own.count { it.fieldMutation == fieldMutation },
+                    "$fieldMutation draws on $example",
+                )
+            }
+            // The well-formed entry is the vendored string itself, and every other entry differs from it.
+            val wellFormed = own.single { it.mutation == HostileCorpus.Mutation.WELL_FORMED }
+            assertEquals(example.invoice, wellFormed.invoice, "$wellFormed is not its vendored example")
+            for (entry in own - wellFormed) assertTrue(entry.invoice != example.invoice, "$entry changed nothing")
+        }
+        assertTrue(corpus.none { it.mutation in HostileCorpus.INVOICE_SKIPPED }, "a skipped mutation was applied")
+        // Composed exactly where the checksum was recomputed: every tagged-field change and the three
+        // decimal ones, and no raw edit.
+        val decimals = setOf(
+            HostileCorpus.Mutation.NON_CANONICAL_DECIMAL,
+            HostileCorpus.Mutation.SIGNED_DECIMAL,
+            HostileCorpus.Mutation.EXPONENTIAL_DECIMAL,
+        )
+        for (entry in corpus) {
+            assertEquals(entry.fieldMutation != null || entry.mutation in decimals, entry.composed, "$entry: composed")
+        }
+        // Reproducible from the seed, compared as values for the reason the listing floor gives.
+        assertEquals(corpus, HostileCorpus.invoiceCorpus())
+    }
+
+    /**
+     * The BOLT-11 reader is reached past its checksum by mutated input — so the JVM sweep's `parse`
+     * target sees field-level damage, not only strings its first check refuses.
+     */
+    @JsName("the_invoice_corpus_reaches_past_the_bolt11_checksum")
+    @Test
+    fun `the invoice corpus reaches past the BOLT-11 checksum`() {
+        val reached = invoiceReach(HostileCorpus.invoiceCorpus())
+        assertTrue(
+            reached >= INVOICE_REACH_FLOOR,
+            "only $reached mutated invoices got past the checksum; the floor is $INVOICE_REACH_FLOOR",
+        )
+    }
+
+    /** The floor's control: without the composed entries, raw string edits alone do not meet it. */
+    @JsName("without_the_composed_invoices_the_invoice_floor_fails")
+    @Test
+    fun `without the composed invoices the invoice floor fails`() {
+        val raw = HostileCorpus.invoiceCorpus().filter { !it.composed }
+        assertTrue(raw.isNotEmpty(), "the raw string edits must be in the corpus")
+        val reached = invoiceReach(raw)
+        assertTrue(
+            reached < INVOICE_REACH_FLOOR,
+            "$reached raw string edits reached past the checksum, so the floor does not need the composer",
+        )
     }
 }

@@ -4,6 +4,12 @@ import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.bid.BidWriter
 import dev.eryalabs.nenya.channel.AttributedRumor
+import dev.eryalabs.nenya.channel.RumorWriterFixtures
+import dev.eryalabs.nenya.delivery.DeliverableCommitment
+import dev.eryalabs.nenya.delivery.DeliverableHash
+import dev.eryalabs.nenya.delivery.DeliverableRelease
+import dev.eryalabs.nenya.delivery.DeliveryEvidence
+import dev.eryalabs.nenya.delivery.ServedBytesVerified
 import dev.eryalabs.nenya.listing.AuthoredListing
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
@@ -12,6 +18,18 @@ import dev.eryalabs.nenya.listing.ListingStatusCodec
 import dev.eryalabs.nenya.listing.ListingWriter
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
+import dev.eryalabs.nenya.order.OrderFixtures
+import dev.eryalabs.nenya.order.OrderStatusCodec
+import dev.eryalabs.nenya.payment.Payee
+import dev.eryalabs.nenya.payment.PaymentHash
+import dev.eryalabs.nenya.payment.Preimage
+import dev.eryalabs.nenya.settlement.Bolt11Invoice
+import dev.eryalabs.nenya.settlement.Bolt11Reference
+import dev.eryalabs.nenya.settlement.FeeTermPoint
+import dev.eryalabs.nenya.settlement.FeeTermSighting
+import dev.eryalabs.nenya.settlement.PaymentMedium
+import dev.eryalabs.nenya.settlement.PaymentWriter
+import dev.eryalabs.nenya.settlement.ReleaseFixtures
 import dev.eryalabs.nenya.tag.Coordinate
 import dev.eryalabs.nenya.tag.ImageRef
 import dev.eryalabs.nenya.tag.ItemRef
@@ -25,6 +43,7 @@ import dev.eryalabs.nenya.wire.CheckedEvent
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.EventJson
 import dev.eryalabs.nenya.wire.WireEvent
+import java.lang.reflect.InvocationTargetException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -63,6 +82,13 @@ import kotlin.test.fail
  * `AttributedRumor.attribute` and the seven `decode(AttributedRumor.Bound…)`, through the same
  * [problemWith], with its own unhardened-probe control, and with the published set of those
  * decoders — in every package, found by reflection — held **equal** to the swept one.
+ *
+ * The money path is swept the same way again: the BOLT-11 recogniser and parser over
+ * `HostileCorpus.invoiceCorpus`, and the hex, token and byte decoders in `settlement`, `payment`,
+ * `delivery` and `order` over every tag value of the other two corpora — with its own probe control,
+ * and with every published function or constructor there taking a `String`, a `ByteArray` or a
+ * `List<String>` held equal to the swept set plus a pinned exemption list, each exemption with its
+ * reason.
  *
  * Following T5's rule, the sweep **fails hard** on an entry point it never managed to invoke and
  * never skips one: a sweep that quietly passed over what it could not build arguments for would
@@ -615,12 +641,16 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
      * JDK is not a rejection a caller can branch on, and neither is a `RuntimeException` this
      * library threw without saying why.
      */
-    private fun problemWith(label: String, input: HostileCorpus.Input, body: () -> Unit): String? {
+    private fun problemWith(label: String, input: HostileCorpus.Input, body: () -> Unit): String? =
+        problemWith(label, input.toString(), body)
+
+    /** The same, for an input named by [described] — a redacted description, never the value itself. */
+    private fun problemWith(label: String, described: String, body: () -> Unit): String? {
         try {
             body()
         } catch (thrown: Throwable) {
             if (isNamedRejection(thrown)) return null
-            return "$label on $input threw ${thrown.javaClass.name}: ${thrown.message}"
+            return "$label on $described threw ${thrown.javaClass.name}: ${thrown.message}"
         }
         return null
     }
@@ -759,5 +789,317 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         List::class.java,
         CheckedEvent::class.java,
         WireEvent::class.java,
+    )
+
+    // -----------------------------------------------------------------------------------------
+    // The money path: the BOLT-11 reader, and the hex, token and byte decoders a counterparty's
+    // values reach in `settlement`, `payment`, `delivery` and `order`.
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * One money-path sweep input: a redacted description, the strings it carries, and the tags it
+     * carries.
+     *
+     * Drawn from all three corpora: every tag value and hostile string of [HostileCorpus.corpus] and
+     * [HostileCorpus.rumorCorpus] — the values a counterparty's event hands these decoders — and every
+     * entry of [HostileCorpus.invoiceCorpus]. A value or a tag already seen is not repeated, so the
+     * sweep's cost is the corpora's distinct values rather than their size.
+     */
+    private class MoneyInput(val described: String, val values: List<String>, val tags: List<List<String>>)
+
+    /** One swept money-path entry point: its label, and the calls it makes for one [MoneyInput]. */
+    private class MoneyTarget(val label: String, val calls: (MoneyInput) -> List<() -> Unit>)
+
+    private fun moneyInputs(): List<MoneyInput> {
+        val seenValues = HashSet<String>()
+        val seenTags = HashSet<List<String>>()
+        val out = ArrayList<MoneyInput>()
+        fun add(described: String, input: HostileCorpus.Input) {
+            val values = (input.tags.flatMap { it.drop(1) } + listOf(input.text, input.hex, input.coordinate, input.decimal))
+                .filter { seenValues.add(it) }
+            val tags = input.tags.filter { seenTags.add(it) }
+            if (values.isNotEmpty() || tags.isNotEmpty()) out += MoneyInput(described, values, tags)
+        }
+        for (input in HostileCorpus.corpus(CORPUS)) add("$input", input)
+        for (rumor in HostileCorpus.rumorCorpus(RUMOR_CORPUS)) add("$rumor", rumor.input)
+        for (invoice in HostileCorpus.invoiceCorpus()) out += MoneyInput("$invoice", listOf(invoice.invoice), emptyList())
+        return out
+    }
+
+    /**
+     * Every money-path entry point a counterparty's string, bytes or tag reaches, each over every
+     * [MoneyInput] it can take.
+     *
+     * The three writers are swept on their string parameters with every other argument a working
+     * fixture's, for the reason the listing writers are: a hostile value refused before the parameter
+     * it sits in is reached sweeps nothing. A receipt's `reference` and `proof` are what the embedding
+     * client's wallet answered, and a fee recipient is read off a counterparty's terms, so none is the
+     * caller's own trusted value. The `paymentRequest` writer also takes every invoice the recogniser
+     * accepted.
+     *
+     * The three 32-byte types and `Bolt11Reference` are also built through the JVM-public synthetic
+     * constructor their KDoc names — the door a Java client reaches without the factory — so the
+     * `init` checks those notes say every construction path runs are swept on that path too.
+     */
+    private fun moneySwept(): List<MoneyTarget> {
+        val blob = OrderFixtures.blob
+        val served = ServedBytesVerified.verifyServedBytes(blob.commitment, blob.served)
+        val cases = RumorWriterFixtures.cases(64)
+        val request = cases.first { it.shape == RumorWriterFixtures.Shape.PAYMENT_REQUEST }
+        val receipt = cases.first { it.shape == RumorWriterFixtures.Shape.RECEIPT }
+        val requestOrder = request.order ?: fail("$request carries no order")
+        val receiptOrder = receipt.order ?: fail("$receipt carries no order")
+        val reference = receipt.reference ?: fail("$receipt carries no reference")
+        val proof = receipt.proof ?: fail("$receipt carries no proof")
+        val invoice = request.invoice ?: fail("$request carries no invoice")
+        val commitment = ReleaseFixtures.commitment()
+        val payment = OrderFixtures.receipt(Payee.PROVIDER)
+
+        fun bytes(m: MoneyInput): List<ByteArray> =
+            m.values.flatMap { listOf(it.encodeToByteArray(), it.encodeToByteArray().copyOf(PaymentHash.BYTE_LENGTH)) }
+
+        return listOf(
+            MoneyTarget("Bolt11Reference\$Companion.recognise") { m ->
+                m.values.map { v -> { Bolt11Reference.recognise(v); Unit } }
+            },
+            MoneyTarget("Bolt11Reference.<init>") { m ->
+                m.values.map { v -> { construct(Bolt11Reference::class.java, v) } }
+            },
+            MoneyTarget("Bolt11Invoice\$Companion.parse") { m ->
+                recognised(m).map { r -> { Bolt11Invoice.parse(r); Unit } }
+            },
+            MoneyTarget("PaymentHash\$Companion.ofHex") { m -> m.values.map { v -> { PaymentHash.ofHex(v); Unit } } },
+            MoneyTarget("PaymentHash.<init>") { m -> bytes(m).map { b -> { construct(PaymentHash::class.java, b) } } },
+            MoneyTarget("Preimage\$Companion.ofHex") { m -> m.values.map { v -> { Preimage.ofHex(v); Unit } } },
+            MoneyTarget("Preimage.<init>") { m -> bytes(m).map { b -> { construct(Preimage::class.java, b) } } },
+            MoneyTarget("DeliverableHash\$Companion.ofHex") { m ->
+                m.values.map { v -> { DeliverableHash.ofHex(v); Unit } }
+            },
+            MoneyTarget("DeliverableHash.<init>") { m -> bytes(m).map { b -> { construct(DeliverableHash::class.java, b) } } },
+            // Every tag as it arrived, and every value inside a `fee` tag at both of §8.1's arities, at
+            // every point §8.4 names.
+            MoneyTarget("FeeTermSighting\$Companion.of") { m ->
+                (m.tags + m.values.flatMap { v -> listOf(listOf("fee", v), listOf("fee", v, v)) }).flatMap { tag ->
+                    FeeTermPoint.entries.map { point -> { FeeTermSighting.of(point, tag); Unit } }
+                }
+            },
+            MoneyTarget("PaymentMedium\$Companion.of") { m -> m.values.map { v -> { PaymentMedium.of(v); Unit } } },
+            MoneyTarget("OrderStatusCodec.read") { m -> m.values.map { v -> { OrderStatusCodec.read(v); Unit } } },
+            MoneyTarget("DeliverableCommitment.<init>") { m ->
+                m.values.map { v ->
+                    { DeliverableCommitment(blob.commitment.x, blob.commitment.ox, v, blob.commitment.sizeBytes); Unit }
+                }
+            },
+            MoneyTarget("DeliverableRelease.<init>") { m ->
+                m.values.map { v ->
+                    { DeliverableRelease(blob.commitment.x, blob.commitment.ox, v, blob.commitment.sizeBytes); Unit }
+                }
+            },
+            // Each value's bytes as they are, and cut or padded to the committed size so the digest
+            // comparison is reached rather than only the length check before it.
+            MoneyTarget("ServedBytesVerified\$Companion.verifyServedBytes") { m ->
+                m.values.flatMap { v ->
+                    listOf(v.encodeToByteArray(), v.encodeToByteArray().copyOf(blob.commitment.sizeBytes.toInt()))
+                }.map { b -> { ServedBytesVerified.verifyServedBytes(blob.commitment, b); Unit } }
+            },
+            MoneyTarget("DeliveryEvidence\$Companion.verifyPlaintextBytes") { m ->
+                bytes(m).map { b -> { DeliveryEvidence.verifyPlaintextBytes(served, b); Unit } }
+            },
+            MoneyTarget("PaymentWriter.paymentRequest") { m ->
+                m.values.map<String, () -> Unit> { v ->
+                    { PaymentWriter.paymentRequest(request.envelope, requestOrder, Payee.FEE, invoice, v, request.medium, request.terms); Unit }
+                } + recognised(m).map { r ->
+                    { PaymentWriter.paymentRequest(request.envelope, requestOrder, Payee.PROVIDER, r); Unit }
+                }
+            },
+            MoneyTarget("PaymentWriter.receipt") { m ->
+                m.values.flatMap { v ->
+                    listOf<() -> Unit>(
+                        { PaymentWriter.receipt(receipt.envelope, receiptOrder, Payee.PROVIDER, v, proof); Unit },
+                        { PaymentWriter.receipt(receipt.envelope, receiptOrder, Payee.PROVIDER, reference, v); Unit },
+                        { PaymentWriter.receipt(receipt.envelope, receiptOrder, Payee.FEE, reference, proof, v); Unit },
+                    )
+                }
+            },
+            MoneyTarget("PaymentWriter.release") { m ->
+                m.values.flatMap { v ->
+                    listOf<() -> Unit>(
+                        {
+                            PaymentWriter.release(ReleaseFixtures.providerEnvelope(), commitment, payment, v, ReleaseFixtures.NONCE_HEX)
+                            Unit
+                        },
+                        {
+                            PaymentWriter.release(ReleaseFixtures.providerEnvelope(), commitment, payment, ReleaseFixtures.KEY_HEX, v)
+                            Unit
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    /** The money-path sweep's harness: each target over [moneyInputs], every call through [problemWith]. */
+    private fun moneySweep(targets: List<MoneyTarget>): Pair<Map<String, Int>, List<String>> {
+        val invocations = targets.associate { it.label to 0 }.toMutableMap()
+        val problems = mutableListOf<String>()
+        for (input in moneyInputs()) {
+            for (target in targets) {
+                for (call in target.calls(input)) {
+                    invocations[target.label] = invocations.getValue(target.label) + 1
+                    problemWith(target.label, input.described, call)?.let { problems += it }
+                }
+            }
+        }
+        return invocations to problems
+    }
+
+    @Test
+    fun `every money-path decoder refuses hostile input by name, never by unhandled exception`() {
+        val (invocations, problems) = moneySweep(moneySwept())
+
+        val never = invocations.filterValues { it == 0 }.keys
+        assertTrue(never.isEmpty(), "these money-path entry points were never invoked, so the sweep proves nothing about them: $never")
+        assertTrue(
+            invocations.values.all { it > 200 },
+            "a money-path entry point ran too few times to have seen every mutation kind: " +
+                invocations.filterValues { it <= 200 },
+        )
+        assertEquals(
+            emptyList(),
+            problems.take(20),
+            "a money-path decoder threw something that is not a named rejection (§4.3). " +
+                "${problems.size} failure(s) in total.",
+        )
+    }
+
+    /**
+     * The money-path harness's control: the unhardened probe — `toInt()` on a value, no digit or
+     * length check — swept beside the real targets through [moneySweep], must be reported, and only it;
+     * its hardened twin, over the same inputs, must not.
+     */
+    @Test
+    fun `an unhardened probe fails the money-path sweep harness`() {
+        val probe = "probe.unhardenedMoneyValue"
+        val unhardened = MoneyTarget(probe) { m -> m.values.map { v -> { unhardenedProbe(v); Unit } } }
+        val (_, problems) = moneySweep(moneySwept() + unhardened)
+
+        assertTrue(problems.isNotEmpty(), "the unhardened probe passed the money-path harness, so it cannot fail")
+        assertTrue(problems.all { it.startsWith("$probe ") }, "only the probe may be reported: ${problems.take(5)}")
+        assertTrue(
+            problems.any { "NumberFormatException" in it },
+            "the harness must name the shape it saw; it reported ${problems.first()}",
+        )
+
+        val hardened = MoneyTarget("probe.hardenedMoneyValue") { m -> m.values.map { v -> { hardenedProbe(v); Unit } } }
+        assertEquals(emptyList(), moneySweep(listOf(hardened)).second, "the hardened twin must pass the same harness")
+    }
+
+    /**
+     * Every published function or constructor in the four money packages taking a `String`, a
+     * `ByteArray` or a `List<String>` is swept or pinned exempt with a reason — the swept set plus
+     * [MONEY_EXEMPT] **equals** the reflected one, and the two are disjoint.
+     */
+    @Test
+    fun `every published money-path entry point taking a string, bytes or a string list is swept or exempt`() {
+        val reflected = reflectedMoneyEntryPoints()
+
+        assertTrue(reflected.size > 20, "the money-path filter found only ${reflected.size} entry point(s): $reflected")
+        assertEquals(emptySet(), moneyGap(moneySwept().map { it.label }.toSet()))
+    }
+
+    /** The equality's control: any one swept entry point dropped from the swept set is named by the gap. */
+    @Test
+    fun `a money-path decoder dropped from the swept set fails the equality`() {
+        val swept = moneySwept().map { it.label }.toSet()
+        for (label in swept) {
+            assertEquals(setOf(label), moneyGap(swept - label), "dropping $label must fail the equality")
+        }
+    }
+
+    /**
+     * Everything the reflected set and the claimed one disagree on: a published entry point neither
+     * swept nor exempt, a claim nothing publishes, a label both swept and exempt, and a pinned
+     * beyond-the-filter target no longer swept.
+     */
+    private fun moneyGap(swept: Set<String>): Set<String> {
+        val reflected = reflectedMoneyEntryPoints()
+        val claimed = (swept - MONEY_SWEPT_BEYOND_THE_FILTER) + MONEY_EXEMPT.keys
+        return (reflected - claimed) + (claimed - reflected) + (swept intersect MONEY_EXEMPT.keys) +
+            (MONEY_SWEPT_BEYOND_THE_FILTER - swept)
+    }
+
+    /**
+     * Every public method and every JVM-public constructor — the synthetic ones included, since a Java
+     * client reaches those — in the four money packages with a parameter of one of [MONEY_SHAPES].
+     */
+    private fun reflectedMoneyEntryPoints(): Set<String> {
+        val found = mutableSetOf<String>()
+        for (packageName in MONEY_PACKAGES) {
+            for (type in MainClasses.published(packageName)) {
+                for (method in MainClasses.methods(type)) {
+                    if (MainClasses.isCompilerGeneratedEnumMember(type, method)) continue
+                    if (method.genericParameterTypes.none { it.typeName in MONEY_SHAPES }) continue
+                    found += MainClasses.label(packageName, type, method)
+                }
+                for (constructor in type.constructors) {
+                    if (constructor.genericParameterTypes.none { it.typeName in MONEY_SHAPES }) continue
+                    found += "${type.name.removePrefix("$packageName.")}.<init>"
+                }
+            }
+        }
+        if (found.isEmpty()) fail("the money-path filter found no entry point at all in $MONEY_PACKAGES")
+        return found
+    }
+
+    /** [m]'s values the recogniser accepts, as the references `Bolt11Invoice.parse` and the request writer take. */
+    private fun recognised(m: MoneyInput): List<Bolt11Reference> =
+        m.values.mapNotNull { runCatching { Bolt11Reference.recognise(it) }.getOrNull() }
+
+    /**
+     * [type] built through its one JVM-public synthetic constructor — the private constructor's
+     * parameter and Kotlin's trailing `DefaultConstructorMarker` — with the cause of a refusal rethrown
+     * as itself, so [problemWith] judges what `init` threw rather than reflection's wrapper.
+     */
+    private fun construct(type: Class<*>, argument: Any) {
+        val synthetic = type.declaredConstructors.single { it.isSynthetic }
+        try {
+            synthetic.newInstance(argument, null)
+        } catch (wrapped: InvocationTargetException) {
+            throw wrapped.targetException
+        }
+    }
+
+    private val MONEY_PACKAGES: List<String> = listOf(
+        "dev.eryalabs.nenya.settlement",
+        "dev.eryalabs.nenya.payment",
+        "dev.eryalabs.nenya.delivery",
+        "dev.eryalabs.nenya.order",
+    )
+
+    /** The three parameter shapes a counterparty's value reaches these packages in, by generic type name. */
+    private val MONEY_SHAPES: Set<String> = setOf("java.lang.String", "byte[]", "java.util.List<java.lang.String>")
+
+    /**
+     * Swept although the filter does not name it: `parse` takes a `Bolt11Reference`, not a string, and
+     * is the decoder every invoice a counterparty sends reaches once the recogniser has accepted it.
+     */
+    private val MONEY_SWEPT_BEYOND_THE_FILTER: Set<String> = setOf("Bolt11Invoice\$Companion.parse")
+
+    /** Published entry points the filter names and the sweep does not call, each with the reason. */
+    private val MONEY_EXEMPT: Map<String, String> = mapOf(
+        "SettlementException.<init>" to "a refusal: a reason and a detail this library wrote; it reads nothing",
+        "PaymentException.<init>" to "a refusal: a reason and a detail this library wrote; it reads nothing",
+        "DeliveryException.<init>" to "a refusal: a reason and a detail this library wrote; it reads nothing",
+        "OrderStateException.<init>" to "a refusal: a reason and a detail this library wrote; it reads nothing",
+        "PaymentBuild\$Refused.<init>" to "a writer's refusal value: reasons and a detail this library wrote",
+        "PaymentRequest.<init>" to "internal: its one caller is PaymentRequest.decode, which the rumor sweep sweeps",
+        "PaymentReceipt.<init>" to "internal: its one caller is PaymentReceipt.decode, which the rumor sweep sweeps",
+        "SettlementTags.single" to "internal to the two settlement decoders, reached only through them, which the " +
+            "rumor sweep sweeps",
+        "SettlementTags.missing" to "internal: builds the refusal a missing tag gets, from a tag name and a clause " +
+            "this library wrote",
+        "SettlementTags\$DecodedPayee.<init>" to "internal: the payee tag the settlement decoders already read",
+        "FeeTermSighting.<init>" to "internal and checks nothing: its callers are `of`, swept here, and the decoded " +
+            "doors over messages the rumor sweep sweeps",
     )
 }
