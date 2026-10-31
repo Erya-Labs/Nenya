@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 370" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="The order lifecycle: proposed to settled along the happy path; cancelled, expired and disputed as terminal states">
-  <rect width="840" height="370" rx="16" fill="#11131c"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 420" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="Order lifecycle: seven states from proposed to settled; cancelled, expired and disputed as the other terminal states">
+  <title>Order lifecycle</title>
+  <rect width="840" height="420" rx="16" fill="#11131c"/>
 
   <defs>
     <marker id="lcAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -13,72 +14,73 @@
     </marker>
   </defs>
 
-  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">The life of an order</text>
-  <text x="40" y="78" fill="#9aa0b8" font-size="14">Seven states forward, three ways out. Any pair not drawn here is refused &#8212; the transition function is total.</text>
+  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">Order lifecycle</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">Transitions not listed in &#167;11.2 are refused. The transition function SHOULD be modelled as total.</text>
 
   <!-- genesis -->
-  <circle cx="58" cy="140" r="5" fill="#f5b942"/>
-  <line x1="63" y1="140" x2="76" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <circle cx="58" cy="167" r="5" fill="#f5b942"/>
+  <line x1="63" y1="167" x2="76" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <!-- happy path: boxes w=96 h=38 at y=121, x = 80 + 104*n -->
-  <rect x="80" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="128" y="145" fill="#eef0f8" font-size="12.5" text-anchor="middle">proposed</text>
-  <line x1="176" y1="140" x2="180" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <!-- forward path: boxes w=96 h=38 at y=148, x = 80 + 104*n -->
+  <rect x="80" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="128" y="172" fill="#eef0f8" font-size="12.5" text-anchor="middle">proposed</text>
+  <line x1="176" y1="167" x2="180" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <rect x="184" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="232" y="145" fill="#eef0f8" font-size="12.5" text-anchor="middle">accepted</text>
-  <line x1="280" y1="140" x2="284" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <rect x="184" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="232" y="172" fill="#eef0f8" font-size="12.5" text-anchor="middle">accepted</text>
+  <line x1="280" y1="167" x2="284" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <rect x="288" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="336" y="145" fill="#eef0f8" font-size="12.5" text-anchor="middle">committed</text>
-  <line x1="384" y1="140" x2="388" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <rect x="288" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="336" y="172" fill="#eef0f8" font-size="12.5" text-anchor="middle">committed</text>
+  <line x1="384" y1="167" x2="388" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <rect x="392" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="440" y="137" fill="#eef0f8" font-size="11.5" text-anchor="middle">awaiting_</text>
-  <text x="440" y="151" fill="#eef0f8" font-size="11.5" text-anchor="middle">payment</text>
-  <line x1="488" y1="140" x2="492" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <rect x="392" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="440" y="164" fill="#eef0f8" font-size="12" text-anchor="middle">awaiting_</text>
+  <text x="440" y="178" fill="#eef0f8" font-size="12" text-anchor="middle">payment</text>
+  <line x1="488" y1="167" x2="492" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <rect x="496" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="544" y="145" fill="#eef0f8" font-size="12.5" text-anchor="middle">paid</text>
-  <line x1="592" y1="140" x2="596" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <rect x="496" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="544" y="172" fill="#eef0f8" font-size="12.5" text-anchor="middle">paid</text>
+  <line x1="592" y1="167" x2="596" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <rect x="600" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="648" y="145" fill="#eef0f8" font-size="12.5" text-anchor="middle">released</text>
-  <line x1="696" y1="140" x2="700" y2="140" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
+  <rect x="600" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="648" y="172" fill="#eef0f8" font-size="12.5" text-anchor="middle">released</text>
+  <line x1="696" y1="167" x2="700" y2="167" stroke="#f5b942" stroke-width="1.6" marker-end="url(#lcAmber)"/>
 
-  <rect x="704" y="121" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#4cc38a" stroke-width="2"/>
-  <text x="752" y="145" fill="#eef0f8" font-size="12.5" font-weight="600" text-anchor="middle">settled</text>
+  <rect x="704" y="148" width="96" height="38" rx="8" fill="#1a1d2b" stroke="#4cc38a" stroke-width="2"/>
+  <text x="752" y="172" fill="#eef0f8" font-size="12.5" font-weight="600" text-anchor="middle">settled</text>
 
-  <!-- what each arrow means, under the happy path -->
-  <text x="128" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">terms sent</text>
-  <text x="232" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">terms repeated back</text>
-  <text x="336" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">fingerprint committed</text>
-  <text x="440" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">bill received</text>
-  <text x="544" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">preimage verified</text>
-  <text x="648" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">key released</text>
-  <text x="752" y="110" fill="#9aa0b8" font-size="10.5" text-anchor="middle">delivery verified</text>
+  <!-- trigger for entering each state, above its box; lines bottom-aligned at y=136 -->
+  <text x="128" y="136" fill="#9aa0b8" font-size="12" text-anchor="middle">terms sent</text>
+  <text x="232" y="121" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="232" y="121">terms accepted,</tspan><tspan x="232" y="136">byte-identical</tspan></text>
+  <text x="336" y="106" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="336" y="106">commitment</tspan><tspan x="336" y="121">(type=5)</tspan><tspan x="336" y="136">with x and ox</tspan></text>
+  <text x="440" y="106" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="440" y="106">required</tspan><tspan x="440" y="121">payment requests</tspan><tspan x="440" y="136">received</tspan></text>
+  <text x="544" y="106" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="544" y="106">required</tspan><tspan x="544" y="121">receipts</tspan><tspan x="544" y="136">verified</tspan></text>
+  <text x="648" y="136" fill="#9aa0b8" font-size="12" text-anchor="middle">key released</text>
+  <text x="752" y="121" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="752" y="121">delivery</tspan><tspan x="752" y="136">verified</tspan></text>
 
-  <!-- bracket 1: proposed..awaiting_payment -> cancelled / expired -->
-  <path d="M80 172 L80 182 L488 182 L488 172" fill="none" stroke="#9aa0b8" stroke-width="1.3"/>
-  <text x="284" y="200" fill="#9aa0b8" font-size="11.5" text-anchor="middle">until the payment proof verifies, either side can walk away or time out</text>
-  <line x1="236" y1="208" x2="236" y2="240" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#lcGray)"/>
-  <line x1="340" y1="208" x2="340" y2="240" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#lcGray)"/>
+  <!-- bracket: proposed..awaiting_payment -> cancelled / expired -->
+  <path d="M80 199 L80 209 L488 209 L488 199" fill="none" stroke="#9aa0b8" stroke-width="1.3"/>
+  <text x="200" y="229" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="200" y="229">before paid: cancelled by either party,</tspan><tspan x="200" y="244">or expired when a deadline passes</tspan></text>
+  <line x1="236" y1="254" x2="236" y2="280" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#lcGray)"/>
+  <line x1="340" y1="254" x2="340" y2="280" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#lcGray)"/>
 
   <!-- disputed: from committed, awaiting_payment, paid, released -->
-  <path d="M336 162 C360 226 480 248 536 252" fill="none" stroke="#e2606b" stroke-width="1.3" opacity="0.9"/>
-  <path d="M440 162 C460 212 500 240 534 250" fill="none" stroke="#e2606b" stroke-width="1.3" opacity="0.9"/>
-  <path d="M544 162 C548 200 556 224 564 238" fill="none" stroke="#e2606b" stroke-width="1.3" marker-end="url(#lcRed)" opacity="0.9"/>
-  <path d="M648 162 C640 206 616 232 596 244" fill="none" stroke="#e2606b" stroke-width="1.3" opacity="0.9"/>
-  <text x="662" y="206" fill="#e2606b" font-size="11.5">a refusal from committed onward</text>
+  <path d="M336 189 C356 245 470 272 532 280" fill="none" stroke="#e2606b" stroke-width="1.3" marker-end="url(#lcRed)" opacity="0.9"/>
+  <path d="M440 189 C456 236 510 266 556 280" fill="none" stroke="#e2606b" stroke-width="1.3" marker-end="url(#lcRed)" opacity="0.9"/>
+  <path d="M544 189 C548 228 568 258 580 280" fill="none" stroke="#e2606b" stroke-width="1.3" marker-end="url(#lcRed)" opacity="0.9"/>
+  <path d="M648 189 C644 230 618 258 604 280" fill="none" stroke="#e2606b" stroke-width="1.3" marker-end="url(#lcRed)" opacity="0.9"/>
 
   <!-- terminals -->
-  <rect x="188" y="244" width="96" height="36" rx="8" fill="#1a1d2b" stroke="#9aa0b8" stroke-width="1.6"/>
-  <text x="236" y="267" fill="#eef0f8" font-size="12.5" text-anchor="middle">cancelled</text>
-  <rect x="292" y="244" width="96" height="36" rx="8" fill="#1a1d2b" stroke="#9aa0b8" stroke-width="1.6"/>
-  <text x="340" y="267" fill="#eef0f8" font-size="12.5" text-anchor="middle">expired</text>
-  <rect x="520" y="244" width="96" height="36" rx="8" fill="#1a1d2b" stroke="#e2606b" stroke-width="1.6"/>
-  <text x="568" y="267" fill="#eef0f8" font-size="12.5" text-anchor="middle">disputed</text>
+  <rect x="188" y="284" width="96" height="36" rx="8" fill="#1a1d2b" stroke="#9aa0b8" stroke-width="1.6"/>
+  <text x="236" y="307" fill="#eef0f8" font-size="12.5" text-anchor="middle">cancelled</text>
+  <rect x="292" y="284" width="96" height="36" rx="8" fill="#1a1d2b" stroke="#9aa0b8" stroke-width="1.6"/>
+  <text x="340" y="307" fill="#eef0f8" font-size="12.5" text-anchor="middle">expired</text>
+  <rect x="520" y="284" width="96" height="36" rx="8" fill="#1a1d2b" stroke="#e2606b" stroke-width="1.6"/>
+  <text x="568" y="307" fill="#eef0f8" font-size="12.5" text-anchor="middle">disputed</text>
+  <text x="632" y="298" fill="#e2606b" font-size="12"><tspan x="632" y="298">a failure after paid,</tspan><tspan x="632" y="313">or a violated commitment</tspan></text>
 
-  <text x="40" y="322" fill="#9aa0b8" font-size="12">Drawn from the machine-checked copy of &#167;11.2 (nenya-1-11.2-transitions.psv): cancelled and expired are reachable from the four states</text>
-  <text x="40" y="340" fill="#9aa0b8" font-size="12">before paid; disputed from committed, awaiting_payment, paid and released. Every transition is gated on evidence the library checked itself.</text>
+  <text x="40" y="354" fill="#9aa0b8" font-size="12">Drawn from &#167;11.2: cancelled and expired are reachable from the four states before paid;</text>
+  <text x="40" y="372" fill="#9aa0b8" font-size="12">disputed from committed, awaiting_payment, paid and released.</text>
+  <text x="40" y="390" fill="#9aa0b8" font-size="12">Each party derives its own order state only from what it verified itself (&#167;11).</text>
 </svg>

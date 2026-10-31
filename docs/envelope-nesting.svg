@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 830" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="The NIP-17 envelope: an unsigned rumor inside a kind 13 seal inside a kind 1059 gift wrap, sent as two copies, with the nine-step read procedure">
+  <title>Rumor, seal, gift wrap &#8212; the envelope and its nine-step read</title>
+  <rect width="960" height="830" rx="16" fill="#11131c"/>
+
+  <defs>
+    <marker id="envGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#4cc38a"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="48" fill="#eef0f8" font-size="26" font-weight="700">Rumor, seal, gift wrap</text>
+  <text x="40" y="72" fill="#9aa0b8" font-size="14">Every private message is an unsigned rumor, sealed with the sender&#8217;s key and wrapped with a freshly generated key.</text>
+  <text x="40" y="90" fill="#9aa0b8" font-size="14">Two copies are sent: one to the recipient, one to the sender.</text>
+
+  <!-- ======================= copy one: the recipient's copy, in full ======================= -->
+  <text x="270" y="114" fill="#eef0f8" font-size="14" font-weight="600" text-anchor="middle">copy one &#8212; to the recipient</text>
+
+  <!-- gift wrap -->
+  <rect x="100" y="124" width="340" height="476" rx="10" fill="#151826" stroke="#2b2f44" stroke-width="2"/>
+  <text x="116" y="150" fill="#eef0f8" font-size="13" font-weight="600">gift wrap<tspan fill="#9aa0b8" font-weight="400"> &#183; kind 1059</tspan></text>
+  <text x="116" y="174" fill="#9aa0b8" font-size="12">pubkey<tspan fill="#eef0f8"> &#8212; throwaway key A, new for every wrap</tspan></text>
+  <text x="116" y="194" fill="#f5b942" font-size="12">MUST NOT be displayed, indexed by,</text>
+  <text x="116" y="210" fill="#f5b942" font-size="12">or compared (&#167;7.2)</text>
+  <text x="116" y="232" fill="#9aa0b8" font-size="12">sig<tspan fill="#eef0f8"> &#8212; by key A; does not affect attribution</tspan></text>
+  <text x="116" y="252" fill="#9aa0b8" font-size="12">created_at<tspan fill="#eef0f8"> &#8212; in [now &#8722; 172 800, now]</tspan></text>
+  <text x="116" y="272" fill="#9aa0b8" font-size="12">tags<tspan fill="#eef0f8"> &#8212; exactly one ["p", recipient, relay]</tspan></text>
+  <text x="116" y="292" fill="#9aa0b8" font-size="12">content<tspan fill="#eef0f8"> &#8212; NIP-44 &#183; &#8804; 87 472 base64 chars</tspan></text>
+
+  <!-- seal -->
+  <rect x="116" y="308" width="308" height="278" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="132" y="334" fill="#eef0f8" font-size="13" font-weight="600">seal<tspan fill="#9aa0b8" font-weight="400"> &#183; kind 13</tspan></text>
+  <text x="132" y="358" fill="#9aa0b8" font-size="12">pubkey<tspan fill="#eef0f8"> &#8212; the sender&#8217;s key</tspan></text>
+  <text x="132" y="378" fill="#9aa0b8" font-size="12">sig<tspan fill="#eef0f8"> &#8212; by the sender&#8217;s key</tspan></text>
+  <text x="132" y="398" fill="#9aa0b8" font-size="12">created_at<tspan fill="#eef0f8"> &#8212; in [now &#8722; 172 800, now]</tspan></text>
+  <text x="132" y="418" fill="#9aa0b8" font-size="12">tags<tspan fill="#eef0f8"> &#8212; empty, always</tspan></text>
+  <text x="132" y="438" fill="#9aa0b8" font-size="12">content<tspan fill="#eef0f8"> &#8212; NIP-44 &#183; plaintext &#8804; 65 535 bytes</tspan></text>
+
+  <!-- rumor -->
+  <rect x="132" y="454" width="276" height="120" rx="10" fill="#2b2f44" stroke="#f5b942" stroke-width="1.8"/>
+  <text x="148" y="480" fill="#eef0f8" font-size="13" font-weight="600">rumor<tspan fill="#9aa0b8" font-weight="400"> &#8212; the message itself</tspan></text>
+  <text x="148" y="502" fill="#9aa0b8" font-size="12">sig<tspan fill="#eef0f8"> &#8212; absent: the rumor is unsigned</tspan></text>
+  <text x="148" y="522" fill="#9aa0b8" font-size="12">pubkey<tspan fill="#eef0f8"> &#8212; must equal seal.pubkey</tspan></text>
+  <text x="148" y="542" fill="#9aa0b8" font-size="12">created_at<tspan fill="#eef0f8"> &#8212; the true time</tspan></text>
+  <text x="148" y="562" fill="#9aa0b8" font-size="12">JSON<tspan fill="#eef0f8"> &#8212; &#8804; 40 960 bytes on write</tspan></text>
+
+  <!-- attribution connector: seal.pubkey must equal rumor.pubkey -->
+  <line x1="56" y1="354" x2="112" y2="354" stroke="#4cc38a" stroke-width="1.6" marker-end="url(#envGreen)"/>
+  <line x1="56" y1="518" x2="128" y2="518" stroke="#4cc38a" stroke-width="1.6" marker-end="url(#envGreen)"/>
+  <line x1="56" y1="354" x2="56" y2="518" stroke="#4cc38a" stroke-width="1.6"/>
+  <circle cx="56" cy="436" r="11" fill="#11131c" stroke="#4cc38a" stroke-width="1.6"/>
+  <text x="56" y="441" fill="#4cc38a" font-size="14" font-weight="700" text-anchor="middle">=</text>
+  <text transform="rotate(-90 30 436)" x="30" y="436" fill="#4cc38a" font-size="12" font-weight="600" text-anchor="middle">must be equal (&#167;7.2)</text>
+
+  <!-- ======================= copy two: the sender's own copy, compact ======================= -->
+  <text x="540" y="114" fill="#eef0f8" font-size="14" font-weight="600" text-anchor="middle">copy two &#8212; to the sender</text>
+
+  <rect x="460" y="124" width="160" height="476" rx="10" fill="#151826" stroke="#2b2f44" stroke-width="2"/>
+  <text x="540" y="148" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">gift wrap<tspan fill="#9aa0b8" font-weight="400"> &#183; kind 1059</tspan></text>
+  <text x="540" y="172" fill="#eef0f8" font-size="12" text-anchor="middle">throwaway key B</text>
+  <text x="540" y="190" fill="#9aa0b8" font-size="12" text-anchor="middle">fresh for this copy:</text>
+  <text x="540" y="206" fill="#9aa0b8" font-size="12" text-anchor="middle">B &#8800; A, and equal to</text>
+  <text x="540" y="222" fill="#9aa0b8" font-size="12" text-anchor="middle">neither party&#8217;s key</text>
+
+  <rect x="474" y="240" width="132" height="210" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="540" y="266" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">seal<tspan fill="#9aa0b8" font-weight="400"> &#183; kind 13</tspan></text>
+  <text x="540" y="290" fill="#eef0f8" font-size="12" text-anchor="middle">its own seal,</text>
+  <text x="540" y="308" fill="#9aa0b8" font-size="12" text-anchor="middle">sealed to the</text>
+  <text x="540" y="326" fill="#9aa0b8" font-size="12" text-anchor="middle">sender</text>
+  <text x="540" y="344" fill="#9aa0b8" font-size="12" text-anchor="middle">(&#167;7.1 step 4)</text>
+
+  <rect x="488" y="378" width="104" height="60" rx="10" fill="#2b2f44" stroke="#f5b942" stroke-width="1.8"/>
+  <text x="540" y="402" fill="#eef0f8" font-size="12" text-anchor="middle">the same</text>
+  <text x="540" y="420" fill="#eef0f8" font-size="12" text-anchor="middle">rumor</text>
+
+  <text x="540" y="490" fill="#9aa0b8" font-size="12" text-anchor="middle">all four seal and</text>
+  <text x="540" y="508" fill="#9aa0b8" font-size="12" text-anchor="middle">gift-wrap created_at</text>
+  <text x="540" y="526" fill="#9aa0b8" font-size="12" text-anchor="middle">values are drawn</text>
+  <text x="540" y="544" fill="#9aa0b8" font-size="12" text-anchor="middle">independently and</text>
+  <text x="540" y="562" fill="#9aa0b8" font-size="12" text-anchor="middle">uniformly (&#167;7.1)</text>
+
+  <!-- ======================= the nine-step read ======================= -->
+  <rect x="644" y="124" width="280" height="476" rx="10" fill="#151826" stroke="#2b2f44" stroke-width="2"/>
+  <text x="660" y="150" fill="#eef0f8" font-size="14" font-weight="600">Reading: nine steps, in order</text>
+  <text x="660" y="170" fill="#9aa0b8" font-size="12">a failed step stops the read &#8212;</text>
+  <text x="660" y="186" fill="#9aa0b8" font-size="12">nothing below it is attempted</text>
+
+  <!-- steps 1-3: no cryptography -->
+  <rect x="656" y="198" width="256" height="170" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="668" y="220" fill="#f5b942" font-size="12">checked before any decryption</text>
+
+  <circle cx="682" cy="244" r="9" fill="#2b2f44"/>
+  <text x="682" y="248" fill="#eef0f8" font-size="12" text-anchor="middle">1</text>
+  <text x="698" y="248" fill="#eef0f8" font-size="12">Recompute the wrap&#8217;s id</text>
+  <text x="698" y="264" fill="#9aa0b8" font-size="12">reject on mismatch (&#167;4.1)</text>
+
+  <circle cx="682" cy="288" r="9" fill="#2b2f44"/>
+  <text x="682" y="292" fill="#eef0f8" font-size="12" text-anchor="middle">2</text>
+  <text x="698" y="292" fill="#eef0f8" font-size="12">Reject any kind but 1059</text>
+  <text x="698" y="308" fill="#9aa0b8" font-size="12">kind 21059 MUST NOT be used</text>
+
+  <circle cx="682" cy="332" r="9" fill="#2b2f44"/>
+  <text x="682" y="336" fill="#eef0f8" font-size="12" text-anchor="middle">3</text>
+  <text x="698" y="336" fill="#eef0f8" font-size="12">Exactly one p = the reader&#8217;s key</text>
+  <text x="698" y="352" fill="#9aa0b8" font-size="12">rejected before any decryption</text>
+
+  <!-- steps 4-9 -->
+  <circle cx="670" cy="390" r="9" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.4"/>
+  <text x="670" y="394" fill="#eef0f8" font-size="12" text-anchor="middle">4</text>
+  <text x="686" y="394" fill="#eef0f8" font-size="12">Verify the wrap&#8217;s signature *</text>
+  <text x="686" y="410" fill="#9aa0b8" font-size="12">a pass establishes no identity</text>
+
+  <circle cx="670" cy="432" r="9" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.4"/>
+  <text x="670" y="436" fill="#eef0f8" font-size="12" text-anchor="middle">5</text>
+  <text x="686" y="436" fill="#eef0f8" font-size="12">Decrypt the wrap &#8594; seal JSON</text>
+
+  <circle cx="670" cy="460" r="9" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.4"/>
+  <text x="670" y="464" fill="#eef0f8" font-size="12" text-anchor="middle">6</text>
+  <text x="686" y="464" fill="#eef0f8" font-size="12">Seal: recompute id &#183; kind 13 &#183;</text>
+  <text x="686" y="480" fill="#9aa0b8" font-size="12">tags empty &#183; verify signature *</text>
+
+  <circle cx="670" cy="502" r="9" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.4"/>
+  <text x="670" y="506" fill="#eef0f8" font-size="12" text-anchor="middle">7</text>
+  <text x="686" y="506" fill="#eef0f8" font-size="12">Decrypt the seal &#8594; rumor JSON</text>
+
+  <circle cx="670" cy="528" r="9" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.4"/>
+  <text x="670" y="532" fill="#eef0f8" font-size="12" text-anchor="middle">8</text>
+  <text x="686" y="532" fill="#eef0f8" font-size="12">Rumor: any sig key &#8594; reject</text>
+  <text x="686" y="548" fill="#9aa0b8" font-size="12">even "" or null &#183; recompute its id</text>
+
+  <circle cx="670" cy="570" r="9" fill="#1a1d2b" stroke="#4cc38a" stroke-width="1.4"/>
+  <text x="670" y="574" fill="#eef0f8" font-size="12" text-anchor="middle">9</text>
+  <text x="686" y="574" fill="#eef0f8" font-size="12">Attribution: seal.pubkey must</text>
+  <text x="686" y="590" fill="#9aa0b8" font-size="12">equal rumor.pubkey (&#167;7.2)</text>
+
+  <!-- ======================= captions ======================= -->
+  <text x="40" y="630" fill="#4cc38a" font-size="12">Attribution (&#167;7.2): the seal&#8217;s pubkey must equal the rumor&#8217;s pubkey; otherwise the message is discarded.</text>
+  <text x="40" y="648" fill="#9aa0b8" font-size="12">An order term is attributed to the seal&#8217;s pubkey, never to the rumor&#8217;s or the gift wrap&#8217;s.</text>
+  <text x="40" y="666" fill="#9aa0b8" font-size="12">The gift wrap&#8217;s signature does not affect attribution.</text>
+  <text x="40" y="686" fill="#9aa0b8" font-size="12">The rumor inside is kind 14 (chat), 15 (the released file &#8212; &#167;10), 16 (structured order message) or 17 (payment receipt) &#8212; &#167;7.4.</text>
+
+  <text x="40" y="710" fill="#9aa0b8" font-size="12">* The signature checks in steps 4 and 6 apply only to an implementation that verifies BIP-340 signatures. One that does not</text>
+  <text x="40" y="728" fill="#9aa0b8" font-size="12">continues past them, still performs the &#167;7.2 pubkey-equality check, and reports the message as authenticated-by-decryption</text>
+  <text x="40" y="746" fill="#9aa0b8" font-size="12">only, never as signature-verified (&#167;7.1, &#167;17).</text>
+
+  <text x="40" y="770" fill="#9aa0b8" font-size="12">A gift wrap, seal or rumor MUST NOT be rejected on timestamp grounds (&#167;4.6). Each seal&#8217;s and gift wrap&#8217;s created_at is drawn</text>
+  <text x="40" y="788" fill="#9aa0b8" font-size="12">from [now &#8722; 172 800, now] (&#167;7.1). Only the rumor&#8217;s created_at is the true time. An order thread is ordered by the reader&#8217;s</text>
+  <text x="40" y="806" fill="#9aa0b8" font-size="12">own receipt sequence, never by created_at (&#167;4.6).</text>
+</svg>

@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 450" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="How Nenya fits together: two clients, a public board and a sealed private channel, with nenya-core and the injected seams">
-  <rect width="840" height="450" rx="16" fill="#11131c"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 526" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="How Nenya fits together: a buyer&#8217;s client and a provider&#8217;s client, each embedding nenya-core and supplying five interfaces, exchange requests, offers and bids on the public board and sealed order messages over the NIP-17 private order channel">
+  <title>How Nenya fits together</title>
+  <rect width="840" height="526" rx="16" fill="#11131c"/>
 
   <defs>
     <marker id="amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -11,51 +12,59 @@
   </defs>
 
   <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">How it fits together</text>
-  <text x="40" y="78" fill="#9aa0b8" font-size="14">Two clients, two channels. The library verifies; everything that touches the world is injected.</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">Listings and public bids are on the board; every message after the bid is sealed (NIP-17).</text>
 
   <!-- buyer's client -->
   <text x="125" y="112" fill="#eef0f8" font-size="14" font-weight="600" text-anchor="middle">buyer&#8217;s client</text>
   <rect x="40" y="122" width="170" height="52" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="125" y="153" fill="#9aa0b8" font-size="13" text-anchor="middle">your UI</text>
+  <text x="125" y="153" fill="#9aa0b8" font-size="13" text-anchor="middle">user interface</text>
   <rect x="40" y="182" width="170" height="84" rx="8" fill="#1a1d2b" stroke="#f5b942" stroke-width="1.8"/>
-  <text x="125" y="218" fill="#eef0f8" font-size="15" font-weight="600" text-anchor="middle">nenya-core</text>
-  <text x="125" y="238" fill="#9aa0b8" font-size="11" text-anchor="middle">checks everything itself</text>
-  <rect x="40" y="274" width="170" height="104" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2" stroke-dasharray="5 5"/>
-  <text x="125" y="296" fill="#9aa0b8" font-size="11" text-anchor="middle">injected by you</text>
+  <text x="125" y="208" fill="#eef0f8" font-size="15" font-weight="600" text-anchor="middle">nenya-core</text>
+  <text x="125" y="228" fill="#9aa0b8" font-size="12" text-anchor="middle">evidence checks</text>
+  <text x="125" y="246" fill="#9aa0b8" font-size="12" text-anchor="middle">order state machine</text>
+  <rect x="40" y="274" width="170" height="144" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2" stroke-dasharray="5 5"/>
+  <text x="125" y="296" fill="#9aa0b8" font-size="12" text-anchor="middle">client-supplied</text>
   <text x="125" y="318" fill="#eef0f8" font-size="12.5" text-anchor="middle">signer</text>
-  <text x="125" y="338" fill="#eef0f8" font-size="12.5" text-anchor="middle">wallet</text>
+  <text x="125" y="338" fill="#eef0f8" font-size="12.5" text-anchor="middle">one-time signer</text>
   <text x="125" y="358" fill="#eef0f8" font-size="12.5" text-anchor="middle">relay transport</text>
+  <text x="125" y="378" fill="#eef0f8" font-size="12.5" text-anchor="middle">wallet</text>
+  <text x="125" y="398" fill="#eef0f8" font-size="12.5" text-anchor="middle">clock and randomness</text>
 
-  <!-- seller's client -->
-  <text x="715" y="112" fill="#eef0f8" font-size="14" font-weight="600" text-anchor="middle">seller&#8217;s client</text>
+  <!-- provider's client -->
+  <text x="715" y="112" fill="#eef0f8" font-size="14" font-weight="600" text-anchor="middle">provider&#8217;s client</text>
   <rect x="630" y="122" width="170" height="52" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
-  <text x="715" y="153" fill="#9aa0b8" font-size="13" text-anchor="middle">your UI</text>
+  <text x="715" y="153" fill="#9aa0b8" font-size="13" text-anchor="middle">user interface</text>
   <rect x="630" y="182" width="170" height="84" rx="8" fill="#1a1d2b" stroke="#f5b942" stroke-width="1.8"/>
-  <text x="715" y="218" fill="#eef0f8" font-size="15" font-weight="600" text-anchor="middle">nenya-core</text>
-  <text x="715" y="238" fill="#9aa0b8" font-size="11" text-anchor="middle">checks everything itself</text>
-  <rect x="630" y="274" width="170" height="104" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2" stroke-dasharray="5 5"/>
-  <text x="715" y="296" fill="#9aa0b8" font-size="11" text-anchor="middle">injected by you</text>
+  <text x="715" y="208" fill="#eef0f8" font-size="15" font-weight="600" text-anchor="middle">nenya-core</text>
+  <text x="715" y="228" fill="#9aa0b8" font-size="12" text-anchor="middle">evidence checks</text>
+  <text x="715" y="246" fill="#9aa0b8" font-size="12" text-anchor="middle">order state machine</text>
+  <rect x="630" y="274" width="170" height="144" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2" stroke-dasharray="5 5"/>
+  <text x="715" y="296" fill="#9aa0b8" font-size="12" text-anchor="middle">client-supplied</text>
   <text x="715" y="318" fill="#eef0f8" font-size="12.5" text-anchor="middle">signer</text>
-  <text x="715" y="338" fill="#eef0f8" font-size="12.5" text-anchor="middle">wallet</text>
+  <text x="715" y="338" fill="#eef0f8" font-size="12.5" text-anchor="middle">one-time signer</text>
   <text x="715" y="358" fill="#eef0f8" font-size="12.5" text-anchor="middle">relay transport</text>
+  <text x="715" y="378" fill="#eef0f8" font-size="12.5" text-anchor="middle">wallet</text>
+  <text x="715" y="398" fill="#eef0f8" font-size="12.5" text-anchor="middle">clock and randomness</text>
 
   <!-- public board -->
   <rect x="228" y="122" width="384" height="112" rx="10" fill="#151826" stroke="#2b2f44" stroke-width="2"/>
-  <text x="420" y="144" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">the public board &#8212; any relays</text>
+  <text x="420" y="144" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">the public board &#183; any relays</text>
   <text x="420" y="166" fill="#eef0f8" font-size="12" text-anchor="middle">request <tspan fill="#9aa0b8">&#183; kind 30404</tspan></text>
   <line x1="252" y1="172" x2="586" y2="172" stroke="#f5b942" stroke-width="1.6" marker-end="url(#amber)"/>
-  <text x="420" y="192" fill="#eef0f8" font-size="12" text-anchor="middle">offer <tspan fill="#9aa0b8">&#183; kind 30402 (NIP-99, unmodified)</tspan></text>
+  <text x="420" y="192" fill="#eef0f8" font-size="12" text-anchor="middle">offer <tspan fill="#9aa0b8">&#183; kind 30402 (NIP-99 classified listing)</tspan></text>
   <line x1="586" y1="198" x2="252" y2="198" stroke="#f5b942" stroke-width="1.6" marker-end="url(#amber)"/>
-  <text x="420" y="218" fill="#eef0f8" font-size="12" text-anchor="middle">bid <tspan fill="#9aa0b8">&#183; kind 1111 (NIP-22)</tspan></text>
-  <line x1="586" y1="224" x2="252" y2="224" stroke="#f5b942" stroke-width="1.6" marker-end="url(#amber)"/>
+  <text x="420" y="218" fill="#eef0f8" font-size="12" text-anchor="middle">bid <tspan fill="#9aa0b8">&#183; kind 1111 (NIP-22 comment on a listing)</tspan></text>
+  <line x1="586" y1="224" x2="252" y2="224" stroke="#f5b942" stroke-width="1.6" marker-start="url(#amber)" marker-end="url(#amber)"/>
 
   <!-- private channel -->
-  <rect x="228" y="252" width="384" height="126" rx="10" fill="#151826" stroke="#4cc38a" stroke-width="1.8"/>
+  <rect x="228" y="252" width="384" height="166" rx="10" fill="#151826" stroke="#4cc38a" stroke-width="1.8"/>
   <text x="420" y="276" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">the private order channel</text>
-  <text x="420" y="294" fill="#9aa0b8" font-size="11" text-anchor="middle">NIP-17 gift wrap &#183; kind 1059 &#183; sealed both ways</text>
+  <text x="420" y="296" fill="#9aa0b8" font-size="12" text-anchor="middle">NIP-17 gift wrap &#183; kind 1059 &#183; both directions</text>
   <line x1="256" y1="316" x2="584" y2="316" stroke="#4cc38a" stroke-width="1.6" marker-start="url(#green)" marker-end="url(#green)"/>
-  <text x="420" y="342" fill="#eef0f8" font-size="12" text-anchor="middle">terms &#183; bill &#183; payment proof &#183; unlock key</text>
-  <text x="420" y="362" fill="#9aa0b8" font-size="11" text-anchor="middle">relays see neither the contents nor who is trading</text>
+  <text x="420" y="342" fill="#eef0f8" font-size="12" text-anchor="middle">terms (proposal, acceptance) &#183; delivery commitment</text>
+  <text x="420" y="360" fill="#eef0f8" font-size="12" text-anchor="middle">invoices &#183; payment receipts &#183; decryption key</text>
+  <text x="420" y="382" fill="#9aa0b8" font-size="12" text-anchor="middle">relays see each wrap&#8217;s recipient key (p tag)</text>
+  <text x="420" y="400" fill="#9aa0b8" font-size="12" text-anchor="middle">the sender and the contents are encrypted</text>
 
   <!-- stubs between clients and lanes -->
   <line x1="210" y1="178" x2="228" y2="178" stroke="#2b2f44" stroke-width="2"/>
@@ -63,6 +72,8 @@
   <line x1="210" y1="315" x2="228" y2="315" stroke="#2b2f44" stroke-width="2"/>
   <line x1="612" y1="315" x2="630" y2="315" stroke="#2b2f44" stroke-width="2"/>
 
-  <text x="40" y="412" fill="#9aa0b8" font-size="12">nenya-core advances an order only on what it verified itself &#8212; ids recomputed, fingerprints rechecked, the payment preimage hashed.</text>
-  <text x="40" y="430" fill="#9aa0b8" font-size="12">The signer, the wallet and the transport are yours: the library never talks to the outside world on its own.</text>
+  <text x="40" y="452" fill="#9aa0b8" font-size="12">nenya-core derives order state only from evidence it verifies itself: recomputed event ids,</text>
+  <text x="40" y="470" fill="#9aa0b8" font-size="12">a payment preimage that hashes to the invoice&#8217;s payment hash, and recomputed deliverable hashes x and ox.</text>
+  <text x="40" y="488" fill="#9aa0b8" font-size="12">The client supplies all five interfaces; nenya-core treats them as untrusted with respect to state (&#167;3).</text>
+  <text x="40" y="506" fill="#9aa0b8" font-size="12">When the fee is non-zero, the named fee recipient also takes part in the sealed order channel (&#167;2, &#167;8.7).</text>
 </svg>

@@ -30,32 +30,30 @@
 #
 # The line numbers are what let a reviewer diff this file against the specification by eye.
 #
-# Regenerated for revision `1.10`, a plain-language readability pass over NENYA-1's prose. That
-# pass splits long sentences and swaps unusual words for everyday ones in sections above §11.2,
-# which lengthened the text ahead of the row block by one line. Nothing inside the block was
-# added, removed or reworded: the shift is uniform at exactly **+1** line, 1766–1780 became
-# 1767–1781, and this regeneration changes the first column only. The set of (from, to) pairs is
-# **identical** to revision `1.9`'s, so `TransitionTotalityTest`'s pair equality is untouched.
-# This is a transcription change under STOP RULE 1 — a fixture that must change because the
-# specification it transcribes moved — and not a silenced failure.
+# Regenerated for revision `1.12`, which condensed NENYA-1's prose. Text above §11.2 was
+# shortened, so the row block moved from lines 1767–1781 to 1079–1093, a uniform
+# -688 shift. The rows themselves are byte-identical to revision `1.11`, only the first
+# column changed, and the set of (from, to) pairs is identical, so `TransitionTotalityTest`'s
+# pair equality is untouched. This is a transcription change under STOP RULE 1: a fixture that
+# changes because the specification it transcribes moved.
 
-1767 | — | proposed
-1768 | proposed | accepted
-1769 | proposed | cancelled
-1770 | proposed | expired
-1771 | accepted | committed
-1772 | accepted | cancelled
-1772 | accepted | expired
-1773 | committed | awaiting_payment
-1774 | committed | cancelled
-1774 | committed | expired
-1774 | committed | disputed
-1775 | awaiting_payment | paid
-1776 | awaiting_payment | cancelled
-1776 | awaiting_payment | expired
-1776 | awaiting_payment | disputed
-1777 | paid | released
-1778 | paid | disputed
-1779 | released | settled
-1780 | released | disputed
-1781 | released | disputed
+1079 | — | proposed
+1080 | proposed | accepted
+1081 | proposed | cancelled
+1082 | proposed | expired
+1083 | accepted | committed
+1084 | accepted | cancelled
+1084 | accepted | expired
+1085 | committed | awaiting_payment
+1086 | committed | cancelled
+1086 | committed | expired
+1086 | committed | disputed
+1087 | awaiting_payment | paid
+1088 | awaiting_payment | cancelled
+1088 | awaiting_payment | expired
+1088 | awaiting_payment | disputed
+1089 | paid | released
+1090 | paid | disputed
+1091 | released | settled
+1092 | released | disputed
+1093 | released | disputed

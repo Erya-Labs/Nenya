@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 940" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="Anatomy of a BOLT-11 invoice: human-readable part, separator, timestamp, tagged fields, signature and checksum, with the fields Nenya reads and the rules that reject an invoice">
+  <title>Anatomy of a BOLT-11 invoice</title>
+  <rect width="960" height="940" rx="16" fill="#11131c"/>
+
+  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">Anatomy of a BOLT-11 invoice</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">Bech32 with the 90-character limit lifted: a human-readable part, the separator 1, 5-bit data groups, a checksum.</text>
+
+  <!-- ===== the invoice bar ===== -->
+  <!-- HRP -->
+  <rect x="40" y="104" width="190" height="46" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="135" y="123" fill="#eef0f8" font-size="12.5" text-anchor="middle">ln + network + amount</text>
+  <text x="135" y="141" fill="#9aa0b8" font-size="12" text-anchor="middle">lnbc<tspan fill="#f5b942">1</tspan>500n</text>
+  <!-- separator -->
+  <rect x="234" y="104" width="36" height="46" rx="8" fill="#1a1d2b" stroke="#f5b942" stroke-width="1.8"/>
+  <text x="252" y="133" fill="#f5b942" font-size="16" font-weight="700" text-anchor="middle">1</text>
+  <!-- timestamp -->
+  <rect x="274" y="104" width="120" height="46" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="334" y="123" fill="#eef0f8" font-size="12.5" text-anchor="middle">timestamp</text>
+  <text x="334" y="141" fill="#9aa0b8" font-size="12" text-anchor="middle">7 chars &#183; 35 bits</text>
+  <!-- tagged fields -->
+  <rect x="398" y="104" width="250" height="46" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="523" y="123" fill="#eef0f8" font-size="12.5" text-anchor="middle">tagged fields</text>
+  <text x="523" y="141" fill="#9aa0b8" font-size="12" text-anchor="middle">type &#183; length &#183; data, repeated</text>
+  <!-- signature -->
+  <rect x="652" y="104" width="174" height="46" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="739" y="123" fill="#eef0f8" font-size="12.5" text-anchor="middle">signature</text>
+  <text x="739" y="141" fill="#9aa0b8" font-size="12" text-anchor="middle">104 chars</text>
+  <!-- checksum -->
+  <rect x="830" y="104" width="90" height="46" rx="8" fill="#1a1d2b" stroke="#4cc38a" stroke-width="1.8"/>
+  <text x="875" y="123" fill="#eef0f8" font-size="12.5" text-anchor="middle">checksum</text>
+  <text x="875" y="141" fill="#9aa0b8" font-size="12" text-anchor="middle">6 chars</text>
+
+  <!-- data-part bracket -->
+  <path d="M274 156 L274 164 L920 164 L920 156" fill="none" stroke="#9aa0b8" stroke-width="1.3"/>
+  <text x="920" y="182" fill="#9aa0b8" font-size="12" text-anchor="end">the data part &#8212; 5-bit character groups</text>
+
+  <!-- separator tick + notes -->
+  <line x1="252" y1="152" x2="252" y2="170" stroke="#f5b942" stroke-width="1.3" stroke-dasharray="3 3"/>
+  <text x="40" y="182" fill="#9aa0b8" font-size="12">the separator is the <tspan fill="#f5b942">last 1</tspan> in the string; the amount may contain a 1: lnbc1500n<tspan fill="#f5b942">1</tspan>&#8230;</text>
+  <text x="40" y="200" fill="#9aa0b8" font-size="12">timestamp: the first 35 bits (7 characters) of the data part &#8212; big-endian Unix seconds</text>
+
+  <!-- ===== zoom panel A: the HRP ===== -->
+  <rect x="40" y="212" width="420" height="224" rx="10" fill="#151826" stroke="#2b2f44" stroke-width="2"/>
+  <text x="56" y="236" fill="#eef0f8" font-size="13" font-weight="600">inside the human-readable part</text>
+  <rect x="56" y="250" width="52" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="82" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">ln</text>
+  <rect x="118" y="250" width="62" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="149" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">bc</text>
+  <rect x="190" y="250" width="84" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="232" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">1500</text>
+  <rect x="300" y="250" width="56" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="328" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">n</text>
+  <text x="82" y="298" fill="#9aa0b8" font-size="12" text-anchor="middle">lightning</text>
+  <text x="149" y="298" fill="#9aa0b8" font-size="12" text-anchor="middle">network</text>
+  <text x="232" y="298" fill="#9aa0b8" font-size="12" text-anchor="middle">amount &#183; OPTIONAL</text>
+  <text x="328" y="298" fill="#9aa0b8" font-size="12" text-anchor="middle">multiplier</text>
+  <text x="56" y="324" fill="#9aa0b8" font-size="12">network prefix: bc, tb, bcrt, &#8230;</text>
+  <text x="56" y="342" fill="#9aa0b8" font-size="12">amount, when present: a positive decimal integer,</text>
+  <text x="56" y="360" fill="#9aa0b8" font-size="12">no leading zeroes &#8212; lnbc0&#8230; and lnbc0500u&#8230; are <tspan fill="#e5484d">rejected</tspan></text>
+  <text x="56" y="378" fill="#9aa0b8" font-size="12">no amount = &#8220;any amount&#8221; &#8212; <tspan fill="#e5484d">Nenya rejects it</tspan> (&#167;9.2 check 4)</text>
+  <text x="56" y="396" fill="#9aa0b8" font-size="12">multiplier: m 10&#8315;&#179; &#183; u 10&#8315;&#8310; &#183; n 10&#8315;&#8313; &#183; p 10&#8315;&#185;&#178; BTC &#183; none = whole BTC</text>
+  <text x="56" y="414" fill="#9aa0b8" font-size="12">a p amount must be a multiple of 10 &#8212; msat is the smallest unit</text>
+
+  <!-- ===== zoom panel B: one tagged field ===== -->
+  <rect x="480" y="212" width="440" height="224" rx="10" fill="#151826" stroke="#2b2f44" stroke-width="2"/>
+  <text x="496" y="236" fill="#eef0f8" font-size="13" font-weight="600">inside one tagged field</text>
+  <rect x="496" y="250" width="96" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="544" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">type &#183; 5 bits</text>
+  <rect x="596" y="250" width="150" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="671" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">length &#183; 10 bits</text>
+  <rect x="750" y="250" width="154" height="32" rx="6" fill="#1a1d2b" stroke="#2b2f44" stroke-width="1.6"/>
+  <text x="827" y="270" fill="#eef0f8" font-size="12.5" text-anchor="middle">data &#183; length &#215; 5 bits</text>
+  <text x="671" y="298" fill="#9aa0b8" font-size="12" text-anchor="middle">two 5-bit groups</text>
+  <text x="496" y="324" fill="#9aa0b8" font-size="12">a field whose length is not the one its type calls for is</text>
+  <text x="496" y="342" fill="#9aa0b8" font-size="12">skipped as though its type were unknown &#8212; it never rejects</text>
+  <text x="496" y="360" fill="#9aa0b8" font-size="12">the invoice</text>
+  <text x="496" y="388" fill="#eef0f8" font-size="12">every other tagged field: skipped by its length</text>
+
+  <!-- ===== field table ===== -->
+  <text x="40" y="462" fill="#eef0f8" font-size="14" font-weight="600">the tagged fields &#8212; Nenya reads six, requires three</text>
+  <text x="62" y="486" fill="#9aa0b8" font-size="12" text-anchor="middle">field</text>
+  <text x="112" y="486" fill="#9aa0b8" font-size="12" text-anchor="middle">type</text>
+  <text x="180" y="486" fill="#9aa0b8" font-size="12" text-anchor="middle">length</text>
+  <text x="252" y="486" fill="#9aa0b8" font-size="12">presence &#183; default</text>
+  <text x="398" y="486" fill="#9aa0b8" font-size="12">what it is &#8212; and what rejects</text>
+  <line x1="40" y1="494" x2="920" y2="494" stroke="#2b2f44" stroke-width="1.5"/>
+
+  <!-- p -->
+  <text x="62" y="516" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">p</text>
+  <text x="112" y="516" fill="#eef0f8" font-size="12" text-anchor="middle">1</text>
+  <text x="180" y="516" fill="#eef0f8" font-size="12" text-anchor="middle">52</text>
+  <text x="252" y="516" fill="#f5b942" font-size="12" font-weight="600">REQUIRED</text>
+  <text x="398" y="516" fill="#eef0f8" font-size="12">payment hash (first 256 of 260 bits) &#8212; none, or a second correct-length p, <tspan fill="#e5484d">rejects</tspan></text>
+  <line x1="40" y1="532" x2="920" y2="532" stroke="#2b2f44" stroke-width="1" opacity="0.6"/>
+
+  <!-- s -->
+  <text x="62" y="548" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">s</text>
+  <text x="112" y="548" fill="#eef0f8" font-size="12" text-anchor="middle">16</text>
+  <text x="180" y="548" fill="#eef0f8" font-size="12" text-anchor="middle">52</text>
+  <text x="252" y="548" fill="#f5b942" font-size="12" font-weight="600">REQUIRED</text>
+  <text x="398" y="548" fill="#eef0f8" font-size="12">payment secret &#8212; presence only: Nenya reads no value out of it, publishes none</text>
+  <line x1="40" y1="564" x2="920" y2="564" stroke="#2b2f44" stroke-width="1" opacity="0.6"/>
+
+  <!-- d / h -->
+  <text x="62" y="580" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">d</text>
+  <text x="112" y="580" fill="#eef0f8" font-size="12" text-anchor="middle">13</text>
+  <text x="180" y="580" fill="#eef0f8" font-size="12" text-anchor="middle">variable</text>
+  <text x="398" y="580" fill="#eef0f8" font-size="12">description</text>
+  <text x="252" y="588" fill="#eef0f8" font-size="12">exactly one of d, h</text>
+  <text x="252" y="604" fill="#f5b942" font-size="12" font-weight="600">REQUIRED</text>
+  <text x="62" y="612" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">h</text>
+  <text x="112" y="612" fill="#eef0f8" font-size="12" text-anchor="middle">23</text>
+  <text x="180" y="612" fill="#eef0f8" font-size="12" text-anchor="middle">52</text>
+  <text x="398" y="612" fill="#eef0f8" font-size="12">description hash &#8212; exactly one of d and h; both or neither <tspan fill="#e5484d">rejects</tspan></text>
+  <line x1="40" y1="628" x2="920" y2="628" stroke="#2b2f44" stroke-width="1" opacity="0.6"/>
+
+  <!-- x -->
+  <text x="62" y="644" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">x</text>
+  <text x="112" y="644" fill="#eef0f8" font-size="12" text-anchor="middle">6</text>
+  <text x="180" y="644" fill="#eef0f8" font-size="12" text-anchor="middle">variable</text>
+  <text x="252" y="644" fill="#9aa0b8" font-size="12">OPTIONAL &#183; 3600</text>
+  <text x="398" y="644" fill="#eef0f8" font-size="12">expiry in seconds, big-endian &#8212; a second x <tspan fill="#e5484d">rejects</tspan>; a value of 2&#8310;&#8308; or more <tspan fill="#e5484d">rejects</tspan></text>
+  <line x1="40" y1="660" x2="920" y2="660" stroke="#2b2f44" stroke-width="1" opacity="0.6"/>
+
+  <!-- c -->
+  <text x="62" y="676" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">c</text>
+  <text x="112" y="676" fill="#eef0f8" font-size="12" text-anchor="middle">24</text>
+  <text x="180" y="676" fill="#eef0f8" font-size="12" text-anchor="middle">variable</text>
+  <text x="252" y="676" fill="#9aa0b8" font-size="12">OPTIONAL &#183; 18</text>
+  <text x="398" y="676" fill="#eef0f8" font-size="12">min_final_cltv_expiry_delta &#8212; repeat: first wins, yet every value &#8805; 2&#8310;&#8308; <tspan fill="#e5484d">rejects</tspan></text>
+  <line x1="40" y1="692" x2="920" y2="692" stroke="#2b2f44" stroke-width="1" opacity="0.6"/>
+
+  <!-- 9 -->
+  <text x="62" y="708" fill="#f5b942" font-size="15" font-weight="700" text-anchor="middle">9</text>
+  <text x="112" y="708" fill="#eef0f8" font-size="12" text-anchor="middle">5</text>
+  <text x="180" y="708" fill="#eef0f8" font-size="12" text-anchor="middle">variable</text>
+  <text x="252" y="708" fill="#9aa0b8" font-size="12">OPTIONAL &#183; none set</text>
+  <text x="398" y="708" fill="#eef0f8" font-size="12">feature bits &#8212; Nenya applies no feature-bit rule; repeat: first wins</text>
+  <line x1="40" y1="718" x2="920" y2="718" stroke="#2b2f44" stroke-width="1.5"/>
+
+  <text x="40" y="740" fill="#9aa0b8" font-size="12">the 2&#8310;&#8308; bound is on the value, never the field&#8217;s width &#8212; a signed 64-bit reader must not let it read negative: saturating is the fail-closed reading</text>
+
+  <!-- ===== callouts ===== -->
+  <rect x="40" y="756" width="282" height="118" rx="10" fill="#1a1d2b" stroke="#e5484d" stroke-width="1.6"/>
+  <text x="56" y="780" fill="#e5484d" font-size="13" font-weight="600">uppercase &#8658; rejected</text>
+  <text x="56" y="802" fill="#9aa0b8" font-size="12">an uppercase invoice is valid BOLT-11,</text>
+  <text x="56" y="820" fill="#9aa0b8" font-size="12">but Nenya rejects any uppercase</text>
+  <text x="56" y="838" fill="#9aa0b8" font-size="12">character and never normalises &#8212; &#167;9.2</text>
+  <text x="56" y="856" fill="#9aa0b8" font-size="12">compares byte for byte; senders lowercase</text>
+
+  <rect x="338" y="756" width="282" height="118" rx="10" fill="#1a1d2b" stroke="#e5484d" stroke-width="1.6"/>
+  <text x="354" y="780" fill="#e5484d" font-size="13" font-weight="600">the 117-character floor</text>
+  <text x="354" y="802" fill="#9aa0b8" font-size="12">a data part under 117 characters</text>
+  <text x="354" y="820" fill="#9aa0b8" font-size="12">is refused: 117 = 7-character</text>
+  <text x="354" y="838" fill="#9aa0b8" font-size="12">timestamp + 104-character signature</text>
+  <text x="354" y="856" fill="#9aa0b8" font-size="12">+ 6-character checksum</text>
+
+  <rect x="636" y="756" width="282" height="118" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="652" y="780" fill="#f5b942" font-size="13" font-weight="600">signature &amp; checksum</text>
+  <text x="652" y="802" fill="#9aa0b8" font-size="12">104 chars: a 512-bit signature plus</text>
+  <text x="652" y="820" fill="#9aa0b8" font-size="12">1 recovery byte, over HRP and data;</text>
+  <text x="652" y="838" fill="#9aa0b8" font-size="12">verifying is OPTIONAL in v1 &#8212; but parse</text>
+  <text x="652" y="856" fill="#9aa0b8" font-size="12">past it, and the checksum MUST verify</text>
+
+  <text x="40" y="898" fill="#9aa0b8" font-size="12">A non-normative picture of Appendix C; BOLT-11 itself is normative for everything here. Everything the evidence rule needs &#8212;</text>
+  <text x="40" y="916" fill="#9aa0b8" font-size="12">the payment hash, the amount, the expiry &#8212; is reachable with bech32 decoding, bit-slicing and SHA-256 alone.</text>
+</svg>

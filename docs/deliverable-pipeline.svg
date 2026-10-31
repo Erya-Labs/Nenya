@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 774" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="The deliverable pipeline: strip metadata, hash the plaintext into ox, encrypt with AES-256-GCM, hash the blob into x, commit without the key or nonce, release both after payment evidence verifies; the buyer checks x, decrypts, checks ox, and only then settles; a hash mismatch or a failed decryption moves the order to disputed">
+  <title>The deliverable pipeline</title>
+  <rect width="960" height="774" rx="16" fill="#11131c"/>
+
+  <defs>
+    <marker id="dpAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#f5b942"/>
+    </marker>
+    <marker id="dpGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#4cc38a"/>
+    </marker>
+    <marker id="dpRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#e5484d"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">The deliverable pipeline</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">An encrypted blob at a URL, never bytes in a nostr event, committed to by hash before payment and unlocked after.</text>
+
+  <!-- ===== provider: transform pipeline ===== -->
+  <text x="40" y="107" fill="#eef0f8" font-size="14" font-weight="600">Provider &#8212; prepare, commit, then release <tspan fill="#9aa0b8" font-weight="400">(&#167;10.1&#8211;10.3, &#167;10.6)</tspan></text>
+
+  <!-- box 1: strip metadata -->
+  <rect x="40" y="118" width="180" height="104" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="130" y="142" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">strip metadata</text>
+  <text x="130" y="164" fill="#9aa0b8" font-size="12" text-anchor="middle">EXIF &#183; XMP &#183; C2PA/JUMBF</text>
+  <text x="130" y="182" fill="#9aa0b8" font-size="12" text-anchor="middle">before encryption</text>
+  <text x="130" y="200" fill="#9aa0b8" font-size="12" text-anchor="middle">and before upload</text>
+  <line x1="220" y1="170" x2="236" y2="170" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+
+  <!-- box 2: ox -->
+  <rect x="240" y="118" width="180" height="104" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="330" y="142" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">hash the plaintext</text>
+  <text x="330" y="164" fill="#eef0f8" font-size="12" text-anchor="middle"><tspan fill="#f5b942">ox</tspan> = SHA-256(plaintext)</text>
+  <text x="330" y="182" fill="#9aa0b8" font-size="12" text-anchor="middle">64 lowercase hex chars</text>
+  <line x1="420" y1="170" x2="436" y2="170" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+
+  <!-- box 3: encrypt -->
+  <rect x="440" y="118" width="245" height="104" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="562" y="142" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">encrypt &#8212; AES-256-GCM</text>
+  <text x="562" y="162" fill="#9aa0b8" font-size="12" text-anchor="middle">256-bit key, fresh per deliverable,</text>
+  <text x="562" y="178" fill="#9aa0b8" font-size="12" text-anchor="middle">never reused across orders</text>
+  <text x="562" y="194" fill="#9aa0b8" font-size="12" text-anchor="middle">96-bit nonce, never reused with key</text>
+  <text x="562" y="210" fill="#9aa0b8" font-size="12" text-anchor="middle">no AAD &#183; 128-bit tag appended</text>
+  <line x1="685" y1="170" x2="701" y2="170" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+
+  <!-- box 4: blob, x, size -->
+  <rect x="705" y="118" width="215" height="104" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="812" y="142" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">blob = ciphertext &#8214; tag</text>
+  <text x="812" y="164" fill="#eef0f8" font-size="12" text-anchor="middle"><tspan fill="#f5b942">x</tspan> = SHA-256(blob as served)</text>
+  <text x="812" y="182" fill="#9aa0b8" font-size="12" text-anchor="middle">size = encrypted length in bytes</text>
+  <text x="812" y="200" fill="#9aa0b8" font-size="12" text-anchor="middle">nonce not prefixed to the blob</text>
+
+  <!-- pipeline products flow into the commitment -->
+  <line x1="330" y1="222" x2="330" y2="268" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+  <text x="344" y="249" fill="#9aa0b8" font-size="12">url &#183; x &#183; ox &#183; m &#183; size</text>
+
+  <!-- the key and nonce bypass the commitment -->
+  <path d="M562 222 L562 264 L720 264 L720 268" fill="none" stroke="#f5b942" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#dpAmber)"/>
+  <text fill="#f5b942" font-size="12"><tspan x="574" y="241">key and nonce: sent only in the release,</tspan><tspan x="574" y="256">after payment evidence verifies</tspan></text>
+
+  <!-- ===== commitment panel ===== -->
+  <rect x="40" y="276" width="400" height="190" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="60" y="304" fill="#eef0f8" font-size="13.5" font-weight="600">commitment &#8212; <tspan fill="#f5b942">kind:16 &#183; type=5</tspan></text>
+  <text x="60" y="324" fill="#9aa0b8" font-size="12">sealed to the buyer &#183; sent before any payment request</text>
+  <text x="60" y="348" fill="#eef0f8" font-size="12.5">order &#183; p <tspan fill="#9aa0b8">(the buyer)</tspan> &#183; nenya = &#8220;1&#8221;</text>
+  <text x="60" y="366" fill="#eef0f8" font-size="12.5">url <tspan fill="#9aa0b8">&#8212; where the encrypted blob is served</tspan></text>
+  <text x="60" y="384" fill="#eef0f8" font-size="12.5">x &#183; ox <tspan fill="#9aa0b8">&#8212; 64 lowercase hex characters each</tspan></text>
+  <text x="60" y="402" fill="#eef0f8" font-size="12.5">m <tspan fill="#9aa0b8">&#8212; MIME type</tspan> &#183; size <tspan fill="#9aa0b8">&#8212; encrypted bytes, decimal</tspan></text>
+  <text x="60" y="420" fill="#eef0f8" font-size="12.5">encryption-algorithm = &#8220;aes-gcm&#8221; <tspan fill="#9aa0b8">(means &#167;10.2 exactly)</tspan></text>
+  <text x="60" y="442" fill="#e5484d" font-size="12">MUST NOT contain decryption-key or decryption-nonce;</text>
+  <text x="60" y="458" fill="#e5484d" font-size="12">a commitment carrying either MUST be rejected</text>
+
+  <!-- payment between the two messages -->
+  <text x="480" y="358" fill="#eef0f8" font-size="12" text-anchor="middle">payment</text>
+  <line x1="446" y1="372" x2="514" y2="372" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+  <text x="480" y="394" fill="#9aa0b8" font-size="12" text-anchor="middle">&#167;8&#8211;&#167;9</text>
+
+  <!-- ===== release panel ===== -->
+  <rect x="520" y="276" width="400" height="190" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="540" y="304" fill="#eef0f8" font-size="13.5" font-weight="600">release &#8212; <tspan fill="#f5b942">kind:15</tspan> file message</text>
+  <text x="540" y="324" fill="#9aa0b8" font-size="12">a NIP-17 file message &#183; content = the blob URL</text>
+  <text x="540" y="348" fill="#eef0f8" font-size="12.5">order <tspan fill="#9aa0b8">&#8212; binds it to its order, not hash equality</tspan></text>
+  <text x="540" y="366" fill="#eef0f8" font-size="12.5">decryption-key <tspan fill="#9aa0b8">&#8212; the 256-bit key, 64 lowercase hex</tspan></text>
+  <text x="540" y="384" fill="#eef0f8" font-size="12.5">decryption-nonce <tspan fill="#9aa0b8">&#8212; the 96-bit nonce, 24 lowercase hex</tspan></text>
+  <text x="540" y="402" fill="#eef0f8" font-size="12.5">file-type <tspan fill="#9aa0b8">&#8212; byte-identical to the commitment&#8217;s m</tspan></text>
+  <text x="540" y="420" fill="#eef0f8" font-size="12.5">x &#183; ox &#183; size <tspan fill="#9aa0b8">&#8212; byte-identical to the commitment&#8217;s</tspan></text>
+  <text x="540" y="442" fill="#e5484d" font-size="12">a mismatch in any of the four &#8594; disputed</text>
+
+  <!-- ===== buyer verification ===== -->
+  <text x="40" y="506" fill="#eef0f8" font-size="14" font-weight="600">Buyer &#8212; verify in this order <tspan fill="#9aa0b8" font-weight="400">(&#167;10.4)</tspan></text>
+
+  <!-- step 1 -->
+  <rect x="40" y="520" width="230" height="96" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="155" y="544" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">1 &#8212; hash the download</text>
+  <text x="155" y="566" fill="#9aa0b8" font-size="12" text-anchor="middle">download the bytes at url</text>
+  <text x="155" y="584" fill="#eef0f8" font-size="12" text-anchor="middle">SHA-256(blob) MUST equal <tspan fill="#f5b942">x</tspan></text>
+  <text x="155" y="602" fill="#9aa0b8" font-size="12" text-anchor="middle">refuse if length &#8800; size</text>
+  <line x1="270" y1="568" x2="288" y2="568" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+
+  <!-- step 2 -->
+  <rect x="292" y="520" width="230" height="96" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="407" y="548" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">2 &#8212; decrypt</text>
+  <text x="407" y="572" fill="#9aa0b8" font-size="12" text-anchor="middle">with the released key + nonce</text>
+  <text x="407" y="590" fill="#eef0f8" font-size="12" text-anchor="middle">GCM authentication MUST pass</text>
+  <line x1="522" y1="568" x2="540" y2="568" stroke="#f5b942" stroke-width="1.6" marker-end="url(#dpAmber)"/>
+
+  <!-- step 3 -->
+  <rect x="544" y="520" width="230" height="96" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="659" y="554" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">3 &#8212; hash the plaintext</text>
+  <text x="659" y="580" fill="#eef0f8" font-size="12" text-anchor="middle">SHA-256(plaintext) MUST equal <tspan fill="#f5b942">ox</tspan></text>
+  <line x1="774" y1="568" x2="784" y2="568" stroke="#4cc38a" stroke-width="1.6" marker-end="url(#dpGreen)"/>
+
+  <!-- settled -->
+  <rect x="788" y="549" width="132" height="38" rx="8" fill="#1a1d2b" stroke="#4cc38a" stroke-width="2"/>
+  <text x="854" y="573" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">settled</text>
+  <text x="854" y="605" fill="#9aa0b8" font-size="12" text-anchor="middle">only after all</text>
+  <text x="854" y="621" fill="#9aa0b8" font-size="12" text-anchor="middle">three succeed</text>
+
+  <!-- failure outcomes -->
+  <line x1="155" y1="616" x2="155" y2="636" stroke="#e5484d" stroke-width="1.3" marker-end="url(#dpRed)"/>
+  <text x="167" y="632" fill="#e5484d" font-size="12">x mismatch</text>
+  <rect x="107" y="640" width="96" height="34" rx="8" fill="#1a1d2b" stroke="#e5484d" stroke-width="1.6"/>
+  <text x="155" y="662" fill="#eef0f8" font-size="12.5" text-anchor="middle">disputed</text>
+  <text fill="#e5484d" font-size="12"><tspan x="215" y="654">MUST NOT decrypt,</tspan><tspan x="215" y="670">MUST NOT settle</tspan></text>
+
+  <line x1="407" y1="616" x2="407" y2="636" stroke="#e5484d" stroke-width="1.3" marker-end="url(#dpRed)"/>
+  <text x="419" y="632" fill="#e5484d" font-size="12">GCM failure</text>
+  <rect x="359" y="640" width="96" height="34" rx="8" fill="#1a1d2b" stroke="#e5484d" stroke-width="1.6"/>
+  <text x="407" y="662" fill="#eef0f8" font-size="12.5" text-anchor="middle">disputed</text>
+
+  <line x1="659" y1="616" x2="659" y2="636" stroke="#e5484d" stroke-width="1.3" marker-end="url(#dpRed)"/>
+  <text x="671" y="632" fill="#e5484d" font-size="12">ox mismatch</text>
+  <rect x="611" y="640" width="96" height="34" rx="8" fill="#1a1d2b" stroke="#e5484d" stroke-width="1.6"/>
+  <text x="659" y="662" fill="#eef0f8" font-size="12.5" text-anchor="middle">disputed</text>
+
+  <text fill="#9aa0b8" font-size="12"><tspan x="40" y="712">A blob refused for its length or by the &#167;4.3 download bound, or a download that does not complete, is not a hash mismatch.</tspan><tspan x="40" y="730">The order remains released and MUST NOT immediately move to disputed; it moves to disputed at the &#167;11.2 verification deadline</tspan><tspan x="40" y="748">if the buyer&#8217;s &#167;10.4 verification has neither succeeded nor failed by then.</tspan></text>
+</svg>

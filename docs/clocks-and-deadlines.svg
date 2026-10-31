@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 1088" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="Clocks and deadlines: the 48-hour timestamp randomisation window for seals and wraps, and the three deadline rules with the verification-deadline fallback chain">
+  <title>Clocks and deadlines</title>
+  <rect width="960" height="1088" rx="16" fill="#11131c"/>
+
+  <defs>
+    <marker id="cdGray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9aa0b8"/>
+    </marker>
+    <marker id="cdAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#f5b942"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">Clocks and deadlines</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">Randomised seal and gift-wrap timestamps, and the anchor of each deadline.</text>
+
+  <!-- ===================== panel a: timestamp randomisation ===================== -->
+  <rect x="40" y="100" width="880" height="316" rx="12" fill="#151826" stroke="#2b2f44" stroke-width="1.5"/>
+  <text x="64" y="134" fill="#eef0f8" font-size="16" font-weight="700">a &#183; Seal and gift-wrap timestamps</text>
+  <text x="64" y="158" fill="#9aa0b8" font-size="12.5">created_at on each seal and each wrap &#8212; four values in total, drawn independently from the injected randomness source &#8212;</text>
+  <text x="64" y="176" fill="#9aa0b8" font-size="12.5">is randomised uniformly into the past. The rumor alone carries the true time.</text>
+
+  <!-- band label -->
+  <text x="430" y="204" fill="#f5b942" font-size="12" text-anchor="middle">seal and wrap created_at: uniform in [now &#8722; 172 800, now]</text>
+
+  <!-- rumor labels (right of the now line) -->
+  <text x="748" y="204" fill="#4cc38a" font-size="12.5" font-weight="600">rumor: true created_at</text>
+  <text x="748" y="222" fill="#9aa0b8" font-size="12"><tspan x="748">the only timestamp</tspan><tspan x="748" dy="16">not randomised</tspan></text>
+
+  <!-- randomisation band -->
+  <rect x="120" y="212" width="620" height="76" rx="6" fill="#f5b942" fill-opacity="0.08" stroke="#f5b942" stroke-opacity="0.35" stroke-width="1"/>
+
+  <!-- axis -->
+  <line x1="84" y1="250" x2="856" y2="250" stroke="#2b2f44" stroke-width="2" marker-end="url(#cdGray)"/>
+
+  <!-- ticks -->
+  <line x1="120" y1="244" x2="120" y2="256" stroke="#9aa0b8" stroke-width="1.3"/>
+  <line x1="740" y1="196" x2="740" y2="296" stroke="#9aa0b8" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <line x1="800" y1="244" x2="800" y2="256" stroke="#9aa0b8" stroke-width="1.3"/>
+
+  <!-- the four independent draws -->
+  <circle cx="180" cy="250" r="5" fill="#f5b942"/>
+  <text x="180" y="276" fill="#eef0f8" font-size="12" text-anchor="middle">seal &#183; recipient copy</text>
+  <circle cx="320" cy="250" r="5" fill="#f5b942"/>
+  <text x="320" y="232" fill="#eef0f8" font-size="12" text-anchor="middle">wrap &#183; recipient copy</text>
+  <circle cx="460" cy="250" r="5" fill="#f5b942"/>
+  <text x="460" y="276" fill="#eef0f8" font-size="12" text-anchor="middle">seal &#183; self copy</text>
+  <circle cx="600" cy="250" r="5" fill="#f5b942"/>
+  <text x="600" y="232" fill="#eef0f8" font-size="12" text-anchor="middle">wrap &#183; self copy</text>
+  <text x="728" y="276" fill="#f5b942" font-size="12" text-anchor="end">no draw lies in the future</text>
+
+  <!-- the rumor at true time -->
+  <circle cx="740" cy="250" r="5.5" fill="#4cc38a"/>
+  <text x="776" y="276" fill="#9aa0b8" font-size="12"><tspan x="776">+15 min:</tspan><tspan x="776" dy="16">public-event future</tspan><tspan x="776" dy="16">tolerance</tspan><tspan x="776" dy="16">(RECOMMENDED)</tspan></text>
+
+  <!-- axis labels -->
+  <text x="120" y="312" fill="#9aa0b8" font-size="12" text-anchor="middle">now &#8722; 172 800 s</text>
+  <text x="120" y="328" fill="#9aa0b8" font-size="12" text-anchor="middle">(48 hours ago)</text>
+  <text x="740" y="312" fill="#eef0f8" font-size="12.5" font-weight="600" text-anchor="middle">now</text>
+
+  <!-- panel a callout -->
+  <text x="64" y="356" fill="#9aa0b8" font-size="12">A gift wrap, seal or rumor MUST NOT be rejected on timestamp grounds; a seal&#8217;s or gift wrap&#8217;s created_at is up to</text>
+  <text x="64" y="374" fill="#9aa0b8" font-size="12">172 800 s in the past. An order thread is ordered by the reader&#8217;s own receipt sequence, never by created_at.</text>
+  <text x="64" y="392" fill="#9aa0b8" font-size="12">Public events only: a created_at implausibly far in the future MAY be rejected; the RECOMMENDED tolerance is 15 minutes.</text>
+
+  <!-- ===================== panel b: deadlines ===================== -->
+  <rect x="40" y="440" width="880" height="588" rx="12" fill="#151826" stroke="#2b2f44" stroke-width="1.5"/>
+  <text x="64" y="474" fill="#eef0f8" font-size="16" font-weight="700">b &#183; Deadlines run on the injected clock</text>
+  <text x="64" y="496" fill="#9aa0b8" font-size="12.5">Every deadline MUST be evaluated against the implementation&#8217;s own injected clock, never a counterparty&#8217;s created_at.</text>
+
+  <!-- b1: the two wire deadlines -->
+  <text x="64" y="528" fill="#eef0f8" font-size="13.5" font-weight="600">Two deadlines are wire terms, agreed in the signed terms</text>
+
+  <line x1="100" y1="588" x2="856" y2="588" stroke="#2b2f44" stroke-width="2" marker-end="url(#cdGray)"/>
+  <circle cx="150" cy="588" r="5" fill="#f5b942"/>
+  <text x="150" y="570" fill="#eef0f8" font-size="12.5" text-anchor="middle">terms proposed</text>
+  <circle cx="430" cy="588" r="5" fill="#f5b942"/>
+  <text x="430" y="570" fill="#eef0f8" font-size="12.5" font-weight="600" text-anchor="middle">expiration</text>
+  <text x="430" y="610" fill="#9aa0b8" font-size="12" text-anchor="middle">the acceptance deadline</text>
+  <text x="430" y="626" fill="#9aa0b8" font-size="12" text-anchor="middle">drives &#8594; expired</text>
+  <circle cx="720" cy="588" r="5" fill="#f5b942"/>
+  <text x="720" y="570" fill="#eef0f8" font-size="12.5" font-weight="600" text-anchor="middle">deliver_by</text>
+  <text x="720" y="610" fill="#9aa0b8" font-size="12" text-anchor="middle">from the accepted terms</text>
+  <text x="720" y="626" fill="#9aa0b8" font-size="12" text-anchor="middle">drives paid &#8594; <tspan fill="#e5484d">disputed</tspan></text>
+
+  <path d="M430 648 L430 656 L720 656 L720 648" fill="none" stroke="#9aa0b8" stroke-width="1.3"/>
+  <text x="575" y="678" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="575">when both are present, expiration MUST be strictly earlier than deliver_by;</tspan><tspan x="575" dy="16">a violating proposal is rejected</tspan></text>
+
+  <!-- b2: verification-deadline fallback chain -->
+  <text x="64" y="718" fill="#eef0f8" font-size="13.5" font-weight="600">The verification deadline is local, not a wire term &#8212; its anchor falls back</text>
+  <text x="64" y="738" fill="#9aa0b8" font-size="12.5">The verification window is local to each implementation, which applies and displays it:</text>
+
+  <rect x="64" y="758" width="182" height="58" rx="8" fill="#1a1d2b" stroke="#f5b942" stroke-width="1.8"/>
+  <text x="155" y="781" fill="#eef0f8" font-size="12.5" text-anchor="middle">clock reading taken</text>
+  <text x="155" y="799" fill="#eef0f8" font-size="12.5" text-anchor="middle">at released, + window</text>
+  <line x1="248" y1="787" x2="278" y2="787" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#cdGray)"/>
+
+  <rect x="280" y="758" width="182" height="58" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="371" y="781" fill="#eef0f8" font-size="12.5" text-anchor="middle">clock reading taken</text>
+  <text x="371" y="799" fill="#eef0f8" font-size="12.5" text-anchor="middle">at paid, + window</text>
+  <line x1="464" y1="787" x2="494" y2="787" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#cdGray)"/>
+
+  <rect x="496" y="758" width="182" height="58" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="587" y="781" fill="#eef0f8" font-size="12.5" text-anchor="middle">deliver_by from the</text>
+  <text x="587" y="799" fill="#eef0f8" font-size="12.5" text-anchor="middle">accepted terms, + window</text>
+  <line x1="680" y1="787" x2="710" y2="787" stroke="#9aa0b8" stroke-width="1.3" marker-end="url(#cdGray)"/>
+
+  <rect x="712" y="758" width="182" height="58" rx="8" fill="#1a1d2b" stroke="#9aa0b8" stroke-width="1.6" stroke-dasharray="5 5"/>
+  <text x="803" y="781" fill="#eef0f8" font-size="12.5" font-weight="600" text-anchor="middle">no deadline at all</text>
+  <text x="803" y="799" fill="#9aa0b8" font-size="12" text-anchor="middle">never shown as &#8220;pending&#8221;</text>
+
+  <text x="480" y="838" fill="#9aa0b8" font-size="12" text-anchor="middle"><tspan x="480">each step right is taken only when the previous anchor does not exist:</tspan><tspan x="480" dy="16">no reading at released, none at paid, no deliver_by in the terms</tspan></text>
+  <text x="64" y="880" fill="#e5484d" font-size="12.5"><tspan x="64">Past the deadline with the check neither succeeded nor failed, the order MUST move to disputed</tspan><tspan x="64" dy="18">and MUST NOT remain in released past it.</tspan></text>
+
+  <!-- b3: invoice expiry -->
+  <rect x="64" y="920" width="832" height="86" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="84" y="948" fill="#eef0f8" font-size="13.5" font-weight="600">Invoice expiry is judged once &#8212; at the acceptance reading</text>
+  <text x="84" y="970" fill="#9aa0b8" font-size="12">An invoice&#8217;s timestamp + expiry is measured against the clock as it read when the type=2 payment request was accepted:</text>
+  <text x="84" y="986" fill="#9aa0b8" font-size="12">an invoice already expired at that reading MUST be rejected at acceptance.</text>
+
+  <text x="40" y="1062" fill="#9aa0b8" font-size="12">A non-normative illustration of &#167;4.6, &#167;7.1, &#167;7.5, &#167;8.6 and &#167;11.2 of NENYA-1 &#8212; every number above is the spec&#8217;s; the spec text governs.</text>
+</svg>

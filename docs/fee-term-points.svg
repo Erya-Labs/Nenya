@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 890" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="The fee term and where it appears: the (bps, recipient) pair on four required and three optional messages, the checks applied to it, and the two separate payments">
+  <title>The fee term and where it appears</title>
+  <rect width="960" height="890" rx="16" fill="#11131c"/>
+
+  <defs>
+    <marker id="ftAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#f5b942"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="52" fill="#eef0f8" font-size="26" font-weight="700">The fee term and where it appears</text>
+  <text x="40" y="78" fill="#9aa0b8" font-size="14">A fee MUST be a signed term of the deal; an invoice claiming an unsigned fee MUST be refused.</text>
+  <text x="40" y="96" fill="#9aa0b8" font-size="14">The (bps, recipient) pair MUST be byte-identical wherever a fee tag appears for an order.</text>
+
+  <!-- row 1: the tag shape -->
+  <rect x="40" y="120" width="500" height="104" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="56" y="144" fill="#eef0f8" font-size="13" font-weight="600">The tag &#8212; two legal arities &#183; &#167;8.1</text>
+  <text x="56" y="168" fill="#eef0f8" font-size="12.5" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["fee", "&lt;bps&gt;", "&lt;recipient-pubkey&gt;"]</text>
+  <text x="372" y="168" fill="#9aa0b8" font-size="12">bps &gt; 0</text>
+  <text x="56" y="188" fill="#eef0f8" font-size="12.5" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["fee", "&lt;bps&gt;"]</text>
+  <text x="372" y="188" fill="#9aa0b8" font-size="12">bps = 0 &#183; recipient omitted</text>
+  <text x="56" y="210" fill="#e5484d" font-size="12" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["fee","0",pk] / ["fee","250"] &#8594; malformed, rejected</text>
+
+  <rect x="560" y="120" width="360" height="104" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="576" y="144" fill="#eef0f8" font-size="13" font-weight="600">Byte-identical comparison &#183; &#167;8.4</text>
+  <text x="576" y="170" fill="#eef0f8" font-size="12.5" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["fee","250",X] &#8800; ["fee","0250",X]</text>
+  <text x="576" y="192" fill="#9aa0b8" font-size="12">&#167;4.4&#8217;s strict decimal form prevents this on write</text>
+
+  <!-- row 2: where the pair appears -->
+  <text x="40" y="254" fill="#eef0f8" font-size="13" font-weight="600">Where the pair appears &#183; &#167;8.4</text>
+
+  <!-- bid (OPTIONAL) -->
+  <rect x="40" y="266" width="160" height="92" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2" stroke-dasharray="5 5"/>
+  <rect x="82" y="276" width="76" height="20" rx="10" fill="none" stroke="#9aa0b8" stroke-width="1.3"/>
+  <text x="120" y="290" fill="#9aa0b8" font-size="12" font-weight="700" text-anchor="middle">OPTIONAL</text>
+  <text x="120" y="314" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">bid</text>
+  <text x="120" y="330" fill="#9aa0b8" font-size="12" text-anchor="middle">kind:1111 (or type=6)</text>
+  <text x="120" y="346" fill="#9aa0b8" font-size="12" text-anchor="middle">if present, it binds</text>
+  <line x1="200" y1="312" x2="216" y2="312" stroke="#f5b942" stroke-width="1.6" marker-end="url(#ftAmber)"/>
+
+  <!-- proposal (REQUIRED) -->
+  <rect x="220" y="266" width="160" height="92" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <rect x="262" y="276" width="76" height="20" rx="10" fill="#f5b942"/>
+  <text x="300" y="290" fill="#11131c" font-size="12" font-weight="700" text-anchor="middle">REQUIRED</text>
+  <text x="300" y="314" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">proposal</text>
+  <text x="300" y="330" fill="#9aa0b8" font-size="12" text-anchor="middle">kind:16 &#183; type=1</text>
+  <text x="300" y="346" fill="#9aa0b8" font-size="12" text-anchor="middle">no tag &#8658; pair is (0, &#8212;)</text>
+  <line x1="380" y1="312" x2="396" y2="312" stroke="#f5b942" stroke-width="1.6" marker-end="url(#ftAmber)"/>
+
+  <!-- acceptance (REQUIRED) -->
+  <rect x="400" y="266" width="160" height="92" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <rect x="442" y="276" width="76" height="20" rx="10" fill="#f5b942"/>
+  <text x="480" y="290" fill="#11131c" font-size="12" font-weight="700" text-anchor="middle">REQUIRED</text>
+  <text x="480" y="314" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">acceptance</text>
+  <text x="480" y="330" fill="#9aa0b8" font-size="12" text-anchor="middle">type=3 &#183; accepted</text>
+  <text x="480" y="346" fill="#9aa0b8" font-size="12" text-anchor="middle">byte-identical (&#167;7.6)</text>
+  <line x1="560" y1="312" x2="576" y2="312" stroke="#f5b942" stroke-width="1.6" marker-end="url(#ftAmber)"/>
+
+  <!-- fee payment request (REQUIRED) -->
+  <rect x="580" y="266" width="160" height="92" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <rect x="622" y="276" width="76" height="20" rx="10" fill="#f5b942"/>
+  <text x="660" y="290" fill="#11131c" font-size="12" font-weight="700" text-anchor="middle">REQUIRED</text>
+  <text x="660" y="314" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">fee payment request</text>
+  <text x="660" y="330" fill="#9aa0b8" font-size="12" text-anchor="middle">type=2 &#183; payee=fee</text>
+  <text x="660" y="346" fill="#9aa0b8" font-size="12" text-anchor="middle">exactly fee_msat</text>
+  <line x1="740" y1="312" x2="756" y2="312" stroke="#f5b942" stroke-width="1.6" marker-end="url(#ftAmber)"/>
+
+  <!-- fee receipt (REQUIRED) -->
+  <rect x="760" y="266" width="160" height="92" rx="8" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <rect x="802" y="276" width="76" height="20" rx="10" fill="#f5b942"/>
+  <text x="840" y="290" fill="#11131c" font-size="12" font-weight="700" text-anchor="middle">REQUIRED</text>
+  <text x="840" y="314" fill="#eef0f8" font-size="13" font-weight="600" text-anchor="middle">fee receipt</text>
+  <text x="840" y="330" fill="#9aa0b8" font-size="12" text-anchor="middle">kind:17 &#183; payee=fee</text>
+  <text x="840" y="346" fill="#9aa0b8" font-size="12" text-anchor="middle">&#167;9.2 check 6</text>
+
+  <!-- divergence ticks into the abort strip -->
+  <line x1="120" y1="358" x2="120" y2="376" stroke="#e5484d" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.5"/>
+  <line x1="300" y1="358" x2="300" y2="376" stroke="#e5484d" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.5"/>
+  <line x1="480" y1="358" x2="480" y2="376" stroke="#e5484d" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.5"/>
+  <line x1="660" y1="358" x2="660" y2="376" stroke="#e5484d" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.5"/>
+  <line x1="840" y1="358" x2="840" y2="376" stroke="#e5484d" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.5"/>
+
+  <rect x="40" y="376" width="880" height="32" rx="8" fill="none" stroke="#e5484d" stroke-width="1.6"/>
+  <text x="480" y="396" fill="#e5484d" font-size="12" text-anchor="middle">divergence at any point aborts the order &#8212; a terms mismatch, never &#8220;take the newest&#8221;, &#8220;take the smaller&#8221;, or a silent renegotiation</text>
+
+  <text x="40" y="430" fill="#9aa0b8" font-size="12">Also OPTIONAL on payee=provider requests and receipts, whose amount the fee does not enter; where present, it MUST match.</text>
+
+  <!-- row 3 left: the gates -->
+  <rect x="40" y="452" width="430" height="344" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="56" y="476" fill="#eef0f8" font-size="13" font-weight="600">The gates &#183; &#167;8.1</text>
+
+  <path d="M60 495 L65 500 L60 505 L55 500 z" fill="#f5b942"/>
+  <text x="74" y="504" fill="#eef0f8" font-size="13" font-weight="600">0 &#8804; bps &#8804; 10000 &#8212; above 10000 rejected</text>
+  <text x="74" y="522" fill="#9aa0b8" font-size="12">a value in range MUST NOT be rejected as too high;</text>
+  <text x="74" y="538" fill="#9aa0b8" font-size="12">a lower local policy limit MAY apply, never on read</text>
+
+  <path d="M60 557 L65 562 L60 567 L55 562 z" fill="#f5b942"/>
+  <text x="74" y="566" fill="#eef0f8" font-size="13" font-weight="600">bps &gt; 500 &#8658; explicit user confirmation</text>
+  <text x="74" y="584" fill="#9aa0b8" font-size="12">shown with basis points, absolute amount and total</text>
+
+  <path d="M60 603 L65 608 L60 613 L55 608 z" fill="#f5b942"/>
+  <text x="74" y="612" fill="#eef0f8" font-size="13" font-weight="600">recipient &#8800; the buyer&#8217;s own pubkey</text>
+  <text x="74" y="630" fill="#9aa0b8" font-size="12">provider&#8217;s key only in a genuine agent relationship;</text>
+  <text x="74" y="646" fill="#9aa0b8" font-size="12">implementations SHOULD warn when it is</text>
+
+  <path d="M60 665 L65 670 L60 675 L55 670 z" fill="#f5b942"/>
+  <text x="74" y="674" fill="#eef0f8" font-size="13" font-weight="600">recipient reachable before propose / accept</text>
+  <text x="74" y="692" fill="#9aa0b8" font-size="12">for bps &gt; 0, the recipient&#8217;s kind:10050 is checked;</text>
+  <text x="74" y="708" fill="#9aa0b8" font-size="12">its absence is surfaced as &#8220;the named fee recipient</text>
+  <text x="74" y="724" fill="#9aa0b8" font-size="12">cannot receive order messages&#8221;; the term is not proposed</text>
+
+  <path d="M60 743 L65 748 L60 753 L55 748 z" fill="#f5b942"/>
+  <text x="74" y="752" fill="#eef0f8" font-size="13" font-weight="600">no fee tag on the proposal &#8658; zero fee</text>
+  <text x="74" y="770" fill="#9aa0b8" font-size="12">and every fee invoice for that order is then refused</text>
+
+  <!-- row 3 right: the money -->
+  <rect x="490" y="452" width="430" height="344" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>
+  <text x="506" y="476" fill="#eef0f8" font-size="13" font-weight="600">The money &#183; &#167;8.2&#8211;&#167;8.6</text>
+  <text x="506" y="502" fill="#eef0f8" font-size="13" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">fee_msat = floor(price_msat &#215; bps / 10000)</text>
+  <text x="506" y="521" fill="#9aa0b8" font-size="12" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">total_msat = price_msat + fee_msat</text>
+
+  <rect x="506" y="534" width="398" height="46" rx="8" fill="#2b2f44"/>
+  <rect x="506" y="534" width="4" height="46" rx="2" fill="#4cc38a"/>
+  <text x="522" y="553" fill="#eef0f8" font-size="13"><tspan font-weight="600">payment 1</tspan>: buyer &#8594; provider, exactly price_msat</text>
+  <text x="522" y="571" fill="#9aa0b8" font-size="12" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["payee", "provider"]</text>
+
+  <rect x="506" y="590" width="398" height="46" rx="8" fill="#2b2f44"/>
+  <rect x="506" y="590" width="4" height="46" rx="2" fill="#4cc38a"/>
+  <text x="522" y="609" fill="#eef0f8" font-size="13"><tspan font-weight="600">payment 2</tspan>: buyer &#8594; fee recipient, exactly fee_msat</text>
+  <text x="522" y="627" fill="#9aa0b8" font-size="12" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["payee", "fee", "&lt;recipient-pubkey&gt;"]</text>
+
+  <text x="506" y="655" fill="#f5b942" font-size="13" font-weight="600">provider receives price &#183; buyer pays price + fee</text>
+  <text x="506" y="673" fill="#9aa0b8" font-size="12">the fee is a line item on top, never deducted from the price</text>
+
+  <line x1="508" y1="689" x2="516" y2="697" stroke="#e5484d" stroke-width="1.8"/>
+  <line x1="516" y1="689" x2="508" y2="697" stroke="#e5484d" stroke-width="1.8"/>
+  <text x="524" y="697" fill="#e5484d" font-size="12.5">never one invoice for total_msat that some party then splits</text>
+
+  <text x="506" y="719" fill="#4cc38a" font-size="12.5">fee_msat = 0 &#8658; no fee invoice may be sent or accepted</text>
+  <text x="506" y="736" fill="#9aa0b8" font-size="12">even with a recipient named &#8212; bps = 1, price_msat = 3000 &#8594; fee 0</text>
+
+  <text x="40" y="824" fill="#9aa0b8" font-size="12">Zero fee arises two ways: a missing fee tag is read as zero (&#167;8.1);</text>
+  <text x="40" y="842" fill="#9aa0b8" font-size="12">a computed fee_msat of 0 means no fee invoice may be sent or accepted (&#167;8.3).</text>
+  <text x="40" y="860" fill="#9aa0b8" font-size="12">Non-normative illustration of &#167;8.1&#8211;&#167;8.6 and &#167;9.2 check 6 &#8212; where this picture and the spec text disagree, the text governs.</text>
+</svg>
