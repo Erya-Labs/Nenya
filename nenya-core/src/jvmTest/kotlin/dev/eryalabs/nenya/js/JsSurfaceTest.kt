@@ -245,6 +245,9 @@ class JsSurfaceTest {
             // T48 split §7.6's three calls out of `crossedAcceptance`, so `checkAcceptance` publishes
             // the whole answer through the same function `acceptance_received` keeps one case of.
             "acceptanceAnswer" to 1,
+            // T73: a `DeliveryRejection` refusal's §10.4 step, through `DeliveryFailure.of`, read by
+            // `verifyServedBytes`' and `stepOrder`'s results alike.
+            "deliveryFailure" to 1,
             // JsChannelEntries.kt — the §7.4, §8.3, §10.1 and §10.3 translations.
             "asJsBuildResult" to 2,
             "asRumorEnvelope" to 1,

@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
+import dev.eryalabs.nenya.delivery.DeliveryRejection
 import dev.eryalabs.nenya.delivery.ServedBytesVerified
 import dev.eryalabs.nenya.order.Order
 import dev.eryalabs.nenya.order.OrderEvent
@@ -131,7 +132,12 @@ public fun stepOrder(
     machine: JsOrderMachine,
     order: JsOrder,
     event: JsOrderEvent,
-): JsOrderOutcome = jsGuarded({ JsOrderOutcome(null, it) }) {
+): JsOrderOutcome = jsGuarded({
+    // T73: only a `delivery_verified` refusal is a §10.4 step's failure. The digest checks run in
+    // that event's translation and nowhere else, so this guard restates the fact rather than
+    // narrowing it — and keeps any later door from inheriting a step it never made.
+    JsOrderOutcome(null, it, if (event.type == "delivery_verified") it.deliveryFailure() else null)
+}) {
     JsOrderOutcome(machine.asOrderMachine().on(order.order, event.asOrderEvent()), null)
 }
 
@@ -374,6 +380,17 @@ public class JsServedBytesResult internal constructor(
     /** Why, in words. Never echoes the bytes or a digest (§12 item 11, STOP RULE 14). */
     public val detail: String? get() = refusal?.detail
 
+    /**
+     * The `DeliveryFailure` token a `delivery_refused` takes for this refusal, or `null`. T73.
+     *
+     * `SERVED_BYTES_HASH_MISMATCH` for §10.4 step 1's digest that is not `x`, and `null` for every
+     * other answer — a verified blob, a size refusal, a crossing refusal — through
+     * `DeliveryFailure.of` and nothing else, so a page offers the order the token this library
+     * named rather than one it mapped by hand. Information, never an order move: nothing here
+     * steps an order, and offering the token to [stepOrder] is the page's decision.
+     */
+    public val deliveryFailure: String? get() = refusal?.deliveryFailure()?.name
+
     override fun toString(): String =
         if (ok) "JsServedBytesResult(verified)" else "JsServedBytesResult(refused: $reason)"
 }
@@ -564,6 +581,7 @@ public class JsOrderResult internal constructor(
 public class JsOrderOutcome internal constructor(
     private val outcome: OrderOutcome?,
     private val refusal: JsRefusal?,
+    private val failure: DeliveryFailure? = null,
 ) {
 
     /** `"advanced"` or `"refused"`. */
@@ -610,6 +628,19 @@ public class JsOrderOutcome internal constructor(
     public val missingChecks: Array<String>
         get() = (outcome as? OrderOutcome.Refused.ChecksNotPerformed)
             ?.missing?.map { it.name }?.toTypedArray() ?: emptyArray()
+
+    /**
+     * The `DeliveryFailure` token a `delivery_refused` takes, for a `delivery_verified` refused by
+     * one of §10.4's two digest checks. `null` for every other answer. T73.
+     *
+     * `SERVED_BYTES_HASH_MISMATCH` when the served bytes are not `x` (step 1) and
+     * `PLAINTEXT_BYTES_HASH_MISMATCH` when the plaintext is not `ox` (step 3), through
+     * `DeliveryFailure.of` and nothing else. A size refusal, a crossing refusal, §11.2's own refusal
+     * of the event, and every other event's refusal answer `null`. **Nothing steps the order on it:**
+     * the order did not move, and offering this token back to [stepOrder] as a `delivery_refused` is
+     * the page's decision.
+     */
+    public val deliveryFailure: String? get() = failure?.name
 
     override fun toString(): String =
         if (ok) "JsOrderOutcome(advanced)" else "JsOrderOutcome(refused: $reason)"
@@ -949,6 +980,20 @@ internal fun acceptanceAnswer(
     )
     return proposal.accepts(update, providerPubkey)
 }
+
+/**
+ * §10.4's step this refusal is the failure of, through `DeliveryFailure.of` alone, or `null`.
+ *
+ * [jsGuarded] keeps a `DeliveryException`'s reason as its constant's `name` under the
+ * `DeliveryRejection` vocabulary, so the constant is found again by that exact name; a refusal from
+ * any other vocabulary is no §10.4 step's.
+ */
+internal fun JsRefusal.deliveryFailure(): DeliveryFailure? =
+    if (vocabulary != "DeliveryRejection") {
+        null
+    } else {
+        DeliveryRejection.entries.firstOrNull { it.name == reason }?.let { DeliveryFailure.of(it) }
+    }
 
 /** §9.2's evidence from a crossed settlement, which must be `Evidenced` and not §9.4's `Unverified`. */
 private fun crossedPaymentEvidence(crossed: JsSettlement): Settlement.Evidenced =

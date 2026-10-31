@@ -619,6 +619,15 @@ internal object JsFlowFixtures {
             )
             assertEquals(expected.detail, crossed.detail, "$what: the details differ")
         }
+        assertEquals(
+            expected.reason?.let { reason ->
+                dev.eryalabs.nenya.order.DeliveryFailure.of(
+                    dev.eryalabs.nenya.delivery.DeliveryRejection.valueOf(reason),
+                )?.name
+            },
+            crossed.deliveryFailure,
+            "$what: T73's `deliveryFailure` must be `DeliveryFailure.of` over the Kotlin refusal",
+        )
     }
 
     // -----------------------------------------------------------------------------------------
@@ -735,6 +744,10 @@ internal object JsFlowFixtures {
             crossed.missingChecks.toSet(),
             "$what: decision B's missing-check set differs, so one side names a check the other " +
                 "says was performed",
+        )
+        assertNull(
+            crossed.deliveryFailure,
+            "$what: an answer the machine gave is no §10.4 digest refusal, so it names no step (T73)",
         )
         JsBoundaryFixtures.assertSameFields(
             orderFields(crossed.order ?: fail("$what: the crossed outcome carries no order"), expected.order),

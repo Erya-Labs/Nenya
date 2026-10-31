@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliverableRelease
 import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
+import dev.eryalabs.nenya.delivery.DeliveryRejection
 import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.settlement.AcceptedPaymentRequest
 import dev.eryalabs.nenya.settlement.Settlement
@@ -39,7 +40,49 @@ public enum class DeliveryFailure {
     BLOB_DID_NOT_DECRYPT,
 
     /** §10.4 step 3 — the SHA-256 of the plaintext is not `ox`. §10.4: the order MUST dispute. */
-    PLAINTEXT_BYTES_HASH_MISMATCH,
+    PLAINTEXT_BYTES_HASH_MISMATCH;
+
+    public companion object {
+
+        /**
+         * The §10.4 step a delivery package refusal is the failure of, or `null` when it is none. T73.
+         *
+         * Exactly two refusals map, each to its own step: `SERVED_BYTES_MISMATCH` is step 1's digest
+         * that is not `x`, and `PLAINTEXT_BYTES_MISMATCH` is step 3's digest that is not `ox`. Every
+         * other `DeliveryRejection` answers `null`, because §10.4 names no step for it: a blob whose
+         * length disagrees with `size`, a size above the caller's bound and a malformed value are each
+         * refused before or apart from a step, and calling one a step's failure would give the order a
+         * dispute ground §10.4 does not state.
+         * [BLOB_DID_NOT_DECRYPT] is never an answer: this library performs no decryption, so no
+         * refusal of its own can be step 2's.
+         *
+         * `SERVED_HASH_MISMATCH` and `PLAINTEXT_HASH_MISMATCH` are the trap the names set: they are
+         * §10.3's identity check finding a release's `x` or `ox` unequal to the commitment's — two
+         * signed statements disagreeing — and not a digest of any bytes, so they answer `null` too.
+         *
+         * The `when` names every constant and has no `else`, so a rejection added later does not
+         * fall silently into either answer: it fails to compile until somebody decides which it is.
+         *
+         * A translation and no more. It performs no check and moves no order: a caller offers the
+         * answer to `OrderMachine.on` as a `DeliveryRefused`, which is the caller's decision.
+         */
+        public fun of(rejection: DeliveryRejection): DeliveryFailure? = when (rejection) {
+            DeliveryRejection.SERVED_BYTES_MISMATCH -> SERVED_BYTES_HASH_MISMATCH
+            DeliveryRejection.PLAINTEXT_BYTES_MISMATCH -> PLAINTEXT_BYTES_HASH_MISMATCH
+            DeliveryRejection.WRONG_LENGTH,
+            DeliveryRejection.NOT_HEX,
+            DeliveryRejection.NEGATIVE_SIZE,
+            DeliveryRejection.MIME_TYPE_ABSENT,
+            DeliveryRejection.FILE_TYPE_ABSENT,
+            DeliveryRejection.FILE_TYPE_MISMATCH,
+            DeliveryRejection.SERVED_HASH_MISMATCH,
+            DeliveryRejection.PLAINTEXT_HASH_MISMATCH,
+            DeliveryRejection.SIZE_MISMATCH,
+            DeliveryRejection.SIZE_LIMIT_EXCEEDED,
+            DeliveryRejection.SIZE_DISAGREEMENT,
+            -> null
+        }
+    }
 }
 
 /**
