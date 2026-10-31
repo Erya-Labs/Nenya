@@ -14,6 +14,7 @@ import dev.eryalabs.nenya.seam.FakeSecp256k1Ops
 import dev.eryalabs.nenya.seam.RecordingRandomness
 import dev.eryalabs.nenya.settlement.ReleaseFixtures
 import dev.eryalabs.nenya.settlement.SettlementFixtures
+import dev.eryalabs.nenya.settlement.SettlementRejection
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.wire.encodeLowerHex
 import kotlin.js.JsName
@@ -36,6 +37,12 @@ import kotlin.test.fail
  * between two steps nothing reaches past a crossed value into a Kotlin type: the only Kotlin values
  * here are the seams and the fixtures — `OrderFixtures.TERMS`' amounts and deadlines, its blob, and
  * the invoices `SettlementFixtures` derives (decision **D**), with preimages from `PaymentFixtures`.
+ *
+ * T74: nothing a library door can give is retyped. The order opens from the proposal itself
+ * ([openOrderFromProposal]); each receipt is checked against the terms its checker decoded off the
+ * proposal it holds (`JsOrderProposal.terms`); and every §8.4 point is a door's sighting
+ * ([proposalFeeSighting], [acceptanceFeeSighting], [paymentRequestFeeSighting]), never one built from
+ * a `fee` row. The only [JsOrderTerms] typed is the proposal's input.
  *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
@@ -68,6 +75,7 @@ class JsTradeWalkthroughTest {
         val commitment = released.commitment ?: fail("a released order holds its commitment")
         val served = verifyServedBytes(commitment, encodeLowerHex(OrderFixtures.blob.served))
         assertTrue(served.ok, "§10.4 step 1: the served bytes hash to `x`: ${served.reason}")
+        assertNull(served.deliveryFailure, "a verified blob names no `delivery_refused` failure")
         val settled = trade.step(
             released,
             JsOrderEvent(
@@ -93,20 +101,43 @@ class JsTradeWalkthroughTest {
         val trade = Trade()
         val receipt = trade.providerReceipt(Trade.OTHER_PREIMAGE)
 
-        val buyerCheck = verifySettlement(receipt.toSelf, trade.buyerStore.seam, trade.terms)
+        val buyerCheck = verifySettlement(receipt.toSelf, trade.buyerStore.seam, trade.buyerTerms)
         assertFalse(buyerCheck.ok, "§9.2 check 3: the proof does not hash to the stored invoice's `p`")
         assertEquals(PaymentRejection.PREIMAGE_MISMATCH.name, buyerCheck.reason)
         assertEquals("PaymentRejection", buyerCheck.reasonVocabulary, "check 3 keeps its own name")
         assertNull(buyerCheck.settlement, "a refusal carries no settlement")
 
-        val providerCheck = verifySettlement(receipt.toRecipient, trade.providerStore.seam, trade.terms)
+        val providerCheck = verifySettlement(receipt.toRecipient, trade.providerStore.seam, trade.providerTerms)
         assertEquals(PaymentRejection.PREIMAGE_MISMATCH.name, providerCheck.reason, "the provider's own check agrees")
         assertNull(providerCheck.settlement, "so the provider has nothing to hand `buildReleaseAfterPayment`")
 
         // The same order, offered the honest receipt instead, verifies: the refusal is the preimage's.
         val honest = trade.providerReceipt(Trade.PROVIDER_PREIMAGE)
-        val honestCheck = verifySettlement(honest.toSelf, trade.buyerStore.seam, trade.terms)
+        val honestCheck = verifySettlement(honest.toSelf, trade.buyerStore.seam, trade.buyerTerms)
         assertTrue(honestCheck.settlement?.evidenced == true, "the stored invoice's own preimage evidences")
+    }
+
+    /**
+     * Negative control on guide step 8: the fee receipt checked with the acceptance's door-made point
+     * left out of `earlierPoints` is refused `FEE_TERM_POINT_MISSING`, where the three points the
+     * guide names, all from the library's doors, evidence it.
+     */
+    @Test
+    @JsName("a_fee_receipt_without_the_acceptance_s_door_made_point_is_refused_FEE_TERM_POINT_MISSING")
+    fun `a fee receipt without the acceptance's door-made point is refused FEE_TERM_POINT_MISSING`() {
+        val trade = Trade()
+        val receipt = trade.feeReceipt()
+
+        val missing = trade.feeCheck(receipt, arrayOf(trade.proposalSighting, trade.feeRequestSighting))
+        assertFalse(missing.ok, "§8.4: the acceptance is a REQUIRED point")
+        assertEquals(SettlementRejection.FEE_TERM_POINT_MISSING.name, missing.reason)
+        assertNull(missing.settlement, "a refusal carries no settlement")
+
+        val whole = trade.feeCheck(
+            receipt,
+            arrayOf(trade.proposalSighting, trade.acceptanceSighting, trade.feeRequestSighting),
+        )
+        assertTrue(whole.settlement?.evidenced == true, "the guide's three points evidence it: ${whole.reason}")
     }
 
     /**
@@ -198,7 +229,11 @@ class JsTradeWalkthroughTest {
         )
         val machine = JsOrderMachine(environment)
 
-        val terms = JsOrderTerms(
+        /**
+         * The one [JsOrderTerms] typed here: the buyer's input to its proposal. The buyer and the
+         * provider read the terms back off the proposal they hold ([buyerTerms], [providerTerms]).
+         */
+        val proposedTerms = JsOrderTerms(
             priceMsat = OrderFixtures.TERMS.split.price.millisatoshis.toString(),
             feeBasisPoints = OrderFixtures.FEE_BASIS_POINTS,
             expirationSeconds = OrderFixtures.EXPIRATION.toString(),
@@ -219,7 +254,7 @@ class JsTradeWalkthroughTest {
                 createdAtSeconds = (NOW - 86_400L).toString(),
                 dValue = "t67-walkthrough-offer",
                 title = "A 30-second animation",
-                priceMsat = terms.priceMsat,
+                priceMsat = proposedTerms.priceMsat,
                 alt = "An offer: a 30-second animation",
             ),
         ).also { assertTrue(it.ok, "the offer must build: ${it.reason} — ${it.detail}") }
@@ -242,21 +277,34 @@ class JsTradeWalkthroughTest {
                 environment,
                 buyerEnvelope(),
                 orderIdHex,
-                terms,
+                proposedTerms,
                 feeRecipient = feeRecipient.key,
             ),
             buyer,
             provider,
         )
-        val proposed: JsOrder = (openOrder(machine, orderIdHex, terms).order ?: fail("the order must open"))
-            .also { assertEquals("PROPOSED", it.state) }
+        val proposed: JsOrder = run {
+            val opened = openOrderFromProposal(machine, proposal.toSelf)
+            val order = opened.order ?: fail("the order must open: ${opened.reason} — ${opened.detail}")
+            assertEquals("PROPOSED", order.state)
+            assertEquals(orderIdHex, order.idHex, "the order id is the proposal's own")
+            order
+        }
 
-        // Guide step 5 — the provider reads and accepts; the buyer checks and steps.
+        /** The terms the buyer checks its receipts against, read off its own proposal copy. */
+        val buyerTerms: JsOrderTerms =
+            (decodeProposal(proposal.toSelf).proposal ?: fail("the buyer must read its own proposal")).terms
+
+        // Guide step 5 — the provider reads and accepts, keeping the proposal's terms (provider step
+        // 2); the buyer checks and steps.
+        private val providerRead: JsOrderProposal =
+            decodeProposal(proposal.toRecipient).proposal ?: fail("the provider must read the proposal")
+        val providerTerms: JsOrderTerms = providerRead.terms
         val acceptance: Delivered = run {
-            val read = decodeProposal(proposal.toRecipient).proposal ?: fail("the provider must read the proposal")
+            val read = providerRead
             assertEquals(listing.coordinate, read.itemCoordinate, "§7.5's `item` is the offer")
             assertEquals(orderIdHex, read.orderIdHex)
-            assertEquals(terms.priceMsat, read.priceMsat)
+            assertEquals(proposedTerms.priceMsat, read.priceMsat)
             assertEquals(feeRecipient.key, read.feeRecipient)
             send(buildAgreementAgainst(listing, environment, providerEnvelope(), proposal.toRecipient), provider, buyer)
         }
@@ -307,16 +355,15 @@ class JsTradeWalkthroughTest {
                 Payee.FEE.token,
                 feeInvoice,
                 feeRecipient = feeRecipient.key,
-                terms = terms,
+                // The fee recipient holds no copy of the proposal here, so it is handed the terms the
+                // buyer proposed and the acceptance repeated.
+                terms = proposedTerms,
             ),
             feeRecipient,
             buyer,
         )
         val awaitingPayment: JsOrder = run {
-            val signed = arrayOf(
-                sighting("ORDER_PROPOSAL", proposal.toSelf),
-                sighting("ACCEPTANCE", acceptance.toRecipient),
-            )
+            val signed = arrayOf(proposalSighting, acceptanceSighting)
             val records = listOf(providerRequest, feeRequest).map { request ->
                 val answer = acceptPaymentRequest(
                     request.toRecipient,
@@ -357,35 +404,13 @@ class JsTradeWalkthroughTest {
          * (provider step 5), and keeps the settlement for [releaseAfterPayment].
          */
         fun paid(receipt: Delivered): JsOrder {
-            val feeReceipt = send(
-                buildReceipt(
-                    envelope(buyer, feeRecipient),
-                    orderIdHex,
-                    Payee.FEE.token,
-                    feeInvoice,
-                    FEE_PREIMAGE,
-                    feeRecipient = feeRecipient.key,
-                    terms = terms,
-                ),
-                buyer,
-                feeRecipient,
-            )
-            val providerPayment = evidenced(verifySettlement(receipt.toSelf, buyerStore.seam, terms), "provider")
+            val providerPayment = evidenced(verifySettlement(receipt.toSelf, buyerStore.seam, buyerTerms), "provider")
             val feePayment = evidenced(
-                verifyFeeReceipt(
-                    feeReceipt.toSelf,
-                    buyerStore.seam,
-                    awaitingPayment,
-                    arrayOf(
-                        sighting("ORDER_PROPOSAL", proposal.toSelf),
-                        sighting("ACCEPTANCE", acceptance.toRecipient),
-                        sighting("FEE_PAYMENT_REQUEST", feeRequest.toRecipient),
-                    ),
-                ),
+                feeCheck(feeReceipt(), arrayOf(proposalSighting, acceptanceSighting, feeRequestSighting)),
                 "fee",
             )
             providerSettlement = evidenced(
-                verifySettlement(receipt.toRecipient, providerStore.seam, terms),
+                verifySettlement(receipt.toRecipient, providerStore.seam, providerTerms),
                 "the provider's own",
             )
             return step(
@@ -393,6 +418,38 @@ class JsTradeWalkthroughTest {
                 JsOrderEvent(type = "receipts_verified", settlements = arrayOf(providerPayment, feePayment)),
             ).also { assertEquals("PAID", it.state) }
         }
+
+        /** Guide step 8's fee receipt, sealed by the buyer to the fee recipient. */
+        fun feeReceipt(): Delivered = send(
+            buildReceipt(
+                envelope(buyer, feeRecipient),
+                orderIdHex,
+                Payee.FEE.token,
+                feeInvoice,
+                FEE_PREIMAGE,
+                feeRecipient = feeRecipient.key,
+                terms = buyerTerms,
+            ),
+            buyer,
+            feeRecipient,
+        )
+
+        /** The buyer's `verifyFeeReceipt` over its own copy of [receipt], with [earlierPoints]. */
+        fun feeCheck(receipt: Delivered, earlierPoints: Array<JsFeeTermSighting>): JsSettlementResult =
+            verifyFeeReceipt(receipt.toSelf, buyerStore.seam, awaitingPayment, earlierPoints)
+
+        /** Guide step 7's two door-made points, kept for step 8. */
+        val proposalSighting: JsFeeTermSighting
+            get() = sighting(proposalFeeSighting(proposal.toSelf), "ORDER_PROPOSAL")
+        val acceptanceSighting: JsFeeTermSighting
+            get() = sighting(acceptanceFeeSighting(acceptance.toRecipient), "ACCEPTANCE")
+
+        /** Guide step 8's fee-request point, read against the same proposal, acceptance and provider. */
+        val feeRequestSighting: JsFeeTermSighting
+            get() = sighting(
+                paymentRequestFeeSighting(feeRequest.toRecipient, proposal.toSelf, acceptance.toRecipient, provider.key),
+                "FEE_PAYMENT_REQUEST",
+            )
 
         private var providerSettlement: JsSettlement? = null
 
@@ -443,9 +500,12 @@ class JsTradeWalkthroughTest {
         private fun envelope(author: Party, to: Party): JsRumorEnvelope =
             JsRumorEnvelope(author.key, NOW.toString(), arrayOf(arrayOf(to.key)))
 
-        /** §8.4's point [point], read off [rumor]'s own `fee` row as the page would read it. */
-        private fun sighting(point: String, rumor: JsRumor): JsFeeTermSighting =
-            JsFeeTermSighting(point, rumor.event.tags.firstOrNull { it[0] == "fee" })
+        /** The sighting a §8.4 door answered, which must be [point]'s. */
+        private fun sighting(answer: JsFeeTermSightingResult, point: String): JsFeeTermSighting {
+            val sighting = answer.sighting ?: fail("the $point door must read its point: ${answer.reason} — ${answer.detail}")
+            assertEquals(point, sighting.point, "the door names its own point")
+            return sighting
+        }
 
         private fun evidenced(answer: JsSettlementResult, what: String): JsSettlement {
             val settlement = answer.settlement ?: fail("the $what receipt must verify: ${answer.reason} — ${answer.detail}")

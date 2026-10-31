@@ -208,10 +208,30 @@ class IntegrationGuideTest {
             )
         }
 
+        /**
+         * T74: the entry points each buyer step must call so that a page retypes nothing a library door
+         * gives — step 4 opens the order from the proposal, step 7 takes §8.4's proposal and acceptance
+         * points from their doors, and step 8 adds the fee request's.
+         */
+        val BUYER_DOOR_CALLS: Map<Int, Set<String>> = mapOf(
+            4 to setOf("openOrderFromProposal"),
+            7 to setOf("proposalFeeSighting", "acceptanceFeeSighting"),
+            8 to setOf("paymentRequestFeeSighting"),
+        )
+
+        /** Fails unless each buyer step in [BUYER_DOOR_CALLS] names its doors on its `Calls:` line. */
+        fun assertBuyerTakesDoors(steps: List<TradeStep>) {
+            val missing = BUYER_DOOR_CALLS.mapValues { (number, doors) ->
+                doors - (steps.singleOrNull { it.number == number }?.calls?.toSet() ?: emptySet())
+            }.filterValues { it.isNotEmpty() }
+            assertEquals(emptyMap(), missing, "`$BUYER_HEADING`: step to the doors its `$CALLS` line omits")
+        }
+
         /** Every check above, over both trade sections of [text]. */
         fun assertTradeSections(text: String) {
             for (heading in TRADE_HEADINGS) assertStepsHeld(heading, tradeSteps(text, heading))
             assertProviderReleasesAfterPayment(tradeSteps(text, PROVIDER_HEADING))
+            assertBuyerTakesDoors(tradeSteps(text, BUYER_HEADING))
         }
 
         /** [text] with its line at [index] removed. */
@@ -339,6 +359,44 @@ class IntegrationGuideTest {
         val steps = tradeSteps(withoutGate, PROVIDER_HEADING)
         assertStepsHeld(PROVIDER_HEADING, steps)
         assertFailsWith<AssertionError> { assertProviderReleasesAfterPayment(steps) }
+    }
+
+    /**
+     * T74: the buyer's step 4 calls `openOrderFromProposal`, step 7 the proposal's and the acceptance's
+     * sighting doors, and step 8 the fee request's, and the steps around them still hold.
+     */
+    @Test
+    fun `the buyer's steps take the order and every sighting from the library's doors`() {
+        val steps = tradeSteps(guide, BUYER_HEADING)
+        assertBuyerTakesDoors(steps)
+        assertStepsHeld(BUYER_HEADING, steps)
+        for ((number, doors) in BUYER_DOOR_CALLS) {
+            assertTrue(doors.all { it in JsSurfaceTest.ENTRY_POINTS }, "step $number's doors are exported: $doors")
+        }
+    }
+
+    /**
+     * Negative control: any one door dropped from its buyer step's `Calls:` line — among them
+     * `paymentRequestFeeSighting` from step 8 — fails, while every other step's line is untouched.
+     */
+    @Test
+    fun `the buyer's steps with any one door dropped fail`() {
+        for ((number, doors) in BUYER_DOOR_CALLS) {
+            for (door in doors) {
+                val lines = guide.lines().toMutableList()
+                val start = lines.indexOf(BUYER_HEADING)
+                val index = (start + 1 until lines.size).single {
+                    lines[it].trimStart().startsWith(CALLS) && "`$door`" in lines[it] && lines.indexOf(PROVIDER_HEADING) > it
+                }
+                lines[index] = lines[index].replace(", `$door`", "").replace("`$door`, ", "")
+                val text = lines.joinToString("\n")
+                val step = tradeSteps(text, BUYER_HEADING).single { it.number == number }
+                assertTrue(door !in step.calls, "`$door` must be gone from step $number's `$CALLS` line")
+                assertFailsWith<AssertionError>("step $number without `$door` must fail") {
+                    assertBuyerTakesDoors(tradeSteps(text, BUYER_HEADING))
+                }
+            }
+        }
     }
 
     /** Negative control: a misplaced, doubled, stray or malformed `Calls:` line fails rather than being skipped. */

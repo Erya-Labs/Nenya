@@ -227,12 +227,15 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    bid's price, `fee`, fee recipient and `deliver_by`, so do not type them again. It is refused unless
    the buyer sends it to the provider — on a request, the request's author to the bidder; on an
    offer, the bidder to the offer's author. Its `acceptBy` is the proposal's `expiration`, and must
-   be before the bid's `deliver_by`; once the clock has reached either, nothing is built. The buyer then starts its order with `openOrder`, giving the
-   same order id and terms (for a bid, the bid's price, fee and `deliver_by`, and `acceptBy`). That
-   call *is* the proposal step: the order starts in `proposed`, and stepping it again with a
-   `proposal` event is refused.
+   be before the bid's `deliver_by`; once the clock has reached either, nothing is built. The buyer then
+   opens the `toSelf` copy of its proposal and keeps it. It starts its order from that copy with
+   `openOrderFromProposal`, which takes the order id and terms from the proposal itself, so do not type
+   them again. That call *is* the proposal step: the order starts in `proposed`, and stepping it again
+   with a `proposal` event is refused. It checks nothing about the provider; only step 5 moves the order
+   on. Read the proposal with `decodeProposal` and keep its `terms`: step 8 checks the provider's
+   receipt against them.
 
-   Calls: `buildProposalAgainst`, `buildProposalForBid`, `seal`, `openOrder`.
+   Calls: `buildProposalAgainst`, `buildProposalForBid`, `seal`, `open`, `openOrderFromProposal`, `decodeProposal`.
 5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
    acceptance with `buildAgreementAgainst`, then seals and sends it. The buyer opens it, can ask
    `checkAcceptance` whether it is an acceptance or a counter-proposal, and steps the order with
@@ -249,24 +252,29 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    `acceptPaymentRequest` its `earlierPoints` parameter: a `JsFeeTermSighting` for each earlier point
    where the `fee` tag appeared, or was absent (§8.4). At least the proposal (`ORDER_PROPOSAL`) and
    the acceptance (`ACCEPTANCE`) must be among them, or the request is refused
-   `FEE_TERM_POINT_MISSING`. If the order came from a bid, add the bid's point too: get it from
-   `bidFeeSighting` for a public bid or `privateBidFeeSighting` for a private one, rather than
-   copying the bid's `fee` tag yourself. A bid with no `fee` tag gives a sighting with no `feeTag`,
+   `FEE_TERM_POINT_MISSING`. Get them from the library rather than copying a `fee` tag yourself:
+   `proposalFeeSighting` on the proposal you kept in step 4, and `acceptanceFeeSighting` on the
+   acceptance. Each answers a result: take its `sighting` when `ok`. They only read the message's own
+   `fee` tag; comparing the points is `acceptPaymentRequest`'s job. Keep both sightings for step 8. If
+   the order came from a bid, add the bid's point too: get it from `bidFeeSighting` for a public bid or
+   `privateBidFeeSighting` for a private one. A bid with no `fee` tag gives a sighting with no `feeTag`,
    which the comparison skips (§8.4). Then the buyer steps the order with `payment_requests_received`,
    passing the accepted records.
 
-   Calls: `buildPaymentRequest`, `seal`, `open`, `bidFeeSighting`, `privateBidFeeSighting`, `acceptPaymentRequest`, `stepOrder`.
+   Calls: `buildPaymentRequest`, `seal`, `open`, `proposalFeeSighting`, `acceptanceFeeSighting`, `bidFeeSighting`, `privateBidFeeSighting`, `acceptPaymentRequest`, `stepOrder`.
 8. **Pay and check the receipts** (§9). The buyer pays each invoice with its own wallet, builds
    `buildReceipt` for each payment, then seals and sends it. The buyer opens its own `toSelf` copy of
-   each receipt and checks it against the stored request: with `verifySettlement` and the accepted
-   terms for the provider's payment, and with `verifyFeeReceipt`, the order and `earlierPoints` for
-   the fee. For the fee, the earlier points now also include the fee payment request
-   (`FEE_PAYMENT_REQUEST`). Read `settlement.evidenced` on each answer, not `ok`. Then the buyer
+   each receipt and checks it against the stored request. For the provider's payment, use
+   `verifySettlement` with the proposal's `terms` you kept in step 4. For the fee, use
+   `verifyFeeReceipt` with the order and `earlierPoints`: step 7's sightings plus the fee payment
+   request's (`FEE_PAYMENT_REQUEST`), from `paymentRequestFeeSighting`. Give it the fee request, the
+   proposal, the acceptance and the provider's key. It reads the request against that acceptance, as step
+   7's acceptance of the request did, and compares its `fee` tag with no other point. Read `settlement.evidenced` on each answer, not `ok`. Then the buyer
    steps the order with `receipts_verified`, passing those settlements. §11.2 allows `paid` only
    once **all** required receipts are verified, so read `stepOrder`'s answer rather than assuming
    the order moved.
 
-   Calls: `buildReceipt`, `seal`, `open`, `verifySettlement`, `verifyFeeReceipt`, `stepOrder`.
+   Calls: `buildReceipt`, `seal`, `open`, `verifySettlement`, `paymentRequestFeeSighting`, `verifyFeeReceipt`, `stepOrder`.
 9. **Release** (§10.3). The provider builds `buildReleaseAfterPayment` from its own commitment and
    the settlement its own `verifySettlement` call answered for the buyer's receipt of its invoice. It
    is refused unless that settlement is evidenced, is the provider's payment and is for the
@@ -275,9 +283,14 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    reads it with `decodeRelease` and steps the order with `deliverable_released`.
 
    Calls: `verifySettlement`, `buildReleaseAfterPayment`, `buildRelease`, `seal`, `open`, `decodeRelease`, `stepOrder`.
-10. **Check the delivery** (§10.4). The buyer fetches the file, checks it with `verifyServedBytes`,
-    decrypts it, and steps the order with `delivery_verified` (passing the served and decrypted
-    bytes) or `delivery_refused`.
+10. **Check the delivery** (§10.4). The buyer fetches the file and checks it with `verifyServedBytes`.
+    Only if that answers `ok`, decrypt the file. If it decrypts, step the order with
+    `delivery_verified`, passing the served and decrypted bytes. If it does not, step it with
+    `delivery_refused` and `BLOB_DID_NOT_DECRYPT`. When `verifyServedBytes` or the
+    `delivery_verified` step refuses, read `deliveryFailure` on the answer.
+    If it is set, step the order with `delivery_refused` and that value. It is set only when the bytes
+    do not hash to the commitment's value. For any other refusal, such as a size refusal, it is not set,
+    and the library names no `delivery_refused` value. Reading it never moves the order.
 
     Calls: `verifyServedBytes`, `stepOrder`.
 
@@ -305,7 +318,7 @@ own messages from their `toSelf` copies. Keep each one.
 
    Calls: `buildListingOffer`, `decodeListing`, `matchesBoard`, `checkDeadlines`, `buildBid`, `buildPrivateBid`, `seal`.
 2. **Open and answer a proposal** (§7.5, §7.6). Open the buyer's proposal and read its terms with
-   `decodeProposal`. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
+   `decodeProposal`, and keep its `terms`: step 5 checks the buyer's receipt against them. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
    listing the proposal is for. It is refused, and builds nothing, when the proposal is for another
    listing, when the listing has expired, or when the clock has reached the proposal's own
    `expiration`, which is the deadline for accepting it. Where either carries a deadline and your
@@ -327,7 +340,8 @@ own messages from their `toSelf` copies. Keep each one.
 
    Calls: `buildPaymentRequest`, `seal`, `open`, `acceptPaymentRequest`.
 5. **Check the buyer's receipt** (§9.2). When the buyer's receipt for your invoice arrives, open it
-   and check it with `verifySettlement`, giving it your store and the terms you accepted. Read
+   and check it with `verifySettlement`, giving it your store and the proposal's `terms` from step 2.
+   Your acceptance copied those terms, so they are the terms you accepted. Read
    `settlement.evidenced` on the answer, not `ok`: a receipt on a rail with no evidence rule, such as
    `bitcoin`, is answered `ok` and evidences nothing (§9.4). Your wallet saying "paid" is not
    evidence either (§9.1).
