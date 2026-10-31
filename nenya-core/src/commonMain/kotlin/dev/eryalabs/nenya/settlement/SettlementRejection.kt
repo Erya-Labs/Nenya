@@ -587,7 +587,53 @@ public enum class SettlementRejection {
      * Raised only by [PaymentWriter]: no decoder can reach it, because `PaymentMedium.of` answers
      * `UNKNOWN` precisely so that reading one is possible.
      */
-    UNKNOWN_MEDIUM_IS_NOT_EMITTABLE;
+    UNKNOWN_MEDIUM_IS_NOT_EMITTABLE,
+
+    // ---------------------------------------------------------------------------------------
+    // §10.3's release, gated on payment evidence — [PaymentWriter.release]. T65. Each is the
+    // caller's mistake rather than a peer's, and each is raised before any tag is written.
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * §10.3: the release is sent "after payment evidence verifies", and the payment handed in is
+     * not [Settlement.Evidenced].
+     *
+     * §9.4's `Unverified` is the one other answer a `Settlement` can be: a `bitcoin` or `ecash`
+     * receipt, which §9.4 says MUST be treated as unverified and MUST NOT advance state. Releasing
+     * the decryption key on one would hand over the deliverable for a payment this library reports
+     * as evidencing nothing.
+     */
+    RELEASE_WITHOUT_EVIDENCE,
+
+    /**
+     * The evidence handed in is the **fee recipient's** payment, not the provider's.
+     *
+     * §8.6's two payments are separate, and the provider's own is the one it is owed `price_msat`
+     * for. A fee receipt proves the buyer paid somebody else; it says nothing about the provider's
+     * invoice.
+     */
+    RELEASE_NOT_PROVIDER_PAYMENT,
+
+    /**
+     * The evidence names one order and the commitment another.
+     *
+     * §10.3 binds a release to its order by the `order` tag, and the release's `order` is read off
+     * the commitment. Evidence for another order would release this order's deliverable on the
+     * strength of a payment made for something else. Kept apart from
+     * [dev.eryalabs.nenya.channel.ChannelRejection.RELEASE_FOR_ANOTHER_ORDER], which is the buyer's
+     * refusal of a release that arrived; this one stops the release being written.
+     */
+    RELEASE_FOR_ANOTHER_ORDER,
+
+    /**
+     * The commitment handed in was not sealed by the key this release is being written under.
+     *
+     * §10.1's commitment is the provider's, and the release repeats its four values (§10.3). A
+     * commitment some other key sealed — the buyer's, a stranger's — is not this author's promise
+     * about its own file, so copying its `x`, `ox`, `m` and `size` would publish another party's
+     * values under this author's key.
+     */
+    RELEASE_OF_ANOTHER_COMMITMENT;
 
     public companion object {
 

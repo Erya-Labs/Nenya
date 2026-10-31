@@ -4,12 +4,14 @@ import dev.eryalabs.nenya.channel.AttributedRumor
 import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.ChannelTags
 import dev.eryalabs.nenya.channel.ChannelVocabulary
+import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderMessageKind
 import dev.eryalabs.nenya.channel.RumorBuild
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorKind
 import dev.eryalabs.nenya.channel.RumorWriter
 import dev.eryalabs.nenya.collections.readOnlyListOf
+import dev.eryalabs.nenya.delivery.DeliverableRelease
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.order.OrderTerms
@@ -21,7 +23,7 @@ import dev.eryalabs.nenya.tag.readPubkeyHex
 import dev.eryalabs.nenya.wire.WireEvent
 
 /**
- * What [PaymentWriter] answers: the unsigned rumor, or the §8.6, §9.2 or §9.4 rule that refused it.
+ * What [PaymentWriter] answers: the unsigned rumor, or the §8.6, §9.2, §9.4 or §10.3 rule that refused it.
  *
  * A value rather than an exception, for the reason [RumorBuild] and `ListingBuild` give. Its own
  * type rather than [RumorBuild] because the reasons are a different vocabulary: a §8.6 refusal is a
@@ -41,7 +43,7 @@ public sealed interface PaymentBuild {
      */
     public class Built internal constructor(
 
-        /** §4.1's five id-bearing fields, with §8.6's or §9.2's tags in their emission order. */
+        /** §4.1's five id-bearing fields, with §8.6's, §9.2's or §10.3's tags in their emission order. */
         public val event: WireEvent,
     ) : PaymentBuild {
 
@@ -60,7 +62,7 @@ public sealed interface PaymentBuild {
      */
     public class Refused internal constructor(
 
-        /** Which §8.6, §9.2 or §9.4 rule refused the message, or `null` if §7.4's envelope did. */
+        /** Which §8.6, §9.2, §9.4 or §10.3 rule refused the message, or `null` if §7.4's envelope did. */
         public val reason: SettlementRejection?,
 
         /** Which §7.4, §4.1 or §4.5 rule refused it, or `null` if one of §8.6's own did. */
@@ -86,7 +88,8 @@ public sealed interface PaymentBuild {
 
 /**
  * The write half of §8.6 and §9.2: the `type=2` payment request and the `kind:17` receipt, each
- * returning the unsigned rumor an app then seals.
+ * returning the unsigned rumor an app then seals — and §10.3's release, gated on the provider's own
+ * evidence ([release]).
  *
  * ### Why these two are here and not in [RumorWriter]
  *
@@ -387,6 +390,118 @@ public object PaymentWriter {
             // §9.2 check 4's own operand, from the one function that computes it. See [receipt].
             amountMsat = terms?.let { Settlement.expectedAmount(payee, it.split) },
         )
+    }
+
+    /**
+     * §10.3's `kind:15` release, written from the provider's **own** commitment and only once the
+     * provider's **own** payment has verified. T65.
+     *
+     * §10.3 says the release is "sent by the provider after payment evidence verifies", and
+     * `RumorWriter.release` takes neither the evidence nor the commitment: its four values are
+     * typed in by the caller. This door takes both and refuses, in this order, before any tag is
+     * written:
+     *
+     * 1. [payment] is not [Settlement.Evidenced] — §9.4's `Unverified` evidences nothing
+     *    ([SettlementRejection.RELEASE_WITHOUT_EVIDENCE]);
+     * 2. it is not the provider's payment ([SettlementRejection.RELEASE_NOT_PROVIDER_PAYMENT]);
+     * 3. it names another order than [commitment] does
+     *    ([SettlementRejection.RELEASE_FOR_ANOTHER_ORDER]);
+     * 4. [commitment] was not sealed by [envelope]'s author
+     *    ([SettlementRejection.RELEASE_OF_ANOTHER_COMMITMENT]).
+     *
+     * Then `RumorWriter.release` writes it, with the `order` and the four values — `x`, `ox`, `m`
+     * as `file-type`, `size` — read off [commitment] and never typed. Its refusals come back on
+     * [PaymentBuild.Refused.channelReason].
+     *
+     * ### What it does not check
+     *
+     * - **The fee receipt.** It is addressed to the fee recipient, who verifies it; the provider
+     *   is not sent it and this door does not ask for it.
+     * - **A free order.** No payment is owed, so there is no `Settlement` to hand in and this door
+     *   refuses. Such an order is released through `RumorWriter.release`.
+     * - **Whether [payment] came from this order's store.** A `Settlement.Evidenced` is minted only
+     *   by `Settlement.verify` and `Settlement.verifyFeeReceipt`; which store and terms the caller
+     *   handed those is the caller's (§13), as it is everywhere on this path.
+     * - **The commitment's spelling.** The release is written in §4.3's canonical form — lowercase
+     *   hex and `size` as plain decimal. A commitment this library wrote is in that form already, so
+     *   `DeliverableReleaseMessage.divergenceFrom` finds nothing. A commitment spelled otherwise by
+     *   another implementation, such as `size` with a leading zero, still passes
+     *   `DeliverableCommitment.checkReleaseIdentity`, but `divergenceFrom` would report that
+     *   operand.
+     *
+     * The evidence is read and not kept: the returned value holds the rumor and nothing else, and
+     * the key and nonce go only into their two tags (§12 item 11).
+     */
+    public fun release(
+        envelope: RumorEnvelope,
+        commitment: DeliveryCommitmentMessage,
+        payment: Settlement,
+        decryptionKey: String,
+        decryptionNonce: String,
+    ): PaymentBuild {
+        if (payment !is Settlement.Evidenced) {
+            return refused(
+                SettlementRejection.RELEASE_WITHOUT_EVIDENCE,
+                SettlementVocabulary.PAYMENT,
+                "§10.3: the release is sent after payment evidence verifies, and this payment is not " +
+                    "evidenced. §9.4 says a receipt on a rail v1 defines no rule for MUST be treated as " +
+                    "unverified, so it releases nothing",
+            )
+        }
+        if (payment.payee != Payee.PROVIDER) {
+            return refused(
+                SettlementRejection.RELEASE_NOT_PROVIDER_PAYMENT,
+                SettlementVocabulary.PAYEE,
+                "§8.6: the provider and the fee recipient are paid separately, and this evidence is " +
+                    "the `${payment.payee.token}` payment. The release is gated on the provider's own",
+            )
+        }
+        if (payment.order != commitment.order) {
+            return refused(
+                SettlementRejection.RELEASE_FOR_ANOTHER_ORDER,
+                SettlementVocabulary.ORDER,
+                "§10.3 binds a release to its order by the `${SettlementVocabulary.ORDER}` tag, and " +
+                    "this evidence is for a different order from the commitment's",
+            )
+        }
+        if (authorOf(envelope) != commitment.sender) {
+            return refused(
+                SettlementRejection.RELEASE_OF_ANOTHER_COMMITMENT,
+                null,
+                "§10.1's commitment is the provider's own, and this one was sealed by a different key " +
+                    "from the envelope's author, so its four values are not this author's to release",
+            )
+        }
+        val committed = commitment.commitment
+        val build = RumorWriter.release(
+            envelope = envelope,
+            order = commitment.order,
+            release = DeliverableRelease(
+                x = committed.x,
+                ox = committed.ox,
+                fileType = committed.mimeType,
+                sizeBytes = committed.sizeBytes,
+            ),
+            decryptionKey = decryptionKey,
+            decryptionNonce = decryptionNonce,
+        )
+        return when (build) {
+            is RumorBuild.Built -> PaymentBuild.Built(build.event)
+            is RumorBuild.Refused ->
+                PaymentBuild.Refused(null, build.reason, build.tag, build.detail)
+        }
+    }
+
+    /**
+     * [envelope]'s author as §4.3 writes it — lowercase — or `null` when it is not a pubkey at all.
+     *
+     * `null` can equal no commitment's sender, which is always a lowercase key, so a malformed
+     * author is refused as not the commitment's.
+     */
+    private fun authorOf(envelope: RumorEnvelope): String? = try {
+        readPubkeyHex(envelope.authorPubkey, "the release's author pubkey")
+    } catch (refusedHex: TagException) {
+        null
     }
 
     /**

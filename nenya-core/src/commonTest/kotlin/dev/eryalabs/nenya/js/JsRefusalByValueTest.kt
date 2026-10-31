@@ -27,6 +27,7 @@ import dev.eryalabs.nenya.seam.Nip44PayloadEphemeralSigners
 import dev.eryalabs.nenya.seam.RecordingRandomness
 import dev.eryalabs.nenya.settlement.FeeTermPoint
 import dev.eryalabs.nenya.settlement.FeeTermSighting
+import dev.eryalabs.nenya.settlement.ReleaseFixtures
 import dev.eryalabs.nenya.settlement.SettlementFixtures
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.wire.encodeLowerHex
@@ -89,7 +90,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Thirty-nine of `JsSurfaceTest.ENTRY_POINTS`' forty: `capabilities` takes nothing, so it
+         * Forty of `JsSurfaceTest.ENTRY_POINTS`' forty-one: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -132,6 +133,7 @@ class JsRefusalByValueTest {
             "bidFeeSighting",
             "privateBidFeeSighting",
             "buildProposalForBid",
+            "buildReleaseAfterPayment",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1037,6 +1039,52 @@ class JsRefusalByValueTest {
         for (bad in HOSTILE_HEX) accept("acceptance providerPubkey=`$bad`", providerPubkey = bad)
         for (clock in HOSTILE_CLOCKS) accept("acceptance under a hostile clock", env = JsEnvironment(nowSeconds = clock))
         for (points in hostilePoints()) accept("fee acceptance with hostile points", payee = Payee.FEE, points = points)
+
+        // T65: §10.3's release after payment, with every string-bearing value spoiled and every
+        // settlement it must refuse.
+        val providerSettlement = JsSettlement(OrderFixtures.receipt(Payee.PROVIDER))
+        val legalEnvelope = JsBoundaryFixtures.crossed(ReleaseFixtures.providerEnvelope())
+        val commitmentRumor = JsRumor(ReleaseFixtures.commitmentRumor())
+        fun release(
+            what: String,
+            envelope: JsRumorEnvelope = legalEnvelope,
+            commitment: JsRumor = commitmentRumor,
+            settlement: JsSettlement = providerSettlement,
+            key: String = ReleaseFixtures.KEY_HEX,
+            nonce: String = ReleaseFixtures.NONCE_HEX,
+        ) = record(
+            what,
+            call(::buildReleaseAfterPayment) { buildReleaseAfterPayment(envelope, commitment, settlement, key, nonce) },
+        )
+        for (bad in HOSTILE_HEX) {
+            release("release-after-payment decryptionKeyHex=`$bad`", key = bad)
+            release("release-after-payment decryptionNonceHex=`$bad`", nonce = bad)
+            release(
+                "release-after-payment authorPubkey=`$bad`",
+                envelope = JsRumorEnvelope(bad, legalEnvelope.createdAtSeconds, legalEnvelope.counterparties),
+            )
+        }
+        for (bad in HOSTILE_DECIMALS) {
+            release(
+                "release-after-payment createdAtSeconds=`$bad`",
+                envelope = JsRumorEnvelope(legalEnvelope.authorPubkey, bad, legalEnvelope.counterparties),
+            )
+        }
+        release("release-after-payment on an unverified payment", settlement = JsSettlement(ReleaseFixtures.bitcoinSettlement()))
+        release("release-after-payment on the fee payment", settlement = JsSettlement(OrderFixtures.receipt(Payee.FEE)))
+        release(
+            "release-after-payment on another order's payment",
+            settlement = JsSettlement(OrderFixtures.receipt(Payee.PROVIDER, index = OrderFixtures.OTHER_ORDER_INDEX)),
+        )
+        release(
+            "release-after-payment on a stranger's commitment",
+            commitment = JsRumor(ReleaseFixtures.commitmentRumor(SettlementFixtures.stranger(OrderFixtures.ORDER_INDEX))),
+        )
+        release("release-after-payment on a receipt offered as a commitment", commitment = providerReceipt)
+        release(
+            "release-after-payment on a chat offered as a commitment",
+            commitment = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())),
+        )
     }
 
     /** §11.2's two doors, with every string-bearing value of the machine, the terms and the event spoiled. */
@@ -1439,9 +1487,10 @@ class JsRefusalByValueTest {
 
         // 15 and 6 over T42's thirteen entry points; 59 and 15, measured, once T54 swept all thirty-three;
         // 61, measured, once T59's `decodePrivateBid` joined the sweep; 62, measured, once T61's
-        // `buildProposalForBid` added `WRONG_PARTIES`; 63, measured, once T62's added `DELIVERY_PASSED`.
+        // `buildProposalForBid` added `WRONG_PARTIES`; 63, measured, once T62's added `DELIVERY_PASSED`;
+        // 67, measured, once T65's `buildReleaseAfterPayment` added its four `RELEASE_…` refusals.
         assertTrue(
-            reasons.size >= 63,
+            reasons.size >= 67,
             "only ${reasons.size} distinct refusal(s) were reached — $reasons — which is not the " +
                 "breadth these cases are written for",
         )

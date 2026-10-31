@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.bid.DeadlineSide
 import dev.eryalabs.nenya.channel.ChannelVocabulary
+import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
 import dev.eryalabs.nenya.channel.OrderProposal
@@ -323,7 +324,11 @@ public fun buildCommitment(
     ).asJsBuildResult()
 }
 
-/** §10.3's `kind:15` file-message release, through `RumorWriter.release`. */
+/**
+ * §10.3's `kind:15` file-message release, through `RumorWriter.release`: the four values typed in, and
+ * no payment evidence asked for. [buildReleaseAfterPayment] is the door that asks for it; this one is
+ * for a free order, which owes no payment and so has none.
+ */
 @OptIn(ExperimentalJsExport::class)
 @JsExport
 public fun buildRelease(
@@ -337,6 +342,43 @@ public fun buildRelease(
         envelope = envelope.asRumorEnvelope(),
         order = OrderId.ofHex(orderIdHex),
         release = release.asDeliverableRelease(),
+        decryptionKey = decryptionKeyHex,
+        decryptionNonce = decryptionNonceHex,
+    ).asJsBuildResult()
+}
+
+/**
+ * §10.3's release, written from the provider's own commitment once its own payment has verified,
+ * through `PaymentWriter.release`. T65.
+ *
+ * The `order` and the four values come off [commitmentRumor], so the page types none of them. Refused
+ * under `SettlementRejection`, with no event, when [settlement] is not evidenced
+ * (`RELEASE_WITHOUT_EVIDENCE` — §9.4's `bitcoin` or `ecash`), is the fee recipient's payment
+ * (`RELEASE_NOT_PROVIDER_PAYMENT`), names another order (`RELEASE_FOR_ANOTHER_ORDER`), or when the
+ * commitment was not sealed by [envelope]'s author (`RELEASE_OF_ANOTHER_COMMITMENT`); the commitment is
+ * decoded by `DeliveryCommitmentMessage.decode`, so one it refuses comes back under `ChannelRejection`.
+ *
+ * The fee receipt is the fee recipient's to verify, and this call does not ask for it. A free order has
+ * no payment to verify and is refused here; it is released through [buildRelease].
+ *
+ * @param commitmentRumor the provider's own `kind:16` `type=5`, as [open] handed back its copy.
+ * @param settlement the provider's payment, as [verifySettlement] answered it.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun buildReleaseAfterPayment(
+    envelope: JsRumorEnvelope,
+    commitmentRumor: JsRumor,
+    settlement: JsSettlement,
+    decryptionKeyHex: String,
+    decryptionNonceHex: String,
+): JsBuildResult = jsBuild {
+    PaymentWriter.release(
+        envelope = envelope.asRumorEnvelope(),
+        commitment = DeliveryCommitmentMessage.decode(
+            commitmentRumor.asBoundRumor("kind:16 type=5 delivery commitment"),
+        ),
+        payment = settlement.settlement,
         decryptionKey = decryptionKeyHex,
         decryptionNonce = decryptionNonceHex,
     ).asJsBuildResult()

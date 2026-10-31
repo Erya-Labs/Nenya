@@ -246,7 +246,11 @@ client builds and sends its own messages at the matching steps.
    steps the order with `receipts_verified`, passing those settlements. §11.2 allows `paid` only
    once **all** required receipts are verified, so read `stepOrder`'s answer rather than assuming
    the order moved.
-9. **Release** (§10.3). The provider builds `buildRelease`, seals and sends it. The buyer opens it,
+9. **Release** (§10.3). The provider builds `buildReleaseAfterPayment` from its own commitment and
+   the settlement its own `verifySettlement` call answered for the buyer's receipt of its invoice. It
+   is refused unless that settlement is evidenced, is the provider's payment and is for the
+   commitment's order. For a free order, which has no payment to check, the provider builds
+   `buildRelease` instead. The provider seals and sends the release. The buyer opens it,
    reads it with `decodeRelease` and steps the order with `deliverable_released`.
 10. **Check the delivery** (§10.4). The buyer fetches the file, checks it with `verifyServedBytes`,
     decrypts it, and steps the order with `delivery_verified` (passing the served and decrypted
@@ -295,6 +299,7 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `buildStatusUpdate` — builds a status update rumor, `kind:16` `type=3` (§11.1).
 - `buildCommitment` — builds a delivery commitment rumor, `kind:16` `type=5` (§10.1).
 - `buildRelease` — builds the deliverable release rumor, `kind:15` (§10.3).
+- `buildReleaseAfterPayment` — the same, from the provider's own commitment, refused unless the provider's own payment was evidenced (§10.3).
 - `buildPrivateBid` — builds a private bid rumor, `kind:16` `type=6` (§6.1).
 - `buildPaymentRequest` — builds a payment request rumor, `kind:16` `type=2` (§8.6).
 - `buildReceipt` — builds a payment receipt rumor, `kind:17` (§9).

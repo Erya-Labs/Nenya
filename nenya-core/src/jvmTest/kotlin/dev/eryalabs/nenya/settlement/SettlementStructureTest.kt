@@ -170,6 +170,10 @@ class SettlementStructureTest {
             // says MAY be parsed. Check 2's lowercase-hex rule is applied to the proof on the one
             // rail §9.2 states it over, which is what `isLowercasePreimageHex` is.
             "PaymentWriter.receipt",
+            // T65: §10.2's decryption key and nonce, which the embedding app authors for its own
+            // release. Neither is evidence: they go into their two tags, where `RumorWriter.release`
+            // holds them to lowercase hex. The evidence is the `Settlement` beside them.
+            "PaymentWriter.release",
         )
 
         /** `Payee` as it appears inside a `typeName`, bare or parameterised. */
