@@ -90,7 +90,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Forty of `JsSurfaceTest.ENTRY_POINTS`' forty-one: `capabilities` takes nothing, so it
+         * Forty-three of `JsSurfaceTest.ENTRY_POINTS`' forty-four: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -134,6 +134,9 @@ class JsRefusalByValueTest {
             "privateBidFeeSighting",
             "buildProposalForBid",
             "buildReleaseAfterPayment",
+            "proposalFeeSighting",
+            "acceptanceFeeSighting",
+            "paymentRequestFeeSighting",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1040,6 +1043,25 @@ class JsRefusalByValueTest {
         for (clock in HOSTILE_CLOCKS) accept("acceptance under a hostile clock", env = JsEnvironment(nowSeconds = clock))
         for (points in hostilePoints()) accept("fee acceptance with hostile points", payee = Payee.FEE, points = points)
 
+        // T71: §8.4's payment-request point, decoded against the same checked acceptance.
+        fun requestSighting(
+            what: String,
+            request: JsRumor = JsRumor(messages.requestRumors.getValue(Payee.FEE)),
+            providerPubkey: String = SettlementFixtures.provider(messages.index),
+        ) {
+            val answer = call(::paymentRequestFeeSighting) {
+                paymentRequestFeeSighting(request, JsRumor(messages.proposalRumor), JsRumor(messages.acceptanceRumor), providerPubkey)
+            }
+            if (!answer.ok) assertNull(answer.sighting, "$what: a refusal carries no sighting")
+            record(what, answer.ok, answer.kind, answer.reason, answer.reasonVocabulary, answer.detail)
+        }
+        for (bad in HOSTILE_HEX) requestSighting("request sighting providerPubkey=`$bad`", providerPubkey = bad)
+        requestSighting("request sighting of a receipt", request = providerReceipt)
+        requestSighting(
+            "request sighting of a chat",
+            request = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())),
+        )
+
         // T65: §10.3's release after payment, with every string-bearing value spoiled and every
         // settlement it must refuse.
         val providerSettlement = JsSettlement(OrderFixtures.receipt(Payee.PROVIDER))
@@ -1205,6 +1227,18 @@ class JsRefusalByValueTest {
             val fee = call(::privateBidFeeSighting) { privateBidFeeSighting(rumor) }
             assertNull(fee.sighting, "privateBidFeeSighting of $what: a refusal carries no sighting")
             record("privateBidFeeSighting of $what", fee.ok, fee.kind, fee.reason, fee.reasonVocabulary, fee.detail)
+            val proposed = call(::proposalFeeSighting) { proposalFeeSighting(rumor) }
+            assertNull(proposed.sighting, "proposalFeeSighting of $what: a refusal carries no sighting")
+            record(
+                "proposalFeeSighting of $what",
+                proposed.ok, proposed.kind, proposed.reason, proposed.reasonVocabulary, proposed.detail,
+            )
+            val accepted = call(::acceptanceFeeSighting) { acceptanceFeeSighting(rumor) }
+            assertNull(accepted.sighting, "acceptanceFeeSighting of $what: a refusal carries no sighting")
+            record(
+                "acceptanceFeeSighting of $what",
+                accepted.ok, accepted.kind, accepted.reason, accepted.reasonVocabulary, accepted.detail,
+            )
         }
         for ((what, rumor) in listOf("a chat" to chat, "a proposal" to proposal)) {
             val decoded = call(::decodeCommitment) { decodeCommitment(rumor) }

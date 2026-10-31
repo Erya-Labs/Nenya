@@ -1,5 +1,7 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.channel.OrderProposal
+import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.channel.PrivateBid
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.seam.OrderId
@@ -225,6 +227,93 @@ public fun privateBidFeeSighting(rumor: JsRumor): JsFeeTermSightingResult =
             null,
         )
     }
+
+/**
+ * §8.4's first REQUIRED point, the proposal, read off a §7.5 `type=1` by the library rather than
+ * copied out of its tags by the page. T71.
+ *
+ * One call to `OrderProposal.decode`, as [decodeProposal] makes, then one to
+ * `FeeTermSighting.onProposal`; this function performs no check of its own. A proposal carrying no
+ * `fee` tag answers a sighting with no [JsFeeTermSighting.feeTag], which is §8.1's read rule — the
+ * order's term is `(0, —)` — and not a missing point.
+ *
+ * @param proposalRumor the `kind:16` `type=1` as [open] handed it back. A rumor of another bound
+ *   kind reaches the decoder and gets its own `NOT_A_PROPOSAL`.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun proposalFeeSighting(proposalRumor: JsRumor): JsFeeTermSightingResult =
+    jsGuarded({ JsFeeTermSightingResult(null, it) }) {
+        JsFeeTermSightingResult(
+            FeeTermSighting.onProposal(OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))),
+            null,
+        )
+    }
+
+/**
+ * §8.4's second REQUIRED point, the acceptance, read off a §7.4 `type=3` by the library. T71.
+ *
+ * One call to `OrderStatusMessage.decode`, as [decodeStatusUpdate] makes, then one to
+ * `FeeTermSighting.onAcceptance`, which refuses an update announcing anything but `accepted` as
+ * `NOT_AN_ACCEPTANCE`: §8.4 names the point as "the acceptance (`type=3`, `status=accepted`)".
+ *
+ * **It performs no §7.6 comparison.** Whether this update accepts the proposal, and was sealed by the
+ * provider the page resolved, is [checkAcceptance]'s and [acceptPaymentRequest]'s; this reads the
+ * update's own `fee` tag and nothing more, which is what §8.4 compares.
+ *
+ * @param statusRumor the `kind:16` `type=3` as [open] handed it back.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun acceptanceFeeSighting(statusRumor: JsRumor): JsFeeTermSightingResult =
+    jsGuarded({ JsFeeTermSightingResult(null, it) }) {
+        JsFeeTermSightingResult(
+            FeeTermSighting.onAcceptance(OrderStatusMessage.decode(statusRumor.asBoundRumor("kind:16 type=3 status update"))),
+            null,
+        )
+    }
+
+/**
+ * §8.4's third REQUIRED point, the fee `type=2`, or its OPTIONAL `payee=provider` counterpart, read
+ * off a §8.6 payment request by the library. T71.
+ *
+ * `PaymentRequest.decode` needs §8.3's split, and it takes it from the same checked acceptance
+ * [acceptPaymentRequest] decodes against — rebuilt from the two rumors and the provider key by the
+ * one `crossedAcceptance` both use (decision **J**), never from terms the page states. Then one call to
+ * `FeeTermSighting.onPaymentRequest`, which takes the point from the request's own `payee` tag rather
+ * than from the page. This function performs no check of its own: it neither stores the request nor
+ * compares its term with any other point, which is [acceptPaymentRequest]'s.
+ *
+ * @param request the `kind:16` `type=2` as [open] handed it back.
+ * @param proposalRumor §7.5's `type=1` for this order, as [open] handed it back.
+ * @param acceptanceRumor §7.6's `status=accepted` `type=3`, as [open] handed it back.
+ * @param providerPubkey the provider's key **as the page resolved it** (§7.6). See
+ *   [JsOrderEvent.providerPubkey].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun paymentRequestFeeSighting(
+    request: JsRumor,
+    proposalRumor: JsRumor,
+    acceptanceRumor: JsRumor,
+    providerPubkey: String,
+): JsFeeTermSightingResult = jsGuarded({ JsFeeTermSightingResult(null, it) }) {
+    val acceptance = crossedAcceptance(
+        proposalRumor = proposalRumor,
+        acceptanceRumor = acceptanceRumor,
+        providerPubkey = providerPubkey,
+        field = "paymentRequestFeeSighting.acceptanceRumor",
+    )
+    JsFeeTermSightingResult(
+        FeeTermSighting.onPaymentRequest(
+            PaymentRequest.decode(
+                rumor = request.asBoundRumor("kind:16 type=2 payment request"),
+                split = acceptance.terms.split,
+            ),
+        ),
+        null,
+    )
+}
 
 // =================================================================================================
 // The boundary types.
@@ -523,7 +612,11 @@ public class JsFeeTermSighting public constructor(
     override fun toString(): String = "JsFeeTermSighting(point=$point)"
 }
 
-/** What [privateBidFeeSighting] answered, with [kind] as the discriminator. */
+/**
+ * What a §8.4 sighting door whose decode can refuse answered, with [kind] as the discriminator:
+ * [privateBidFeeSighting], [proposalFeeSighting], [acceptanceFeeSighting] and
+ * [paymentRequestFeeSighting].
+ */
 @OptIn(ExperimentalJsExport::class)
 @JsExport
 public class JsFeeTermSightingResult internal constructor(
@@ -534,7 +627,10 @@ public class JsFeeTermSightingResult internal constructor(
     /** `"fee_term_sighting"` or `"refused"`. */
     public val kind: String get() = if (read != null) "fee_term_sighting" else "refused"
 
-    /** True exactly when [kind] is `"fee_term_sighting"`. Says the bid decoded — never that its fee agrees. */
+    /**
+     * True exactly when [kind] is `"fee_term_sighting"`. Says the message decoded and is the point
+     * read — never that its fee agrees with any other point's.
+     */
     public val ok: Boolean get() = read != null
 
     /** The sighting, when [ok], in the shape the settlement checks' `earlierPoints` take. */
@@ -543,7 +639,11 @@ public class JsFeeTermSightingResult internal constructor(
     /** The rejection constant's `name`, when not [ok]. */
     public val reason: String? get() = refusal?.reason
 
-    /** Which rejection enum [reason] came from — `ChannelRejection` for §6.1's own refusals. */
+    /**
+     * Which rejection enum [reason] came from — `ChannelRejection` for §6.1's and §7's own refusals,
+     * `SettlementRejection` for §8.4's and §8.6's, and `JsCrossing` where §7.6 answered no acceptance
+     * for a payment request to be decoded against.
+     */
     public val reasonVocabulary: String? get() = refusal?.vocabulary
 
     /** The tag the refusal is about, where the rule names one. */

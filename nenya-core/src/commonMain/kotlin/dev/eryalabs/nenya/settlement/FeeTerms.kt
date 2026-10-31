@@ -278,8 +278,10 @@ public class FeeTermSighting internal constructor(
          *
          * Every point §8.4 names has a decoded door above — [onProposal], [onAcceptance],
          * [onPaymentRequest], [onReceipt], [onBid] and [onPrivateBid] — and those are the doors
-         * to use. This one is for a tag that reached the caller some other way, such as across
-         * the JavaScript boundary, and a caller using it owns the parse: §4.4's strict decimal
+         * to use; the JavaScript build crosses all of them but [onReceipt], so a page reading a bid,
+         * a proposal, an acceptance or a payment request has no reason to build a sighting itself
+         * either. This one is for a tag that reached
+         * the caller some other way, and a caller using it owns the parse: §4.4's strict decimal
          * form is what makes the byte comparison below honest, and a tag that never went through
          * it can carry `["fee", "0250", …]` into a comparison T9 would have refused.
          *

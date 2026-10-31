@@ -402,6 +402,9 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `verifyFeeReceipt` — the same, for the fee recipient's payment (§8.5, §9.2).
 - `bidFeeSighting` — the `fee` tag of a decoded public bid, as a `BID` sighting for `earlierPoints` (§8.4).
 - `privateBidFeeSighting` — the same, for a private bid read from an opened rumor (§6.1, §8.4).
+- `proposalFeeSighting` — the `fee` tag of an order proposal read from an opened rumor, as an `ORDER_PROPOSAL` sighting (§7.5, §8.4).
+- `acceptanceFeeSighting` — the same, for the provider's acceptance, refused if the update is not `status=accepted` (§7.6, §8.4).
+- `paymentRequestFeeSighting` — the same, for a payment request read against the proposal and acceptance; the point comes from its `payee` (§8.6, §8.4).
 - `verifyServedBytes` — compares the bytes a provider served with the commitment (§10.4).
 - `openOrder` — starts an order in the state machine (§11).
 - `stepOrder` — applies one event to an order and answers the new order or the refusal (§11.2).
