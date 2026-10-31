@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.channel.PrivateBid
+import dev.eryalabs.nenya.order.OrderTerms
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.fail
@@ -126,6 +127,12 @@ internal object JsMessageFixtures {
             crossed.deliverBySeconds,
             JsBoundaryFixtures.decimalOrNull(expected.terms.deliverBy),
         ),
+        // T72's terms, compared field by field rather than as one opaque value.
+        JsBoundaryFixtures.Field(
+            "terms",
+            termsValues(crossed.terms),
+            termsValues(expected.terms),
+        ),
         JsBoundaryFixtures.Field(
             "counterparties",
             crossed.counterparties.map { it.toList() },
@@ -138,6 +145,18 @@ internal object JsMessageFixtures {
             crossed.event.unsignedJson().value,
             JsBoundaryFixtures.json(expected.encode()),
         ),
+    )
+
+    /** `JsOrderTerms`' four fields, in constructor order: price, fee basis points, `expiration`, `deliver_by`. */
+    fun termsValues(terms: JsOrderTerms): List<Any?> =
+        listOf(terms.priceMsat, terms.feeBasisPoints, terms.expirationSeconds, terms.deliverBySeconds)
+
+    /** The same four fields written independently off §8.3's split and §7.5's deadlines. */
+    fun termsValues(terms: OrderTerms): List<Any?> = listOf(
+        JsBoundaryFixtures.decimal(terms.split.price.millisatoshis),
+        JsBoundaryFixtures.basisPointsOf(terms.split.term),
+        JsBoundaryFixtures.decimalOrNull(terms.expiration),
+        JsBoundaryFixtures.decimalOrNull(terms.deliverBy),
     )
 
     /** The whole of §7.5's decode equality: [crossed] says exactly what [expected] says. */

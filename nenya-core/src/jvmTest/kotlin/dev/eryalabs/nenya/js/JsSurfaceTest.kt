@@ -293,9 +293,9 @@ class JsSurfaceTest {
         )
 
         /**
-         * The forty-four entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * The forty-five entry points this package exports: T42's thirteen, T43's six, T44's five,
          * T47's one, T48's two, T49's three, T50's one, T51's one, T52's one, T53's one, T55's two,
-         * T59's one, T60's two, T61's one, T65's one and T71's three.
+         * T59's one, T60's two, T61's one, T65's one, T71's three and T72's one.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -362,6 +362,8 @@ class JsSurfaceTest {
             "proposalFeeSighting",
             "acceptanceFeeSighting",
             "paymentRequestFeeSighting",
+            // T72 — §11.2's first row from the decoded `type=1`, its terms carried rather than retyped.
+            "openOrderFromProposal",
         )
 
         /**
@@ -378,6 +380,9 @@ class JsSurfaceTest {
             val covered = pinned + REFUSAL_BY_VALUE_EXEMPT
             return (ENTRY_POINTS - covered) to (covered - ENTRY_POINTS)
         }
+
+        /** T72's one, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T72_ENTRY_POINTS: Set<String> = setOf("openOrderFromProposal")
 
         /** T71's three, for the same reason [T42_ENTRY_POINTS] exists. */
         val T71_ENTRY_POINTS: Set<String> =
@@ -565,11 +570,13 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            44,
+            45,
             ENTRY_POINTS.size,
-            "T71's three on top of T65's one on top of T61's one on top of T60's two on top of T59's one on top of T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
+            "T72's one on top of T71's three on top of T65's one on top of T61's one on top of T60's two on top of T59's one on top of T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
                 "on top of T43's six on top of T42's thirteen",
         )
+        assertEquals(1, T72_ENTRY_POINTS.size, "T72's text crosses one")
+        assertTrue(T72_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T72's `openOrderFromProposal` is exported")
         assertEquals(3, T71_ENTRY_POINTS.size, "T71's text crosses three")
         assertTrue(
             T71_ENTRY_POINTS.all { it in ENTRY_POINTS },
@@ -606,7 +613,7 @@ class JsSurfaceTest {
             (ENTRY_POINTS - T42_ENTRY_POINTS - T44_ENTRY_POINTS - T47_ENTRY_POINTS - T48_ENTRY_POINTS -
                 T49_ENTRY_POINTS - T50_ENTRY_POINTS - T51_ENTRY_POINTS - T52_ENTRY_POINTS -
                 T53_ENTRY_POINTS - T55_ENTRY_POINTS - T59_ENTRY_POINTS - T60_ENTRY_POINTS -
-                T61_ENTRY_POINTS - T65_ENTRY_POINTS - T71_ENTRY_POINTS).size,
+                T61_ENTRY_POINTS - T65_ENTRY_POINTS - T71_ENTRY_POINTS - T72_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -637,7 +644,7 @@ class JsSurfaceTest {
             pinned.none { it in REFUSAL_BY_VALUE_EXEMPT },
             "an exempt entry point is also pinned as swept, so one of the two lists is not what it says",
         )
-        assertEquals(43, pinned.size, "forty-four entry points less `capabilities`")
+        assertEquals(44, pinned.size, "forty-five entry points less `capabilities`")
     }
 
     /** The control for the test above: a pin missing any one entry point fails the equality. */
@@ -932,7 +939,7 @@ class JsSurfaceTest {
         val proposal = decodeProposal(JsRumor(proposalRumor)).proposal
             ?: fail("the generated proposal must decode")
         assertEquals(
-            publishedPropertyNames(typeNamed("JsOrderProposal"), floor = 16),
+            publishedPropertyNames(typeNamed("JsOrderProposal"), floor = 17),
             JsMessageFixtures.proposalFields(proposal, OrderProposal.decode(proposalRumor))
                 .map { it.name }.toSet(),
             "JsMessageFixtures.proposalFields must name every value JsOrderProposal publishes",
@@ -963,8 +970,8 @@ class JsSurfaceTest {
             "JsMessageFixtures.releaseFields must name every value JsReleaseMessage publishes",
         )
 
-        // T59's §6.1 private bid, on the same terms: fifteen values, the proposal's sixteen less the
-        // order id a `type=6` does not carry.
+        // T59's §6.1 private bid, on the same terms: fifteen values, the proposal's seventeen less the
+        // order id a `type=6` does not carry and T72's `terms`.
         val bidCase = RumorWriterFixtures.cases(RumorWriterFixtures.Shape.entries.size)
             .single { it.shape == RumorWriterFixtures.Shape.PRIVATE_BID }
         val bidRumor = RumorWriterFixtures.bound(RumorWriterFixtures.build(bidCase))

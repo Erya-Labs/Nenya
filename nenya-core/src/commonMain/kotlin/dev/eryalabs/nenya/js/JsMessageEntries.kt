@@ -208,6 +208,22 @@ public class JsOrderProposal internal constructor(private val proposal: OrderPro
     /** §7.5's `deliver_by`, unix seconds as a decimal string, or `null`. */
     public val deliverBySeconds: String? get() = JsDecimal.ofOrNull(proposal.terms.deliverBy)
 
+    /**
+     * §7.5's terms — price, fee term and both deadlines — in the shape [openOrder] and
+     * [verifySettlement] already take. T72.
+     *
+     * Read off the decoded proposal, as [JsCommitmentMessage.commitment] is off its message, so a page
+     * passes the terms the wire carried straight on rather than copying four values across. An absent
+     * fee term stays `null` here and a stated zero stays `0` (§8.1).
+     */
+    public val terms: JsOrderTerms
+        get() = JsOrderTerms(
+            JsDecimal.of(proposal.terms.split.price.millisatoshis),
+            feeBasisPoints,
+            expirationSeconds,
+            deliverBySeconds,
+        )
+
     /** §7.4's `p` rows, each `[pubkey]` or `[pubkey, relay]`. A fresh array on every read. */
     public val counterparties: Array<Array<String>>
         get() = proposal.counterparties.map { ref ->

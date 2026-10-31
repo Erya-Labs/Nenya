@@ -69,6 +69,35 @@ public fun openOrder(
 }
 
 /**
+ * §11.2's first row from the `type=1` itself: the order opened on the terms the wire carried. T72.
+ *
+ * [openOrder] takes the order id and the terms as values a page types, so a page that has the
+ * proposal rumor in hand copies four terms and an id across and can copy one wrong. This takes the
+ * rumor. The facade performs **no check of its own**: one call to `OrderProposal.decode` — §7.5's
+ * `amount`/`amount_msat` agreement, its deadline rules and §8.1's read rule all run inside it — and
+ * one to `OrderMachine.open` over `OrderProposal.asOrderEvent()`, so the order is bound to the
+ * `["order", ...]` tag that was on the wire.
+ *
+ * **It establishes no provider and performs no §7.6 comparison**, exactly as [decodeProposal] does
+ * not: the order opens in `proposed`, and only [stepOrder]'s `acceptance_received` moves it on.
+ *
+ * @param machine as [openOrder]'s: `open` reads none of it, and a machine configured with a
+ *   non-positive timeout is refused here rather than at the next call.
+ * @param proposalRumor the `kind:16` `type=1` as [open] handed it back. A rumor of another bound
+ *   kind reaches the decoder and gets its own `NOT_A_PROPOSAL`, and no order.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun openOrderFromProposal(
+    machine: JsOrderMachine,
+    proposalRumor: JsRumor,
+): JsOrderResult = jsGuarded({ JsOrderResult(null, it) }) {
+    val opener = machine.asOrderMachine()
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    JsOrderResult(opener.open(proposal.asOrderEvent()), null)
+}
+
+/**
  * §11.2's fourteen rows: one event offered to one order, which moves or does not.
  *
  * ### This facade cannot become a second opinion about an order

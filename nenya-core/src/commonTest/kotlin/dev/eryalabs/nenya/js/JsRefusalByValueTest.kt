@@ -90,7 +90,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Forty-three of `JsSurfaceTest.ENTRY_POINTS`' forty-four: `capabilities` takes nothing, so it
+         * Forty-four of `JsSurfaceTest.ENTRY_POINTS`' forty-five: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -137,6 +137,7 @@ class JsRefusalByValueTest {
             "proposalFeeSighting",
             "acceptanceFeeSighting",
             "paymentRequestFeeSighting",
+            "openOrderFromProposal",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1134,6 +1135,24 @@ class JsRefusalByValueTest {
 
         val proposed = JsOrder(OrderMachine().open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS)))
         val messages = OrderFixtures.messages(OrderFixtures.ORDER_INDEX, stream = 0)
+
+        // T72: the order opened from the rumor itself, so the machine and the rumor are what can be spoiled.
+        fun openedFrom(what: String, at: JsOrderMachine = machine, rumor: JsRumor = JsRumor(messages.proposalRumor)) =
+            record(what, call(::openOrderFromProposal) { openOrderFromProposal(at, rumor) })
+        for (bad in HOSTILE_DECIMALS) {
+            openedFrom("openOrderFromProposal releaseTimeoutSeconds=`$bad`", at = JsOrderMachine(environment, releaseTimeoutSeconds = bad))
+            openedFrom(
+                "openOrderFromProposal verificationTimeoutSeconds=`$bad`",
+                at = JsOrderMachine(environment, verificationTimeoutSeconds = bad),
+            )
+        }
+        for (clock in HOSTILE_CLOCKS) {
+            openedFrom("openOrderFromProposal under a hostile clock", at = JsOrderMachine(JsEnvironment(nowSeconds = clock)))
+        }
+        openedFrom("openOrderFromProposal of a status update", rumor = JsRumor(messages.acceptanceRumor))
+        openedFrom("openOrderFromProposal of a receipt", rumor = JsRumor(messages.receiptRumor(Payee.PROVIDER)))
+        openedFrom("openOrderFromProposal of a chat", rumor = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())))
+
         val blob = DeliveryFixtures.blob()
         val commitment = JsBoundaryFixtures.crossed(blob.commitment)
         val served = encodeLowerHex(blob.served)
