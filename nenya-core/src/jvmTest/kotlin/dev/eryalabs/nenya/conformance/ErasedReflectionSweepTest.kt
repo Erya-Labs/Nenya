@@ -227,10 +227,11 @@ class ErasedReflectionSweepTest {
             // `genericParameterTypes` and needs no pin. T69 moved them to 666 and 771 with the money
             // path's imports, its KDoc paragraph and `problemWith`'s string-input overload — the same
             // two reads, unchanged, declared on the same terms; its own reflection reads
-            // `genericParameterTypes` too.
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:666" to
+            // `genericParameterTypes` too. T70 moved them to 673 and 778 with one import and the §12
+            // item 2 scan's sweep target — the same two reads, unchanged, declared on the same terms.
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:673" to
                 "dispatches through Enum::class.java.isAssignableFrom",
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:771" to
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:778" to
                 "tests membership in hostileShapes(), a set of Class objects; its KDoc says the " +
                 "erasure is deliberate, because a filter written against the parameterised type " +
                 "would see nothing at all",

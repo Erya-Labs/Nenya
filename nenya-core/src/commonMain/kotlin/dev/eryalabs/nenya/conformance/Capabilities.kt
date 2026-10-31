@@ -587,8 +587,14 @@ public object Capabilities {
                 "clause closes a channel for are the ones a *public* event has no reason to " +
                 "carry. On that reading: this library writes nothing into a payment layer — it " +
                 "builds no BOLT-11 description and no wallet memo — logs nothing at all, and " +
-                "emits only listings and public bids, neither of which has a field an order " +
-                "id, an invoice or a preimage could reach. §12 item 5's `g` and `location` are " +
+                "emits only listings and public bids. Both carry free text — `content`, " +
+                "`summary`, extension tags — that an author could paste a value into, so " +
+                "`ListingWriter` and `BidWriter` refuse an event carrying a BOLT-11 invoice in " +
+                "`content` or in any element of any tag, by §12 item 2's automatic check: a " +
+                "maximal ASCII letter-and-digit run, lowercased when it carries no lowercase " +
+                "letter, that `Bolt11Invoice.parse` accepts. An invoice split across runs or " +
+                "otherwise encoded is not found, and an order id or a preimage is not looked " +
+                "for. §12 item 5's `g` and `location` are " +
                 "refused on read and unemittable on write. Every type holding one of §12 item " +
                 "11's values redacts " +
                 "it from its string representation, with a control per type asserting the full " +

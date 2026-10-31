@@ -11,6 +11,7 @@ import dev.eryalabs.nenya.delivery.DeliverableRelease
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
 import dev.eryalabs.nenya.delivery.ServedBytesVerified
 import dev.eryalabs.nenya.listing.AuthoredListing
+import dev.eryalabs.nenya.listing.PublicEventInvoiceScan
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingBuild
 import dev.eryalabs.nenya.listing.ListingSide
@@ -365,6 +366,12 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
                     { BidWriter.bid(bidWith(c.input, wellFormedPubkey(c.input), text)); Unit },
                 )
             }
+        },
+        // T70's §12 item 2 scan, which both writers run over every string they emit. Each hostile
+        // string as `content`, beside the corpus entry's own tag list, so every run the scan cuts
+        // reaches `Bolt11Reference.recognise` and, past it, `Bolt11Invoice.parse`.
+        Target("PublicEventInvoiceScan.find", Needs.NOTHING) { c ->
+            c.strings.map { text -> { PublicEventInvoiceScan.find(text, c.input.tags); Unit } }
         },
     )
 

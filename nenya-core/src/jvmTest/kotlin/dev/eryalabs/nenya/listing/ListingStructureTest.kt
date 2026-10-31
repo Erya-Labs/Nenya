@@ -98,6 +98,12 @@ class ListingStructureTest {
             // (§5.5). The query's author is the caller, so nothing in it is a counterparty's say-so,
             // and `matches` takes a decoded `Listing`, never a String.
             "BoardQuery.<init>",
+            // T70's §12 item 2 scan: the `content` and tags of an event this library is about to
+            // construct, read for an invoice and never as a fact about anybody; and its answer, which
+            // carries the name of the tag the invoice was in. Both are `internal`, and are here only
+            // because Kotlin's `internal` is public on the JVM.
+            "PublicEventInvoiceScan.find",
+            "PublicEventInvoiceScan\$Found.<init>",
         )
 
         fun mainClasses(): List<Class<*>> {

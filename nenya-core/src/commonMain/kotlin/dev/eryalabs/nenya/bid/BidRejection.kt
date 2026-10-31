@@ -122,7 +122,7 @@ public enum class BidRejection {
      */
     MALFORMED_TAG,
 
-    // The three below are `BidWriter`'s alone. `Bid.decode` takes a `CheckedEvent`, whose event
+    // The four below are `BidWriter`'s alone. `Bid.decode` takes a `CheckedEvent`, whose event
     // fields §4.1 has already accepted, and reads an extension tag rather than being handed one.
 
     /**
@@ -145,6 +145,14 @@ public enum class BidRejection {
      * parameter, where §5.3's Encoding column is applied and §4.1's position fixed.
      */
     ROW_IS_NOT_AN_EXTENSION,
+
+    /**
+     * §12 item 2: the bid would carry a BOLT-11 invoice string — in its `content` or in any element
+     * of any tag — and "any invoice string MUST NOT appear in a public event". The same constant as
+     * `ListingRejection.INVOICE_IN_PUBLIC_EVENT`, naming the carrying tag, or `null` for `content`,
+     * a tag name, or a name that itself contains the invoice, and never the invoice.
+     */
+    INVOICE_IN_PUBLIC_EVENT,
 }
 
 /**

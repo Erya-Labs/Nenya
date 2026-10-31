@@ -295,6 +295,12 @@ public sealed interface ListingBuild {
  *    every `1`/`0–1` row at most once, every `≥2` row at least twice. It is derived rather than
  *    listed, so a MUST row added to §5.3 that this writer has no parameter for makes it refuse
  *    everything rather than quietly emit a non-conformant listing.
+ * 8. §12 item 2's automatic check: a BOLT-11 invoice string in `content` or in any element of any
+ *    tag, extra tags and tag names included ([ListingRejection.INVOICE_IN_PUBLIC_EVENT], naming the
+ *    carrying tag, or `null` for `content`, a tag name, or a name that itself contains the invoice).
+ *    An invoice is a maximal run of ASCII
+ *    letters and digits, lowercased when it carries no lowercase letter, that `Bolt11Invoice.parse`
+ *    accepts; `PublicEventInvoiceScan` states the rule and what it does not see.
  *
  * Pure computation: no clock, no randomness, no I/O. The `created_at` is the caller's (§4.6).
  */
@@ -439,6 +445,15 @@ public object ListingWriter {
         for (tag in listing.extraTags) tags += tag.toList()
 
         vocabularyProblem(kind, tags)?.let { return it }
+
+        PublicEventInvoiceScan.find(listing.content, tags)?.let { found ->
+            return refusal(
+                ListingRejection.INVOICE_IN_PUBLIC_EVENT,
+                found.tag,
+                "§12 item 2: an invoice string MUST NOT appear in a public event, and this listing " +
+                    "would carry one in ${where(found.tag)}",
+            )
+        }
 
         val event = try {
             WireEvent(author, listing.createdAt, kind, tags, listing.content)
@@ -682,6 +697,10 @@ public object ListingWriter {
         }
         return null
     }
+
+    /** Where §12 item 2's scan found an invoice, as words that name a tag and never a value. */
+    private fun where(tag: String?): String =
+        if (tag == null) "its `content` or a tag name" else "a `$tag` tag"
 
     private fun refusal(
         reason: ListingRejection,

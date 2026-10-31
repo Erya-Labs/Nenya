@@ -155,6 +155,16 @@ public enum class ListingRejection {
      * the [TagException] the tag codec threw. See [ListingException].
      */
     MALFORMED_TAG,
+
+    /**
+     * §12 item 2: the listing would carry a BOLT-11 invoice string — in its `content` or in any
+     * element of any tag — and "any invoice string MUST NOT appear in a public event".
+     *
+     * Only `ListingWriter` answers this, as its automatic check over the events it constructs; the
+     * decoder does not look. The refusal names the carrying tag, or `null` for `content`, a tag
+     * name, or a name that itself contains the invoice, and never the invoice. `PublicEventInvoiceScan` states what counts as one.
+     */
+    INVOICE_IN_PUBLIC_EVENT,
 }
 
 /**

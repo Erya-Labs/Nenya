@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.bid
 
 import dev.eryalabs.nenya.listing.ListingWriter
+import dev.eryalabs.nenya.listing.PublicEventInvoiceScan
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.tag.Coordinate
@@ -242,6 +243,11 @@ public sealed interface BidBuild {
  *    ([BidRejection.ROW_IS_NOT_AN_EXTENSION]).
  * 6. A final audit, derived: every tag in `Bid.requiredTags()` present, `t` carrying `nenya`, no
  *    scope tag or single-occurrence §5.3 row twice, no `E`/`e`, no `item`, no `g` or `location`.
+ * 7. §12 item 2's automatic check: a BOLT-11 invoice string in `content` or in any element of any
+ *    tag, extra tags and tag names included ([BidRejection.INVOICE_IN_PUBLIC_EVENT], naming the
+ *    carrying tag, or `null` for `content`, a tag name, or a name that itself contains the
+ *    invoice), by the rule `PublicEventInvoiceScan`
+ *    states — the same one `ListingWriter` applies.
  *
  * Pure computation: no clock, no randomness, no I/O. The `created_at` is the caller's (§4.6).
  */
@@ -337,6 +343,15 @@ public object BidWriter {
         for (tag in bid.extraTags) tags += tag.toList()
 
         auditProblem(tags)?.let { return it }
+
+        PublicEventInvoiceScan.find(bid.content, tags)?.let { found ->
+            return refusal(
+                BidRejection.INVOICE_IN_PUBLIC_EVENT,
+                found.tag,
+                "§12 item 2: an invoice string MUST NOT appear in a public event, and this bid would " +
+                    "carry one in " + if (found.tag == null) "its `content` or a tag name" else "a `${found.tag}` tag",
+            )
+        }
 
         val event = try {
             WireEvent(bidder, bid.createdAt, NenyaKind.PUBLIC_BID, tags, bid.content)
