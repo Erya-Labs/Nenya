@@ -15,7 +15,7 @@ JavaScript. Other implementations can be written against the specification alone
 
 ## Status
 
-- The specification is a draft: NENYA-1 version `1`, revision `1.12`.
+- The specification is a draft: NENYA-1 version `1`, revision `1.13`.
 - The library is a proof of concept. It is not published to any package registry and is not
   intended for production use.
 - The request kind `30404` is not registered in the nostr kind registry (`OPEN-9`).

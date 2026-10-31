@@ -115,7 +115,7 @@ public class Bid internal constructor(
      * from the tags, "so a bid whose prose and tags disagree is a display defect, never a terms
      * dispute". This codec never reads it, which is how that rule is kept — a parser that never
      * looks cannot be fooled by what it would have found. §6's "`content` MUST be plain text" binds
-     * the publisher and the renderer (§5.4, §12.10: no embedded scripting, no auto-fetch); it is
+     * the publisher and the renderer (§5.4, §12 item 10: no embedded scripting, no auto-fetch); it is
      * not a shape this codec can check, and pretending otherwise would be the §17 over-claim.
      */
     public val content: String,
@@ -207,7 +207,7 @@ public class Bid internal constructor(
     /** §5.3's `p` tags as the tag codec decoded them. Exactly one on a bid, the listing author's. */
     public val pubkeyRefs: List<PubkeyRef> get() = tags.pubkeyRefs
 
-    /** §5.3's `image` tags, in order. Each is an `https:` URL; §12.10 forbids auto-fetching them. */
+    /** §5.3's `image` tags, in order. Each is an `https:` URL; §12 item 10 forbids auto-fetching them. */
     public val images: List<ImageRef> get() = tags.images
 
     /**

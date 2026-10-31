@@ -164,7 +164,7 @@ public class Listing internal constructor(
     /** §5.3's `m` — the desired or produced MIME type, NIP-94 semantics and relay-filterable. */
     public val mimeType: String? get() = tags.mimeType
 
-    /** §5.3's `image` tags, in order. Each is an `https:` URL; §12.10 forbids auto-fetching them. */
+    /** §5.3's `image` tags, in order. Each is an `https:` URL; §12 item 10 forbids auto-fetching them. */
     public val images: List<ImageRef> get() = tags.images
 
     /** §5.3's `expiration` (NIP-40), in Unix seconds. Enforced by [activity], never by the relay (§5.6). */

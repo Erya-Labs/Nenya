@@ -14,7 +14,7 @@ library, not an application or a service; `nenya-core` is one reference implemen
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.12`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.13`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and its reserved identifiers are not registered.
 
 A short non-normative summary is [the overview](NENYA-1-overview.md). The revision history is in
@@ -350,7 +350,7 @@ order rumors (see §6, §6.1, §7.4, §7.5). A shared tag validator MUST take th
 | `status` | both | 0–1 | SHOULD | `["status", "<value>"]` | Offers: `active` \| `sold` only. Requests: `active` \| `awarded` \| `fulfilled` \| `cancelled`. Absent means `active`. **This is the listing vocabulary, not the order-state vocabulary of §11.1**, which rides the same tag name on a sealed `kind:16` `type=3` and shares only the token `cancelled`, with a different meaning. One codec MUST NOT serve both (§11.1). |
 | `t` | both | ≥2 | MUST | `["t", "<token>"]` | MUST include `nenya` and exactly one of `request` / `wts`. Further `t` tags are free-form categories. Tokens MUST be lowercase with no whitespace; implementations MUST lowercase on write and SHOULD match case-insensitively on read, because relay tag indexes are byte-exact. |
 | `m` | both | 0–1 | SHOULD | `["m", "<mime type>"]` | Desired/produced MIME type of the deliverable, NIP-94 semantics. Single-letter, therefore relay-filterable — this is how a client offers "show me only video jobs" without downloading the board. |
-| `image` | both | 0–n | MAY | `["image", "<url>", "<width>x<height>"]` | Reference material (requests) or samples (offers). MUST be an `https:` URL, never inline bytes and never a `data:` URI. See §12.10 on auto-fetch. |
+| `image` | both | 0–n | MAY | `["image", "<url>", "<width>x<height>"]` | Reference material (requests) or samples (offers). MUST be an `https:` URL, never inline bytes and never a `data:` URI. See §12 item 10 on auto-fetch. |
 | `expiration` | both | 0–1 | SHOULD | `["expiration", "<unix seconds>"]` | NIP-40. See §5.6. |
 | `alt` | both | 0–1 | MUST on requests, SHOULD on offers | `["alt", "<text>"]` | NIP-31 fallback rendering. |
 | `nenya` | both | 1 | MUST | `["nenya", "1"]` | Protocol version. |
@@ -367,7 +367,7 @@ order rumors (see §6, §6.1, §7.4, §7.5). A shared tag validator MUST take th
 A listing's `content` is a human-readable description and, per NIP-99, SHOULD be Markdown. It
 MUST NOT carry structured terms: a price, deadline, fee or URL in `content` has no effect. An
 implementation rendering `content` MUST NOT execute embedded scripts, MUST NOT auto-fetch remote
-resources it references (§12.10), and SHOULD render it as plain text if it cannot do both.
+resources it references (§12 item 10), and SHOULD render it as plain text if it cannot do both.
 
 ### 5.5 Discovery
 

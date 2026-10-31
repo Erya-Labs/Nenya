@@ -115,7 +115,7 @@ public class Coordinate(kind: Int, pubkey: String, dValue: String) {
  * §5.3's `image` tag: `["image", "<url>", "<width>x<height>"]`.
  *
  * §5.3 fixes the scheme and gives no latitude: an `image` MUST be an `https:` URL, "never inline
- * bytes and never a `data:` URI". §12.10 is the reason — a `data:` URI puts arbitrary bytes into
+ * bytes and never a `data:` URI". §12 item 10 is the reason — a `data:` URI puts arbitrary bytes into
  * a public listing, and a plain `http:` URL discloses the reader's interest to a network observer
  * as well as to the host.
  *

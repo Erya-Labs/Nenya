@@ -129,7 +129,7 @@ public class TagSet internal constructor(
     /** §5.3's `m` — the desired or produced MIME type of the deliverable, NIP-94 semantics. */
     public val mimeType: String?,
 
-    /** §5.3's `image` tags, in order, each an `https:` URL (§5.3, §12.10). */
+    /** §5.3's `image` tags, in order, each an `https:` URL (§5.3, §12 item 10). */
     public val images: List<ImageRef>,
 
     /** §5.3's `expiration` (NIP-40), in Unix seconds. Enforced by the consumer (§5.6), not here. */
