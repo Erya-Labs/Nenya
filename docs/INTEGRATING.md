@@ -200,16 +200,27 @@ copy of a message you sent yourself, which is how your client gets a `JsRumor` f
 
 The order steps below follow **the buyer's client**. It receives every message the order machine
 needs, and it holds the stored payment requests the receipt checks compare against. The provider's
-client builds and sends its own messages at the matching steps.
+client builds and sends its own messages at the matching steps; [The provider's side](#the-providers-side)
+walks them in its own order.
+
+Every step ends with a `Calls:` line naming the entry points the step uses, in the order it uses
+them. Where a step names two calls as alternatives, both are listed. `seal` and `open` stand for
+`sealAsync` and `openAsync` too.
 
 1. **Post to the board** (§5). The provider builds an offer with `buildListingOffer`, or the buyer
    builds a request with `buildListingRequest`. Sign it and publish it.
+
+   Calls: `buildListingOffer`, `buildListingRequest`.
 2. **Read the board** (§5.5, §5.6). Decode each event with `decodeListing`. Relays OR a multi-value
    filter, so re-check each result with `matchesBoard`. Before acting on a listing, ask
    `listingActivity` or `checkDeadlines`.
+
+   Calls: `decodeListing`, `matchesBoard`, `listingActivity`, `checkDeadlines`.
 3. **Bid** (§6), where the listing invites it: `buildBid` for a public bid, or `buildPrivateBid`
    sealed to the listing's author. Read public bids with `decodeBid`, and open private bids and
    read them with `decodePrivateBid`. A bid binds nobody and does not move an order.
+
+   Calls: `buildBid`, `buildPrivateBid`, `seal`, `decodeBid`, `open`, `decodePrivateBid`.
 4. **Propose** (§7.5). The buyer draws a new order id — 32 bytes from a secure random source, as
    64 hex characters (§7.4) — builds the proposal with `buildProposalAgainst`, then seals and sends
    it. If the buyer chose a public bid, build it with `buildProposalForBid` instead: it copies the
@@ -220,12 +231,18 @@ client builds and sends its own messages at the matching steps.
    same order id and terms (for a bid, the bid's price, fee and `deliver_by`, and `acceptBy`). That
    call *is* the proposal step: the order starts in `proposed`, and stepping it again with a
    `proposal` event is refused.
+
+   Calls: `buildProposalAgainst`, `buildProposalForBid`, `seal`, `openOrder`.
 5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
    acceptance with `buildAgreementAgainst`, then seals and sends it. The buyer opens it, can ask
    `checkAcceptance` whether it is an acceptance or a counter-proposal, and steps the order with
    `acceptance_received`.
+
+   Calls: `open`, `decodeProposal`, `buildAgreementAgainst`, `seal`, `checkAcceptance`, `stepOrder`.
 6. **Commit to the deliverable** (§10.1). The provider builds `buildCommitment`, seals and sends it. The
    buyer opens it, reads it with `decodeCommitment` and steps the order with `delivery_committed`.
+
+   Calls: `buildCommitment`, `seal`, `open`, `decodeCommitment`, `stepOrder`.
 7. **Request payment** (§8.6). The provider — and the fee recipient, where the terms give a non-zero
    fee — each build `buildPaymentRequest`, seal and send it. The buyer opens each and accepts it with
    `acceptPaymentRequest`, which writes the record to the store. For a fee request, give
@@ -237,6 +254,8 @@ client builds and sends its own messages at the matching steps.
    copying the bid's `fee` tag yourself. A bid with no `fee` tag gives a sighting with no `feeTag`,
    which the comparison skips (§8.4). Then the buyer steps the order with `payment_requests_received`,
    passing the accepted records.
+
+   Calls: `buildPaymentRequest`, `seal`, `open`, `bidFeeSighting`, `privateBidFeeSighting`, `acceptPaymentRequest`, `stepOrder`.
 8. **Pay and check the receipts** (§9). The buyer pays each invoice with its own wallet, builds
    `buildReceipt` for each payment, then seals and sends it. The buyer opens its own `toSelf` copy of
    each receipt and checks it against the stored request: with `verifySettlement` and the accepted
@@ -246,20 +265,85 @@ client builds and sends its own messages at the matching steps.
    steps the order with `receipts_verified`, passing those settlements. §11.2 allows `paid` only
    once **all** required receipts are verified, so read `stepOrder`'s answer rather than assuming
    the order moved.
+
+   Calls: `buildReceipt`, `seal`, `open`, `verifySettlement`, `verifyFeeReceipt`, `stepOrder`.
 9. **Release** (§10.3). The provider builds `buildReleaseAfterPayment` from its own commitment and
    the settlement its own `verifySettlement` call answered for the buyer's receipt of its invoice. It
    is refused unless that settlement is evidenced, is the provider's payment and is for the
    commitment's order. For a free order, which has no payment to check, the provider builds
    `buildRelease` instead. The provider seals and sends the release. The buyer opens it,
    reads it with `decodeRelease` and steps the order with `deliverable_released`.
+
+   Calls: `verifySettlement`, `buildReleaseAfterPayment`, `buildRelease`, `seal`, `open`, `decodeRelease`, `stepOrder`.
 10. **Check the delivery** (§10.4). The buyer fetches the file, checks it with `verifyServedBytes`,
     decrypts it, and steps the order with `delivery_verified` (passing the served and decrypted
     bytes) or `delivery_refused`.
+
+    Calls: `verifyServedBytes`, `stepOrder`.
 
 Along the way, either side can send a chat message with `buildChat` and a status update (for
 example `cancelled`) with `buildStatusUpdate`, reading a status update with `decodeStatusUpdate`.
 Step the order with `clock_checked` whenever your client wants deadlines applied. An order only
 moves when `stepOrder` says it did, so always read its answer.
+
+---
+
+## The provider's side
+
+The same trade, followed by **the provider's client**. The provider never pays, so it never builds a
+receipt. What it has to get right is that it releases the deliverable only once the library has
+checked the buyer's payment of its own invoice (§10.3).
+
+Several later calls take a `JsRumor` for a message the provider handled earlier: the buyer's
+proposal, and its own acceptance, commitment and payment request. `open` answers each of them, its
+own messages from their `toSelf` copies. Keep each one.
+
+1. **Post or bid** (§5, §6). Post an offer with `buildListingOffer`, sign it and publish it. Or read
+   the requests on the board with `decodeListing`, re-check each with `matchesBoard`, ask
+   `checkDeadlines` before acting on one, and bid: `buildBid` for a public bid, or `buildPrivateBid`
+   sealed to the request's author.
+
+   Calls: `buildListingOffer`, `decodeListing`, `matchesBoard`, `checkDeadlines`, `buildBid`, `buildPrivateBid`, `seal`.
+2. **Open and answer a proposal** (§7.5, §7.6). Open the buyer's proposal and read its terms with
+   `decodeProposal`. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
+   listing the proposal is for. It is refused, and builds nothing, when the proposal is for another
+   listing, when the listing has expired, or when the clock has reached the proposal's own
+   `expiration`, which is the deadline for accepting it. Where either carries a deadline and your
+   clock gives no reading, it is refused too. Seal and send the acceptance, then open its `toSelf`
+   copy.
+
+   Calls: `open`, `decodeProposal`, `buildAgreementAgainst`, `seal`.
+3. **Commit to the deliverable** (§10.1). Encrypt the file (§10.2) and build the commitment with
+   `buildCommitment`. It goes before any payment request. Seal and send it, then open its `toSelf`
+   copy: step 6 builds the release from that copy.
+
+   Calls: `buildCommitment`, `seal`, `open`.
+4. **Request payment and keep the request** (§8.6). Build a payment request for your own invoice with
+   `buildPaymentRequest`, payee `provider`, for exactly the price. Seal and send it, then open its
+   `toSelf` copy and accept it into your own store with `acceptPaymentRequest`, giving it the
+   proposal, your acceptance and your own key as the provider. Without that stored request, step 5
+   has nothing to check the buyer's receipt against, and the receipt is refused. `acceptPaymentRequest`
+   reads your clock, and refuses with `CLOCK_UNAVAILABLE` if it has none.
+
+   Calls: `buildPaymentRequest`, `seal`, `open`, `acceptPaymentRequest`.
+5. **Check the buyer's receipt** (§9.2). When the buyer's receipt for your invoice arrives, open it
+   and check it with `verifySettlement`, giving it your store and the terms you accepted. Read
+   `settlement.evidenced` on the answer, not `ok`: a receipt on a rail with no evidence rule, such as
+   `bitcoin`, is answered `ok` and evidences nothing (§9.4). Your wallet saying "paid" is not
+   evidence either (§9.1).
+
+   Calls: `open`, `verifySettlement`.
+6. **Release** (§10.3). Build the release with `buildReleaseAfterPayment`, giving it your commitment
+   from step 3, the settlement step 5 answered, and the key and nonce you encrypted the file with. It
+   copies the order and the commitment's values, so do not type them again. It is refused, and builds
+   nothing, unless the settlement is evidenced, is the provider's payment, and is for the commitment's
+   order, and unless the commitment was sealed by the author you are building as. The fee receipt is
+   addressed to the fee recipient, who checks it; this call does not ask for it, and this side does not
+   check it. A free order, with a price of `0`, has no payment to check, and `buildReleaseAfterPayment`
+   refuses it: build its release with `buildRelease` instead, skipping steps 4 and 5. Seal and send the
+   release.
+
+   Calls: `buildReleaseAfterPayment`, `buildRelease`, `seal`.
 
 ---
 
