@@ -227,6 +227,35 @@ public fun checkAcceptance(
     JsAcceptanceCheck(acceptanceAnswer(proposalRumor, statusRumor, providerPubkey), null)
 }
 
+/**
+ * §7.2's attributed sender mapped to its §11.2 party by the library, not by the page. T75.
+ *
+ * [JsOrderEvent.fromParty] is the party a page says sealed a rumor, and a page labelling every update
+ * `BUYER` lets any key holding the order id cancel. This answers that label from the proposal and
+ * the key §7.2 attributed — the token [JsOrderEvent.fromParty] takes, or `null` for a key that is no
+ * party of this proposal or is two of them at once.
+ *
+ * The facade performs **no check of its own**: one call to `OrderProposal.decode` and one to
+ * `OrderProposal.partyOf`, whose two refusals of the provider key are [checkAcceptance]'s first two.
+ * Nothing here moves an order; a party answered is still offered to [stepOrder], whose machine decides
+ * what that party may do.
+ *
+ * @param proposalRumor the `kind:16` `type=1`, as [open] handed it back.
+ * @param providerPubkey the provider key the page resolved **independently of the proposal** — see
+ *   [JsOrderEvent.providerPubkey].
+ * @param senderPubkey the key [open] attributed the rumor being labelled to — `JsRumor.pubkey`.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun partyOf(
+    proposalRumor: JsRumor,
+    providerPubkey: String,
+    senderPubkey: String,
+): JsPartyResult = jsGuarded({ JsPartyResult(null, it) }) {
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    JsPartyResult(proposal.partyOf(senderPubkey, providerPubkey), null)
+}
+
 // =================================================================================================
 // The boundary types.
 // =================================================================================================
@@ -325,6 +354,52 @@ public class JsAcceptanceCheck internal constructor(
         null -> "JsAcceptanceCheck(refused: $reason)"
         else -> "JsAcceptanceCheck($kind)"
     }
+}
+
+/**
+ * What [partyOf] answered: a party, no party, or the refusal.
+ *
+ * [ok] says an answer came back, and **an answer may be no party**: [party] is `null`, and [kind]
+ * `"not_a_party"`, for a key that is none of the proposal's three, or two of them. A page writing
+ * `if (result.ok)` and then reading [party] must handle that `null` as "not a party", never as a
+ * default.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsPartyResult internal constructor(
+    private val answer: Party?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"party"`, `"not_a_party"` or `"refused"`. */
+    public val kind: String
+        get() = when {
+            refusal != null -> "refused"
+            answer != null -> "party"
+            else -> "not_a_party"
+        }
+
+    /** True when [partyOf] answered rather than refused — whether or not the key is a party. */
+    public val ok: Boolean get() = refusal == null
+
+    /** `BUYER`, `PROVIDER` or `FEE_RECIPIENT` — the [JsOrderEvent.fromParty] token — or `null`. */
+    public val party: String? get() = answer?.name
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `ChannelRejection` for the provider key's refusals. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag or argument the refusal is about, where the rule names one. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = refusal?.detail
+
+    /** Names the party or the refusal reason — never a key. */
+    override fun toString(): String =
+        if (ok) "JsPartyResult(${party ?: kind})" else "JsPartyResult(refused: $reason)"
 }
 
 /**

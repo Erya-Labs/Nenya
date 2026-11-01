@@ -8,6 +8,7 @@ import dev.eryalabs.nenya.order.OrderEvent
 import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.order.OrderStatusCodec
 import dev.eryalabs.nenya.order.OrderTerms
+import dev.eryalabs.nenya.order.Party
 import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.tag.ItemRef
 import dev.eryalabs.nenya.tag.PubkeyRef
@@ -451,30 +452,7 @@ public class OrderProposal internal constructor(
      *   constant for why it is not one of the others.
      */
     public fun accepts(update: OrderStatusMessage, provider: String): Acceptance {
-        val resolved = try {
-            readPubkeyHex(provider, "the provider's pubkey")
-        } catch (refused: TagException) {
-            throw ChannelException(
-                ChannelRejection.MALFORMED_PROVIDER_PUBKEY,
-                ChannelVocabulary.COUNTERPARTY,
-                "§4.3 fixes a pubkey as exactly 64 hex characters and §7.6 compares the provider's " +
-                    "against the key that sealed the acceptance; an operand no seal can equal " +
-                    "would refuse every acceptance for this order and look like a fault in the " +
-                    "counterparty's implementation",
-                refused,
-            )
-        }
-        if (resolved == buyer) {
-            throw ChannelException(
-                ChannelRejection.PROVIDER_IS_BUYER,
-                ChannelVocabulary.COUNTERPARTY,
-                "§7.6 requires the provider's key be established independently of the proposal and " +
-                    "says an acceptance sealed by the buyer MUST be rejected even where every term " +
-                    "is byte-identical: an acceptance is the counterparty's act. A resolution that " +
-                    "returned this proposal's own author has read the provider out of the message " +
-                    "being judged, which is the one place §7.6 forbids taking it from",
-            )
-        }
+        val resolved = resolvedProvider(provider)
         if (update.order != order) {
             throw ChannelException(
                 ChannelRejection.DIFFERENT_ORDER,
@@ -501,6 +479,86 @@ public class OrderProposal internal constructor(
         val divergent = signedTerms.divergenceFrom(update.signedTerms)
         return if (divergent.isEmpty()) Acceptance.Accepted(order, terms, resolved)
         else Acceptance.CounterProposal(readOnlyListOf(divergent))
+    }
+
+    /**
+     * §7.2's attributed sender mapped to its §11.2 party, against this proposal. T75.
+     *
+     * §7.2 establishes **which key** sealed a rumor; §11.2's sender rules are written in parties.
+     * Between the two sits a mapping a caller otherwise makes by hand, and a caller that labels
+     * every update `BUYER` lets any key holding the order id cancel it. The three keys come from
+     * here, never from the message being labelled:
+     *
+     * - [Party.BUYER] — [buyer], the key §7.4 makes a `type=1`'s sender;
+     * - [Party.PROVIDER] — [provider] **as the caller resolved it** (decision H), as [accepts] takes it;
+     * - [Party.FEE_RECIPIENT] — [feeRecipient], the third key §8.1's `fee` term names.
+     *
+     * ### `null` is "not one party", and never a pick
+     *
+     * A key that is none of the three — a stranger, or a string that is not a pubkey at all — is
+     * `null`. So is a key holding **two** of those roles: a proposal naming its buyer or its provider
+     * as fee recipient makes that key both, and §11.2's rules differ between them (a cancellation
+     * from the provider ends the order, one from the fee recipient does not). Choosing either would
+     * be this function deciding the sender's standing, so it chooses neither.
+     *
+     * Performs no other check: it reads no message, no status and no clock, and it never moves an
+     * order. Whatever party it answers is still offered to `OrderMachine`, whose own sender rules
+     * decide what that party may do.
+     *
+     * @param sender the key §7.2 attributed a rumor to — `AttributedRumor`'s author. Accepted in
+     *   either case and normalised to §4.3's lowercase, exactly as [provider] is.
+     * @param provider as [accepts]' parameter, and refused the same way, first, whatever [sender] is.
+     * @throws ChannelException [ChannelRejection.MALFORMED_PROVIDER_PUBKEY] or
+     *   [ChannelRejection.PROVIDER_IS_BUYER], as [accepts] throws them.
+     */
+    public fun partyOf(sender: String, provider: String): Party? {
+        val resolved = resolvedProvider(provider)
+        val key = try {
+            readPubkeyHex(sender, "the sender's pubkey")
+        } catch (notAKey: TagException) {
+            // Not a refusal: a string no seal can carry is a key holding none of the three roles,
+            // which is this function's `null` and not a fault in the caller's resolution.
+            return null
+        }
+        val roles = buildList {
+            if (key == buyer) add(Party.BUYER)
+            if (key == resolved) add(Party.PROVIDER)
+            if (key == feeRecipient) add(Party.FEE_RECIPIENT)
+        }
+        return roles.singleOrNull()
+    }
+
+    /**
+     * [accepts]' first two refusals, which are about the **argument**: the caller's provider key
+     * read as §4.3 reads one, and refused if it is this proposal's own author. One function, shared
+     * with [partyOf], so the two cannot come to disagree about which provider keys are usable.
+     */
+    private fun resolvedProvider(provider: String): String {
+        val resolved = try {
+            readPubkeyHex(provider, "the provider's pubkey")
+        } catch (refused: TagException) {
+            throw ChannelException(
+                ChannelRejection.MALFORMED_PROVIDER_PUBKEY,
+                ChannelVocabulary.COUNTERPARTY,
+                "§4.3 fixes a pubkey as exactly 64 hex characters and §7.6 compares the provider's " +
+                    "against the key that sealed the acceptance; an operand no seal can equal " +
+                    "would refuse every acceptance for this order and look like a fault in the " +
+                    "counterparty's implementation",
+                refused,
+            )
+        }
+        if (resolved == buyer) {
+            throw ChannelException(
+                ChannelRejection.PROVIDER_IS_BUYER,
+                ChannelVocabulary.COUNTERPARTY,
+                "§7.6 requires the provider's key be established independently of the proposal and " +
+                    "says an acceptance sealed by the buyer MUST be rejected even where every term " +
+                    "is byte-identical: an acceptance is the counterparty's act. A resolution that " +
+                    "returned this proposal's own author has read the provider out of the message " +
+                    "being judged, which is the one place §7.6 forbids taking it from",
+            )
+        }
+        return resolved
     }
 
     /**

@@ -90,7 +90,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Forty-four of `JsSurfaceTest.ENTRY_POINTS`' forty-five: `capabilities` takes nothing, so it
+         * Forty-five of `JsSurfaceTest.ENTRY_POINTS`' forty-six: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -138,6 +138,7 @@ class JsRefusalByValueTest {
             "acceptanceFeeSighting",
             "paymentRequestFeeSighting",
             "openOrderFromProposal",
+            "partyOf",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1345,6 +1346,20 @@ class JsRefusalByValueTest {
                 check.kind != "refused", check.kind, check.reason, check.reasonVocabulary, check.detail,
             )
         }
+
+        // T75: the provider key is refused as `checkAcceptance` refuses it; a hostile sender is no party.
+        fun party(what: String, rumor: JsRumor = JsRumor(messages.proposalRumor), provider: String, sender: String) {
+            val answer = call(::partyOf) { partyOf(rumor, provider, sender) }
+            if (!answer.ok) assertNull(answer.party, "$what: a refusal names no party")
+            record(what, answer.ok, answer.kind, answer.reason, answer.reasonVocabulary, answer.detail)
+        }
+        val provider = SettlementFixtures.provider(OrderFixtures.ORDER_INDEX)
+        for (bad in HOSTILE_HEX + HOSTILE_TEXTS) {
+            party("partyOf providerPubkey=`$bad`", provider = bad, sender = provider)
+            party("partyOf senderPubkey=`$bad`", provider = provider, sender = bad)
+        }
+        party("partyOf of a status update", rumor = JsRumor(messages.acceptanceRumor), provider = provider, sender = provider)
+        party("partyOf of a chat", rumor = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())), provider = provider, sender = provider)
     }
 
     /**

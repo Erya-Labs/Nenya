@@ -173,6 +173,11 @@ class ChannelStructureTest {
             // against. It could not be a richer type without inventing one for "64 hex characters"
             // that `AttributedRumor.attribute` above does not use either.
             "OrderProposal.accepts",
+            // T75: that same caller-resolved provider key, read and refused exactly as `accepts`
+            // reads and refuses it, beside §7.2's attributed sender key — the key `attribute` above
+            // already established. Both are 64 hex characters compared against the proposal's own
+            // three keys; neither is a claim this codec believes, and the answer is a `Party?`.
+            "OrderProposal.partyOf",
             "Acceptance\$Accepted.<init>",          // that same checked key, carried on the answer
             // §10.1's `["url", …]`, the one value a delivery message publishes as a bare string.
             // It *is* something a counterparty wrote, and it is deliberately not a term: nothing in

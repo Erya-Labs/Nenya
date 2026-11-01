@@ -150,6 +150,8 @@ These rules come from decision **P**:
   an answer rather than a refusal. It is never the verdict.** Read the field that carries the verdict:
   - `checkAcceptance` — `accepted` (and `kind`: acceptance, counter-proposal, or neither);
   - `checkDeadlines` — `permitted`;
+  - `partyOf` — `party`. An `ok` answer with no `party` (`kind` `"not_a_party"`) means the key is
+    none of the three, or holds two roles at once; never fill in a party yourself;
   - `verifySettlement` and `verifyFeeReceipt` — the answer's `settlement.evidenced`. An `ok`
     answer can hold a receipt that proves nothing, and `settlement.checksNotPerformedHere`
     names what was not checked. Never treat a payment as made on `ok` alone;
@@ -409,6 +411,7 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `decodeStatusUpdate` — reads a status update from an opened rumor (§7.4).
 - `decodePrivateBid` — reads a private bid from an opened rumor (§6.1).
 - `checkAcceptance` — compares a status update with the proposal it answers: acceptance, counter-proposal or neither (§7.6).
+- `partyOf` — says whether the key a rumor came from is the buyer, the provider or the fee recipient of a proposal, or none of them (§7.2, §11.2).
 - `decodeCommitment` — reads a delivery commitment from an opened rumor (§10.1).
 - `decodeRelease` — reads a deliverable release from an opened rumor (§10.3).
 - `acceptPaymentRequest` — accepts a payment request against the proposal and acceptance, and stores it (§8.6).
