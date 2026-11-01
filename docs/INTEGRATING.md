@@ -426,4 +426,5 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `openOrder` — starts an order in the state machine (§11).
 - `openOrderFromProposal` — the same, from an order proposal read from an opened rumor, so its order id and terms are the ones it carried (§7.5, §11.2).
 - `stepOrder` — applies one event to an order and answers the new order or the refusal (§11.2).
+- `stepOrderWithStatusUpdate` — applies a received status update to an order, with the sender's party and the order id read from the messages (§7.6, §11.2).
 - `capabilities` — the library's own statement of what it does and does not check (§17).

@@ -1,6 +1,9 @@
 package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.channel.Acceptance
+import dev.eryalabs.nenya.channel.ChannelException
+import dev.eryalabs.nenya.channel.ChannelRejection
+import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
@@ -10,6 +13,7 @@ import dev.eryalabs.nenya.order.Order
 import dev.eryalabs.nenya.order.OrderEvent
 import dev.eryalabs.nenya.order.OrderMachine
 import dev.eryalabs.nenya.order.OrderOutcome
+import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.order.OrderStatusCodec
 import dev.eryalabs.nenya.order.Party
 import dev.eryalabs.nenya.order.DeliveryFailure
@@ -139,6 +143,76 @@ public fun stepOrder(
     JsOrderOutcome(null, it, if (event.type == "delivery_verified") it.deliveryFailure() else null)
 }) {
     JsOrderOutcome(machine.asOrderMachine().on(order.order, event.asOrderEvent()), null)
+}
+
+/**
+ * §11.2's status rows stepped from the sealed `type=3` itself, its sender and order read off the
+ * messages. T76.
+ *
+ * [stepOrder]'s `status_update` takes a `statusToken` and a `fromParty` a page read itself, and a
+ * page passing `BUYER` for every update lets any key holding the order id cancel. This takes the two
+ * rumors and the provider key, and the facade performs **no check of its own**:
+ *
+ * 1. `OrderProposal.decode` and `OrderStatusMessage.decode`, whose refusals come back as values;
+ * 2. the proposal's and the update's `order` ids against [order]'s — either other is
+ *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order;
+ * 3. a `status=accepted` goes exactly where [stepOrder]'s `acceptance_received` sends it — §7.6's
+ *    checked answer through `OrderProposal.accepts` (decision J), so a counter-proposal or an update
+ *    from the wrong key is refused as it is there;
+ * 4. any other status is `OrderEvent.StatusUpdate` from the party `OrderProposal.partyOf` maps the
+ *    update's attributed sender to; `null` — a stranger, or a key holding two roles — is
+ *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
+ * 5. then `OrderMachine.on`, whose own sender rules decide what that party may do.
+ *
+ * @param machine as [stepOrder]'s.
+ * @param order the order as it stands, from [openOrder] or from a previous step.
+ * @param proposalRumor the `kind:16` `type=1` this order was opened on, as [open] handed it back.
+ * @param statusRumor the `kind:16` `type=3` received, as [open] handed it back.
+ * @param providerPubkey the provider key the page resolved **independently of both messages** — see
+ *   [JsOrderEvent.providerPubkey].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun stepOrderWithStatusUpdate(
+    machine: JsOrderMachine,
+    order: JsOrder,
+    proposalRumor: JsRumor,
+    statusRumor: JsRumor,
+    providerPubkey: String,
+): JsOrderOutcome = jsGuarded({ JsOrderOutcome(null, it) }) {
+    val stepper = machine.asOrderMachine()
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    val update = OrderStatusMessage.decode(statusRumor.asBoundRumor("kind:16 type=3 status update"))
+    if (proposal.order != order.order.id || update.order != order.order.id) {
+        throw ChannelException(
+            ChannelRejection.DIFFERENT_ORDER,
+            ChannelVocabulary.ORDER,
+            "§7.4's `${ChannelVocabulary.ORDER}` id binds every message to one order, and the " +
+                "proposal or the update offered here names a different one than the order being " +
+                "stepped; a message about another order moves nothing on this one",
+        )
+    }
+    val event = if (update.status == OrderState.ACCEPTED) {
+        OrderEvent.AcceptanceReceived(
+            acceptance = crossedAcceptance(
+                proposalRumor = proposalRumor,
+                acceptanceRumor = statusRumor,
+                providerPubkey = providerPubkey,
+                field = "stepOrderWithStatusUpdate.statusRumor",
+            ),
+            createdAt = update.createdAt,
+        )
+    } else {
+        val from = proposal.partyOf(update.sender, providerPubkey) ?: throw ChannelException(
+            ChannelRejection.SENDER_NOT_A_PARTY,
+            ChannelVocabulary.STATUS,
+            "§11.2's sender rules are written in parties, and the key §7.2 attributed this update " +
+                "to is not exactly one of the proposal's buyer, the provider and the fee recipient; " +
+                "there is no party to offer it from, and none is chosen on its behalf",
+        )
+        OrderEvent.StatusUpdate(update.status, from, createdAt = update.createdAt)
+    }
+    JsOrderOutcome(stepper.on(order.order, event), null)
 }
 
 /**

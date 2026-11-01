@@ -297,8 +297,25 @@ public enum class ChannelRejection {
      * altered terms, and the correct response to it is a new `type=1` with a new order id. A status
      * update about some other order is not about this one at all, and answering "counter-proposal"
      * would tell the caller to re-propose on the strength of a message it must ignore.
+     *
+     * T76 widens its subject to the order a message is offered **to**: `stepOrderWithStatusUpdate`
+     * refuses it when the proposal or the update names an `order` id other than the order being
+     * stepped. A proposal about another order is no operand for this one — its buyer, fee recipient
+     * and terms are another trade's — and an update about another order moves nothing here.
      */
     DIFFERENT_ORDER,
+
+    /**
+     * A `type=3`'s §7.2-attributed sender is no single party of the proposal it was offered against.
+     * T76.
+     *
+     * §11.2's sender rules are written in parties, and `OrderProposal.partyOf` answers `null` for a
+     * key that is none of the buyer, the caller-resolved provider and the fee recipient, or is two of
+     * them at once. An update from such a key has no `from` to be offered to the order with, and
+     * choosing one on its behalf — `BUYER`, say — would let any key holding the order id cancel it.
+     * So nothing is offered: the order is not stepped at all.
+     */
+    SENDER_NOT_A_PARTY,
 
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,

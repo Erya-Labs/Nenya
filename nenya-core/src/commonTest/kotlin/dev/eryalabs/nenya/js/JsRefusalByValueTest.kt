@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.channel.ChannelFixtures
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
+import dev.eryalabs.nenya.channel.ProposalFixtures
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.delivery.DeliveryFixtures
 import dev.eryalabs.nenya.envelope.EnvelopeFixtures
@@ -90,7 +91,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Forty-five of `JsSurfaceTest.ENTRY_POINTS`' forty-six: `capabilities` takes nothing, so it
+         * Forty-six of `JsSurfaceTest.ENTRY_POINTS`' forty-seven: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -139,6 +140,7 @@ class JsRefusalByValueTest {
             "paymentRequestFeeSighting",
             "openOrderFromProposal",
             "partyOf",
+            "stepOrderWithStatusUpdate",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1218,6 +1220,35 @@ class JsRefusalByValueTest {
         for (clock in HOSTILE_CLOCKS) {
             step("clock_checked under a hostile clock", JsOrderEvent(type = "clock_checked"), at = JsOrderMachine(JsEnvironment(nowSeconds = clock)))
         }
+
+        // T76: the status update stepped from its rumors, so the machine, the provider key and the rumors are what can be spoiled.
+        val cancellation = JsRumor(
+            SettlementFixtures.boundSealedBy(
+                SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX),
+                ProposalFixtures.acceptanceTags(messages.proposalTags, OrderFixtures.ORDER_INDEX, status = "cancelled"),
+            ),
+        )
+        val provider = messages.acceptanceRumor.author
+        fun updated(
+            what: String,
+            at: JsOrderMachine = machine,
+            proposal: JsRumor = JsRumor(messages.proposalRumor),
+            status: JsRumor = cancellation,
+            providerKey: String = provider,
+        ) = record(what, call(::stepOrderWithStatusUpdate) { stepOrderWithStatusUpdate(at, proposed, proposal, status, providerKey) })
+        for (bad in HOSTILE_HEX + HOSTILE_TEXTS) {
+            updated("stepOrderWithStatusUpdate providerPubkey=`$bad`", providerKey = bad)
+            updated("stepOrderWithStatusUpdate of an acceptance, providerPubkey=`$bad`", status = JsRumor(messages.acceptanceRumor), providerKey = bad)
+        }
+        for (bad in HOSTILE_DECIMALS) {
+            updated("stepOrderWithStatusUpdate releaseTimeoutSeconds=`$bad`", at = JsOrderMachine(environment, releaseTimeoutSeconds = bad))
+        }
+        for (clock in HOSTILE_CLOCKS) {
+            updated("stepOrderWithStatusUpdate under a hostile clock", at = JsOrderMachine(JsEnvironment(nowSeconds = clock)))
+        }
+        updated("stepOrderWithStatusUpdate with a status update as the proposal", proposal = cancellation)
+        updated("stepOrderWithStatusUpdate with a proposal as the status update", status = JsRumor(messages.proposalRumor))
+        updated("stepOrderWithStatusUpdate of a chat", status = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())))
     }
 
     /**
