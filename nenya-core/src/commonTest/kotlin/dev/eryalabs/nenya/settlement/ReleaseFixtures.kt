@@ -65,6 +65,25 @@ internal object ReleaseFixtures {
         return RumorWriterFixtures.bound(built.event)
     }
 
+    /**
+     * §10.3's `kind:15` for the order at [index], releasing `OrderFixtures.blob` under [KEY_HEX] and
+     * [NONCE_HEX], written and sealed by [author] — the provider unless a control says otherwise. T77.
+     */
+    fun releaseRumor(
+        author: String = SettlementFixtures.provider(OrderFixtures.ORDER_INDEX),
+        index: Int = OrderFixtures.ORDER_INDEX,
+    ): AttributedRumor.Bound {
+        val build = RumorWriter.release(
+            envelope = envelope(author, index),
+            order = OrderFixtures.orderId(index),
+            release = OrderFixtures.matchingRelease(),
+            decryptionKey = KEY_HEX,
+            decryptionNonce = NONCE_HEX,
+        )
+        val built = build as? RumorBuild.Built ?: fail("the fixture release must build, not $build")
+        return RumorWriterFixtures.bound(built.event)
+    }
+
     /** [commitmentRumor], decoded. */
     fun commitment(
         author: String = SettlementFixtures.provider(OrderFixtures.ORDER_INDEX),

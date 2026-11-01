@@ -4,6 +4,8 @@ import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.channel.ChannelException
 import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.ChannelVocabulary
+import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
+import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
@@ -183,15 +185,7 @@ public fun stepOrderWithStatusUpdate(
     val stepper = machine.asOrderMachine()
     val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
     val update = OrderStatusMessage.decode(statusRumor.asBoundRumor("kind:16 type=3 status update"))
-    if (proposal.order != order.order.id || update.order != order.order.id) {
-        throw ChannelException(
-            ChannelRejection.DIFFERENT_ORDER,
-            ChannelVocabulary.ORDER,
-            "§7.4's `${ChannelVocabulary.ORDER}` id binds every message to one order, and the " +
-                "proposal or the update offered here names a different one than the order being " +
-                "stepped; a message about another order moves nothing on this one",
-        )
-    }
+    requireSameOrder(order.order, proposal.order, update.order)
     val event = if (update.status == OrderState.ACCEPTED) {
         OrderEvent.AcceptanceReceived(
             acceptance = crossedAcceptance(
@@ -203,17 +197,125 @@ public fun stepOrderWithStatusUpdate(
             createdAt = update.createdAt,
         )
     } else {
-        val from = proposal.partyOf(update.sender, providerPubkey) ?: throw ChannelException(
-            ChannelRejection.SENDER_NOT_A_PARTY,
-            ChannelVocabulary.STATUS,
-            "§11.2's sender rules are written in parties, and the key §7.2 attributed this update " +
-                "to is not exactly one of the proposal's buyer, the provider and the fee recipient; " +
-                "there is no party to offer it from, and none is chosen on its behalf",
-        )
+        val from = senderParty(proposal, update.sender, providerPubkey, ChannelVocabulary.STATUS)
         OrderEvent.StatusUpdate(update.status, from, createdAt = update.createdAt)
     }
     JsOrderOutcome(stepper.on(order.order, event), null)
 }
+
+/**
+ * §11.2's `accepted → committed` stepped from the sealed `type=5` itself, so the order records the
+ * §10.1 check its decoder makes. T77.
+ *
+ * [stepOrder]'s `delivery_committed` takes four retyped values and a `fromParty` a page read itself,
+ * and records no check: nobody read the tags. This takes the two rumors and the provider key, and the
+ * facade performs **no check of its own**:
+ *
+ * 1. `OrderProposal.decode` and `DeliveryCommitmentMessage.decode`, whose refusals come back as
+ *    values — among them §10.1's `COMMITMENT_CARRIES_KEY`;
+ * 2. the proposal's and the commitment's `order` ids against [order]'s — either other is
+ *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order;
+ * 3. the party `OrderProposal.partyOf` maps the commitment's attributed sender to; `null` is
+ *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
+ * 4. `DeliveryCommitmentMessage.asOrderEvent` from that party, carrying the checks its decode made;
+ * 5. then `OrderMachine.on`, whose own sender rules decide what that party may do.
+ *
+ * @param machine as [stepOrder]'s.
+ * @param order the order as it stands, from [openOrder] or from a previous step.
+ * @param proposalRumor the `kind:16` `type=1` this order was opened on, as [open] handed it back.
+ * @param commitmentRumor the `kind:16` `type=5` received, as [open] handed it back.
+ * @param providerPubkey the provider key the page resolved **independently of both messages** — see
+ *   [JsOrderEvent.providerPubkey].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun stepOrderWithCommitment(
+    machine: JsOrderMachine,
+    order: JsOrder,
+    proposalRumor: JsRumor,
+    commitmentRumor: JsRumor,
+    providerPubkey: String,
+): JsOrderOutcome = jsGuarded({ JsOrderOutcome(null, it) }) {
+    val stepper = machine.asOrderMachine()
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    val commitment = DeliveryCommitmentMessage.decode(
+        commitmentRumor.asBoundRumor("kind:16 type=5 delivery commitment"),
+    )
+    requireSameOrder(order.order, proposal.order, commitment.order)
+    val from = senderParty(proposal, commitment.sender, providerPubkey, tag = null)
+    JsOrderOutcome(stepper.on(order.order, commitment.asOrderEvent(from)), null)
+}
+
+/**
+ * §11.2's `paid → released` stepped from the sealed `kind:15` itself, so the order records §10.3's
+ * binding, checked by the call that makes it. T77.
+ *
+ * [stepOrder]'s `deliverable_released` takes four retyped values and a `fromParty` a page read
+ * itself, and records no check. This takes the two rumors and the provider key, and the facade
+ * performs **no check of its own**:
+ *
+ * 1. `OrderProposal.decode` and `DeliverableReleaseMessage.decode`, whose refusals come back as values;
+ * 2. the proposal's `order` id against [order]'s — another is `ChannelRejection.DIFFERENT_ORDER`, and
+ *    nothing is offered. The release's own id is **not** compared here: that is §10.3's binding, and
+ *    `asOrderEvent` makes it below;
+ * 3. the party `OrderProposal.partyOf` maps the release's attributed sender to; `null` is
+ *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
+ * 4. `DeliverableReleaseMessage.asOrderEvent` against [order] from that party — another order's
+ *    release is its `RELEASE_FOR_ANOTHER_ORDER`, an order not in `paid` its `RELEASE_ORDER_NOT_PAID`;
+ * 5. then `OrderMachine.on`, whose own sender rules decide what that party may do.
+ *
+ * §10.3's identity comparison against the commitment is not made here, as `asOrderEvent` does not
+ * make it; the order does not record it as performed.
+ *
+ * @param machine as [stepOrder]'s.
+ * @param order the order as it stands, from [openOrder] or from a previous step.
+ * @param proposalRumor the `kind:16` `type=1` this order was opened on, as [open] handed it back.
+ * @param releaseRumor the `kind:15` received, as [open] handed it back.
+ * @param providerPubkey the provider key the page resolved **independently of both messages** — see
+ *   [JsOrderEvent.providerPubkey].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun stepOrderWithRelease(
+    machine: JsOrderMachine,
+    order: JsOrder,
+    proposalRumor: JsRumor,
+    releaseRumor: JsRumor,
+    providerPubkey: String,
+): JsOrderOutcome = jsGuarded({ JsOrderOutcome(null, it) }) {
+    val stepper = machine.asOrderMachine()
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    val release = DeliverableReleaseMessage.decode(releaseRumor.asBoundRumor("kind:15 deliverable release"))
+    requireSameOrder(order.order, proposal.order)
+    val from = senderParty(proposal, release.sender, providerPubkey, tag = null)
+    JsOrderOutcome(stepper.on(order.order, release.asOrderEvent(order.order, from)), null)
+}
+
+/** `ChannelRejection.DIFFERENT_ORDER` unless every one of [ids] is [order]'s own. T76, T77. */
+private fun requireSameOrder(order: Order, vararg ids: OrderId) {
+    if (ids.any { it != order.id }) {
+        throw ChannelException(
+            ChannelRejection.DIFFERENT_ORDER,
+            ChannelVocabulary.ORDER,
+            "§7.4's `${ChannelVocabulary.ORDER}` id binds every message to one order, and a " +
+                "message offered here names a different one than the order being stepped; a " +
+                "message about another order moves nothing on this one",
+        )
+    }
+}
+
+/**
+ * The party `OrderProposal.partyOf` maps [sender] to, or `ChannelRejection.SENDER_NOT_A_PARTY`
+ * naming [tag]. T76, T77.
+ */
+private fun senderParty(proposal: OrderProposal, sender: String, providerPubkey: String, tag: String?): Party =
+    proposal.partyOf(sender, providerPubkey) ?: throw ChannelException(
+        ChannelRejection.SENDER_NOT_A_PARTY,
+        tag,
+        "§11.2's sender rules are written in parties, and the key §7.2 attributed this message " +
+            "to is not exactly one of the proposal's buyer, the provider and the fee recipient; " +
+            "there is no party to offer it from, and none is chosen on its behalf",
+    )
 
 /**
  * §10.4 **step 1 alone**: the served bytes hashed here and compared to the commitment's `x`.

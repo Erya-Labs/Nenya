@@ -141,6 +141,8 @@ class JsRefusalByValueTest {
             "openOrderFromProposal",
             "partyOf",
             "stepOrderWithStatusUpdate",
+            "stepOrderWithCommitment",
+            "stepOrderWithRelease",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1249,6 +1251,43 @@ class JsRefusalByValueTest {
         updated("stepOrderWithStatusUpdate with a status update as the proposal", proposal = cancellation)
         updated("stepOrderWithStatusUpdate with a proposal as the status update", status = JsRumor(messages.proposalRumor))
         updated("stepOrderWithStatusUpdate of a chat", status = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList())))
+
+        // T77: the commitment and the release stepped from their rumors — the same four things to spoil.
+        val commitmentRumor = JsRumor(ReleaseFixtures.commitmentRumor())
+        val releaseRumor = JsRumor(ReleaseFixtures.releaseRumor())
+        val chat = JsRumor(ChannelFixtures.attribute(NenyaKind.CHAT, emptyList()))
+        fun committed(
+            what: String,
+            at: JsOrderMachine = machine,
+            proposal: JsRumor = JsRumor(messages.proposalRumor),
+            rumor: JsRumor = commitmentRumor,
+            providerKey: String = provider,
+        ) = record(what, call(::stepOrderWithCommitment) { stepOrderWithCommitment(at, proposed, proposal, rumor, providerKey) })
+        fun released(
+            what: String,
+            at: JsOrderMachine = machine,
+            proposal: JsRumor = JsRumor(messages.proposalRumor),
+            rumor: JsRumor = releaseRumor,
+            providerKey: String = provider,
+        ) = record(what, call(::stepOrderWithRelease) { stepOrderWithRelease(at, proposed, proposal, rumor, providerKey) })
+        for (bad in HOSTILE_HEX + HOSTILE_TEXTS) {
+            committed("stepOrderWithCommitment providerPubkey=`$bad`", providerKey = bad)
+            released("stepOrderWithRelease providerPubkey=`$bad`", providerKey = bad)
+        }
+        for (bad in HOSTILE_DECIMALS) {
+            committed("stepOrderWithCommitment releaseTimeoutSeconds=`$bad`", at = JsOrderMachine(environment, releaseTimeoutSeconds = bad))
+            released("stepOrderWithRelease verificationTimeoutSeconds=`$bad`", at = JsOrderMachine(environment, verificationTimeoutSeconds = bad))
+        }
+        for (clock in HOSTILE_CLOCKS) {
+            committed("stepOrderWithCommitment under a hostile clock", at = JsOrderMachine(JsEnvironment(nowSeconds = clock)))
+            released("stepOrderWithRelease under a hostile clock", at = JsOrderMachine(JsEnvironment(nowSeconds = clock)))
+        }
+        committed("stepOrderWithCommitment with a commitment as the proposal", proposal = commitmentRumor)
+        committed("stepOrderWithCommitment with a release as the commitment", rumor = releaseRumor)
+        committed("stepOrderWithCommitment of a chat", rumor = chat)
+        released("stepOrderWithRelease with a release as the proposal", proposal = releaseRumor)
+        released("stepOrderWithRelease with a commitment as the release", rumor = commitmentRumor)
+        released("stepOrderWithRelease of a chat", rumor = chat)
     }
 
     /**

@@ -302,12 +302,18 @@ public enum class ChannelRejection {
      * refuses it when the proposal or the update names an `order` id other than the order being
      * stepped. A proposal about another order is no operand for this one — its buyer, fee recipient
      * and terms are another trade's — and an update about another order moves nothing here.
+     *
+     * T77 refuses it the same way in `stepOrderWithCommitment`, for the proposal's or the
+     * commitment's `order` id, and in `stepOrderWithRelease` for the proposal's alone: a release's
+     * own id is §10.3's binding, which `DeliverableReleaseMessage.asOrderEvent` refuses as
+     * [RELEASE_FOR_ANOTHER_ORDER].
      */
     DIFFERENT_ORDER,
 
     /**
      * A `type=3`'s §7.2-attributed sender is no single party of the proposal it was offered against.
-     * T76.
+     * T76; T77 refuses a `type=5` commitment's and a `kind:15` release's sender the same way, naming
+     * no tag.
      *
      * §11.2's sender rules are written in parties, and `OrderProposal.partyOf` answers `null` for a
      * key that is none of the buyer, the caller-resolved provider and the fee recipient, or is two of
