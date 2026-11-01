@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
+import dev.eryalabs.nenya.delivery.DeliveryCheck
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.order.OrderFixtures
 import dev.eryalabs.nenya.payment.Payee
@@ -44,6 +45,11 @@ import kotlin.test.fail
  * ([proposalFeeSighting], [acceptanceFeeSighting], [paymentRequestFeeSighting]), never one built from
  * a `fee` row. The only [JsOrderTerms] typed is the proposal's input.
  *
+ * T78: every message the buyer receives is stepped through the door that reads it — the acceptance
+ * through [stepOrderWithStatusUpdate], the commitment through [stepOrderWithCommitment], the release
+ * through [stepOrderWithRelease] — so nothing here passes a `fromParty` or builds a [JsCommitment] or
+ * [JsRelease] for a received message, and the settled order records both delivery checks.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -57,18 +63,9 @@ class JsTradeWalkthroughTest {
         val trade = Trade()
         val paid = trade.paid(trade.providerReceipt(Trade.PROVIDER_PREIMAGE))
 
-        // Guide step 9 — the provider's release, gated on its own evidence (T65).
-        val release = trade.releaseAfterPayment()
-        val decoded = decodeRelease(release).release ?: fail("the buyer must read the release")
-        val released = trade.step(
-            paid,
-            JsOrderEvent(
-                type = "deliverable_released",
-                orderIdHex = release.orderIdHex,
-                release = decoded.release,
-                fromParty = "PROVIDER",
-            ),
-        )
+        // Guide step 9 — the provider's release, gated on its own evidence (T65), and stepped by the
+        // buyer from the rumor itself (T78).
+        val released = trade.stepped(trade.receivedRelease(paid, trade.releaseAfterPayment()))
         assertEquals("RELEASED", released.state, "§11.2's `paid → released`")
 
         // Guide step 10 — §10.4, step 1 on its own and then the whole check inside the order.
@@ -88,6 +85,11 @@ class JsTradeWalkthroughTest {
         assertEquals("SETTLED", settled.state, "§11.2's `released → settled`")
         assertTrue(settled.terminal, "`settled` is terminal")
         assertEquals(emptyList(), settled.paymentChecksNotPerformedHere.toList(), "§17: no §9.2 check left undone")
+        // T78: the commitment and the release were stepped from their rumors, so both checks are recorded.
+        for (check in listOf(DeliveryCheck.COMMITMENT_CARRIES_NO_KEY, DeliveryCheck.RELEASE_ORDER_BINDING)) {
+            assertTrue(check.name in settled.deliveryChecksPerformed, "§17: ${check.name} performed")
+            assertFalse(check.name in settled.deliveryChecksNotPerformedHere, "and not also listed as not performed")
+        }
     }
 
     /**
@@ -151,12 +153,7 @@ class JsTradeWalkthroughTest {
         val paid = trade.paid(trade.providerReceipt(Trade.PROVIDER_PREIMAGE))
         val commitment = paid.commitment ?: fail("a paid order holds its commitment")
 
-        val honest = decodeRelease(trade.releaseAfterPayment()).release ?: fail("the T65 release decodes")
-        val honestOutcome = stepOrder(
-            trade.machine,
-            paid,
-            JsOrderEvent(type = "deliverable_released", release = honest.release, fromParty = "PROVIDER"),
-        )
+        val honestOutcome = trade.receivedRelease(paid, trade.releaseAfterPayment())
         assertEquals("RELEASED", honestOutcome.order?.state, "the T65 release releases: ${honestOutcome.reason}")
 
         val retyped = JsRelease(
@@ -173,13 +170,7 @@ class JsTradeWalkthroughTest {
             ReleaseFixtures.NONCE_HEX,
         )
         assertTrue(raw.ok, "`buildRelease` asks for no evidence and checks nothing against the commitment")
-        val cheat = decodeRelease(trade.send(raw, trade.provider, trade.buyer).toRecipient).release
-            ?: fail("the buyer reads the raw release")
-        val cheatOutcome = stepOrder(
-            trade.machine,
-            paid,
-            JsOrderEvent(type = "deliverable_released", release = cheat.release, fromParty = "PROVIDER"),
-        )
+        val cheatOutcome = trade.receivedRelease(paid, trade.send(raw, trade.provider, trade.buyer).toRecipient)
         assertTrue(cheatOutcome.ok, "§10.3: a divergent release moves the order, to `disputed`")
         assertEquals("DISPUTED", cheatOutcome.order?.state, "§10.3's identity check fails on `size`")
         assertEquals(
@@ -311,18 +302,13 @@ class JsTradeWalkthroughTest {
         val accepted: JsOrder = run {
             val check = checkAcceptance(proposal.toSelf, acceptance.toRecipient, provider.key)
             assertEquals("accepted", check.kind, "§7.6: all four terms byte-identical")
-            step(
-                proposed,
-                JsOrderEvent(
-                    type = "acceptance_received",
-                    proposalRumor = proposal.toSelf,
-                    acceptanceRumor = acceptance.toRecipient,
-                    providerPubkey = provider.key,
-                ),
+            stepped(
+                stepOrderWithStatusUpdate(machine, proposed, proposal.toSelf, acceptance.toRecipient, provider.key),
             ).also { assertEquals("ACCEPTED", it.state) }
         }
 
-        // Guide step 6 — the provider commits; the buyer reads and steps.
+        // Guide step 6 — the provider commits; the buyer steps from the commitment itself and reads its
+        // `url` for step 10.
         val commitment: Delivered = send(
             buildCommitment(
                 providerEnvelope(),
@@ -335,10 +321,13 @@ class JsTradeWalkthroughTest {
         )
         val committed: JsOrder = run {
             val read = decodeCommitment(commitment.toRecipient).commitment ?: fail("the buyer must read the commitment")
-            step(
-                accepted,
-                JsOrderEvent(type = "delivery_committed", commitment = read.commitment, fromParty = "PROVIDER"),
-            ).also { assertEquals("COMMITTED", it.state) }
+            assertEquals(DeliveryMessageFixtures.url(OrderFixtures.ORDER_INDEX), read.url, "step 10 fetches from it")
+            stepped(
+                stepOrderWithCommitment(machine, accepted, proposal.toSelf, commitment.toRecipient, provider.key),
+            ).also {
+                assertEquals("COMMITTED", it.state)
+                assertEquals(listOf(DeliveryCheck.COMMITMENT_CARRIES_NO_KEY.name), it.deliveryChecksPerformed.toList())
+            }
         }
 
         // Guide step 7 — both payees request payment; the buyer accepts each into its store, and the
@@ -487,11 +476,18 @@ class JsTradeWalkthroughTest {
         }
 
         /** [order] stepped by [event], which must advance it. */
-        fun step(order: JsOrder, event: JsOrderEvent): JsOrder {
-            val outcome = stepOrder(machine, order, event)
-            assertTrue(outcome.ok, "${event.type} must advance a ${order.state} order: ${outcome.reason} — ${outcome.detail}")
+        fun step(order: JsOrder, event: JsOrderEvent): JsOrder =
+            stepped(stepOrder(machine, order, event), "${event.type} offered to a ${order.state} order")
+
+        /** The order [outcome] advanced to; a refusal fails, naming [what] was offered. */
+        fun stepped(outcome: JsOrderOutcome, what: String = "the received message"): JsOrder {
+            assertTrue(outcome.ok, "$what must advance it: ${outcome.reason} — ${outcome.detail}")
             return outcome.order ?: fail("an advanced outcome carries its order")
         }
+
+        /** Guide step 9's buyer side: [releaseRumor] offered to [order] from the rumor itself (T78). */
+        fun receivedRelease(order: JsOrder, releaseRumor: JsRumor): JsOrderOutcome =
+            stepOrderWithRelease(machine, order, proposal.toSelf, releaseRumor, provider.key)
 
         fun buyerEnvelope(): JsRumorEnvelope = envelope(buyer, provider)
 

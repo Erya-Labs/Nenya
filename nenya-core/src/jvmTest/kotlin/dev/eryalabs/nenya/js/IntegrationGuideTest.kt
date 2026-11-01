@@ -227,11 +227,41 @@ class IntegrationGuideTest {
             assertEquals(emptyMap(), missing, "`$BUYER_HEADING`: step to the doors its `$CALLS` line omits")
         }
 
+        /**
+         * T78: the door each buyer step receiving a message steps the order through, so that a page
+         * passes no `fromParty` and retypes no commitment or release — step 5 the acceptance, step 6
+         * the commitment and step 9 the release.
+         */
+        val BUYER_RECEIVING_DOORS: Map<Int, String> = mapOf(
+            5 to "stepOrderWithStatusUpdate",
+            6 to "stepOrderWithCommitment",
+            9 to "stepOrderWithRelease",
+        )
+
+        /** Fails unless each buyer step in [BUYER_RECEIVING_DOORS] names its door on its `Calls:` line. */
+        fun assertBuyerStepsReceived(steps: List<TradeStep>) {
+            val missing = BUYER_RECEIVING_DOORS.filter { (number, door) ->
+                door !in (steps.singleOrNull { it.number == number }?.calls ?: emptyList())
+            }
+            assertEquals(emptyMap(), missing, "`$BUYER_HEADING`: step to the receiving door its `$CALLS` line omits")
+        }
+
+        /** [text] with [name] removed from the one buyer `Calls:` line that names it. */
+        fun withoutBuyerCall(text: String, name: String): String {
+            val lines = text.lines().toMutableList()
+            val start = lines.indexOf(BUYER_HEADING)
+            val end = lines.indexOf(PROVIDER_HEADING)
+            val index = (start + 1 until end).single { lines[it].trimStart().startsWith(CALLS) && "`$name`" in lines[it] }
+            lines[index] = lines[index].replace(", `$name`", "").replace("`$name`, ", "")
+            return lines.joinToString("\n")
+        }
+
         /** Every check above, over both trade sections of [text]. */
         fun assertTradeSections(text: String) {
             for (heading in TRADE_HEADINGS) assertStepsHeld(heading, tradeSteps(text, heading))
             assertProviderReleasesAfterPayment(tradeSteps(text, PROVIDER_HEADING))
             assertBuyerTakesDoors(tradeSteps(text, BUYER_HEADING))
+            assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
         }
 
         /** [text] with its line at [index] removed. */
@@ -395,6 +425,37 @@ class IntegrationGuideTest {
                 assertFailsWith<AssertionError>("step $number without `$door` must fail") {
                     assertBuyerTakesDoors(tradeSteps(text, BUYER_HEADING))
                 }
+            }
+        }
+    }
+
+    /**
+     * T78: the buyer's steps receiving the acceptance, the commitment and the release each name the
+     * door that steps the order from that message, the doors are exported, and the steps still hold.
+     */
+    @Test
+    fun `the buyer's receiving steps step the order through the doors that read the message`() {
+        val steps = tradeSteps(guide, BUYER_HEADING)
+        assertBuyerStepsReceived(steps)
+        assertStepsHeld(BUYER_HEADING, steps)
+        assertTrue(
+            BUYER_RECEIVING_DOORS.values.all { it in JsSurfaceTest.ENTRY_POINTS },
+            "the receiving doors are exported: ${BUYER_RECEIVING_DOORS.values}",
+        )
+    }
+
+    /**
+     * Negative control: any one receiving door dropped from its buyer step's `Calls:` line — among them
+     * `stepOrderWithRelease` from step 9 — fails.
+     */
+    @Test
+    fun `the buyer's receiving steps with any one door dropped fail`() {
+        for ((number, door) in BUYER_RECEIVING_DOORS) {
+            val text = withoutBuyerCall(guide, door)
+            val step = tradeSteps(text, BUYER_HEADING).single { it.number == number }
+            assertTrue(door !in step.calls, "`$door` must be gone from step $number's `$CALLS` line")
+            assertFailsWith<AssertionError>("step $number without `$door` must fail") {
+                assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
             }
         }
     }

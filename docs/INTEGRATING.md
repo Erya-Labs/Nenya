@@ -241,13 +241,20 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
 5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
    acceptance with `buildAgreementAgainst`, then seals and sends it. The buyer opens it, can ask
    `checkAcceptance` whether it is an acceptance or a counter-proposal, and steps the order with
-   `acceptance_received`.
+   `stepOrderWithStatusUpdate`. Give it the proposal you kept in step 4, the acceptance as `open`
+   answered it, and the provider's key as you know it from the listing or the bid, not from either
+   message. It checks that both messages are for this order, and makes the same acceptance check as
+   `checkAcceptance`, so a counter-proposal or an acceptance from another key does not move the order.
 
-   Calls: `open`, `decodeProposal`, `buildAgreementAgainst`, `seal`, `checkAcceptance`, `stepOrder`.
+   Calls: `open`, `decodeProposal`, `buildAgreementAgainst`, `seal`, `checkAcceptance`, `stepOrderWithStatusUpdate`.
 6. **Commit to the deliverable** (§10.1). The provider builds `buildCommitment`, seals and sends it. The
-   buyer opens it, reads it with `decodeCommitment` and steps the order with `delivery_committed`.
+   buyer opens it and steps the order with `stepOrderWithCommitment`, giving it the proposal, the
+   commitment and the provider's key as in step 5. It refuses a commitment for another order, one that
+   carries the decryption key (§10.1), and one sealed by a key that is not a party to the order, and
+   then the order records that the key check was made. Read the commitment with `decodeCommitment` for
+   its `url`, which step 10 fetches from.
 
-   Calls: `buildCommitment`, `seal`, `open`, `decodeCommitment`, `stepOrder`.
+   Calls: `buildCommitment`, `seal`, `open`, `stepOrderWithCommitment`, `decodeCommitment`.
 7. **Request payment** (§8.6). The provider — and the fee recipient, where the terms give a non-zero
    fee — each build `buildPaymentRequest`, seal and send it. The buyer opens each and accepts it with
    `acceptPaymentRequest`, which writes the record to the store. For a fee request, give
@@ -281,10 +288,14 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    the settlement its own `verifySettlement` call answered for the buyer's receipt of its invoice. It
    is refused unless that settlement is evidenced, is the provider's payment and is for the
    commitment's order. For a free order, which has no payment to check, the provider builds
-   `buildRelease` instead. The provider seals and sends the release. The buyer opens it,
-   reads it with `decodeRelease` and steps the order with `deliverable_released`.
+   `buildRelease` instead. The provider seals and sends the release. The buyer opens it and
+   steps the order with `stepOrderWithRelease`, giving it the proposal, the release and the provider's
+   key as in step 5. It refuses a release for another order, and one sealed by a key that is not a
+   party to the order, and then the order records that the release was checked against this order.
+   A release whose values differ from the commitment moves the order to `disputed`, so read the
+   answer's state rather than assuming `released`.
 
-   Calls: `verifySettlement`, `buildReleaseAfterPayment`, `buildRelease`, `seal`, `open`, `decodeRelease`, `stepOrder`.
+   Calls: `verifySettlement`, `buildReleaseAfterPayment`, `buildRelease`, `seal`, `open`, `stepOrderWithRelease`.
 10. **Check the delivery** (§10.4). The buyer fetches the file and checks it with `verifyServedBytes`.
     Only if that answers `ok`, decrypt the file. If it decrypts, step the order with
     `delivery_verified`, passing the served and decrypted bytes. If it does not, step it with
@@ -298,8 +309,16 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
 
 Along the way, either side can send a chat message with `buildChat` and a status update (for
 example `cancelled`) with `buildStatusUpdate`, reading a status update with `decodeStatusUpdate`.
-Step the order with `clock_checked` whenever your client wants deadlines applied. An order only
-moves when `stepOrder` says it did, so always read its answer.
+Step the order on a status update you receive with `stepOrderWithStatusUpdate`, as in step 5. It
+works out from the proposal which party sent the update, so do not say who sent it yourself: an
+update from a key that is not exactly one of the buyer, the provider and the fee recipient moves
+nothing, and the order decides what each party may do. To show who sent a chat message on an
+order, ask `partyOf` with the proposal, the provider's key and the key `open` gave for the message,
+rather than labelling it yourself. It answers no party for a key that is not exactly one of those
+three. A private bid comes before any proposal, so `partyOf` cannot label one: its sender is the key
+`open` gave. Step the order with `clock_checked` whenever your client wants deadlines applied. An
+order only moves when `stepOrder` or one of the `stepOrderWith…` calls says it did, so always read
+its answer.
 
 ---
 
