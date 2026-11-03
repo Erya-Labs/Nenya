@@ -1288,6 +1288,21 @@ class JsRefusalByValueTest {
         released("stepOrderWithRelease with a release as the proposal", proposal = releaseRumor)
         released("stepOrderWithRelease with a commitment as the release", rumor = commitmentRumor)
         released("stepOrderWithRelease of a chat", rumor = chat)
+
+        // T79: once accepted, the provider key is compared with the recorded one, so spoil it there too.
+        val accepted = stepOrderWithStatusUpdate(
+            machine, proposed, JsRumor(messages.proposalRumor), JsRumor(messages.acceptanceRumor), provider,
+        ).order ?: fail("the honest acceptance steps")
+        for (bad in HOSTILE_HEX + HOSTILE_TEXTS) {
+            record(
+                "stepOrderWithStatusUpdate of an accepted order, providerPubkey=`$bad`",
+                call(::stepOrderWithStatusUpdate) { stepOrderWithStatusUpdate(machine, accepted, JsRumor(messages.proposalRumor), cancellation, bad) },
+            )
+            record(
+                "stepOrderWithCommitment of an accepted order, providerPubkey=`$bad`",
+                call(::stepOrderWithCommitment) { stepOrderWithCommitment(machine, accepted, JsRumor(messages.proposalRumor), commitmentRumor, bad) },
+            )
+        }
     }
 
     /**

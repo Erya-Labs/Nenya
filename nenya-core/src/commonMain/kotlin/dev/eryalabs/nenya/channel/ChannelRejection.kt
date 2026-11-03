@@ -323,6 +323,22 @@ public enum class ChannelRejection {
      */
     SENDER_NOT_A_PARTY,
 
+    /**
+     * The provider key a `stepOrderWith…` door was handed is not the one the order's acceptance was
+     * checked against. T79.
+     *
+     * Once an order is accepted, `Order.provider` records the key §7.6 compared the acceptance's seal
+     * against. The doors map a message's sender with the provider key the page hands them, and a page
+     * that resolved it wrongly on a later message — a stranger's key, say — would make that stranger
+     * `PROVIDER` for this order, able to commit or cancel it. So the key, read and normalised exactly
+     * as `OrderProposal.partyOf` reads it, must equal the recorded one; another is refused here and
+     * nothing is offered. At `proposed` no key is recorded and no comparison is made.
+     *
+     * A local refusal of the door's argument, as [SENDER_NOT_A_PARTY] is: no tag of any message is at
+     * fault, so it names none.
+     */
+    PROVIDER_NOT_THIS_ORDERS,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 

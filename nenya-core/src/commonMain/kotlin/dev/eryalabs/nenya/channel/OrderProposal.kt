@@ -18,6 +18,7 @@ import dev.eryalabs.nenya.tag.readPubkeyHex
 import dev.eryalabs.nenya.tag.readStrictDecimal
 import dev.eryalabs.nenya.wire.EventId
 import dev.eryalabs.nenya.wire.WireEvent
+import kotlin.jvm.JvmSynthetic
 
 /**
  * §7.6's four terms as the **raw tag elements** the rumor carried, which is what "byte-identical"
@@ -531,9 +532,12 @@ public class OrderProposal internal constructor(
     /**
      * [accepts]' first two refusals, which are about the **argument**: the caller's provider key
      * read as §4.3 reads one, and refused if it is this proposal's own author. One function, shared
-     * with [partyOf], so the two cannot come to disagree about which provider keys are usable.
+     * with [partyOf], so the two cannot come to disagree about which provider keys are usable — and
+     * with the `stepOrderWith…` doors (T79), which compare its answer to the key an accepted order
+     * recorded, so a key read differently there could never be the one `partyOf` maps.
      */
-    private fun resolvedProvider(provider: String): String {
+    @JvmSynthetic
+    internal fun resolvedProvider(provider: String): String {
         val resolved = try {
             readPubkeyHex(provider, "the provider's pubkey")
         } catch (refused: TagException) {

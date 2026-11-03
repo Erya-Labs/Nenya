@@ -157,7 +157,9 @@ public fun stepOrder(
  *
  * 1. `OrderProposal.decode` and `OrderStatusMessage.decode`, whose refusals come back as values;
  * 2. the proposal's and the update's `order` ids against [order]'s — either other is
- *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order;
+ *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order; then, once [order] is
+ *    accepted, [providerPubkey] against the key its acceptance was checked against — another is
+ *    `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79), and nothing is offered;
  * 3. a `status=accepted` goes exactly where [stepOrder]'s `acceptance_received` sends it — §7.6's
  *    checked answer through `OrderProposal.accepts` (decision J), so a counter-proposal or an update
  *    from the wrong key is refused as it is there;
@@ -186,6 +188,7 @@ public fun stepOrderWithStatusUpdate(
     val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
     val update = OrderStatusMessage.decode(statusRumor.asBoundRumor("kind:16 type=3 status update"))
     requireSameOrder(order.order, proposal.order, update.order)
+    requireThisOrdersProvider(order.order, proposal, providerPubkey)
     val event = if (update.status == OrderState.ACCEPTED) {
         OrderEvent.AcceptanceReceived(
             acceptance = crossedAcceptance(
@@ -214,7 +217,9 @@ public fun stepOrderWithStatusUpdate(
  * 1. `OrderProposal.decode` and `DeliveryCommitmentMessage.decode`, whose refusals come back as
  *    values — among them §10.1's `COMMITMENT_CARRIES_KEY`;
  * 2. the proposal's and the commitment's `order` ids against [order]'s — either other is
- *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order;
+ *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order; then [providerPubkey]
+ *    against the key the accepted order's acceptance was checked against — another is
+ *    `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79), and nothing is offered;
  * 3. the party `OrderProposal.partyOf` maps the commitment's attributed sender to; `null` is
  *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
  * 4. `DeliveryCommitmentMessage.asOrderEvent` from that party, carrying the checks its decode made;
@@ -242,6 +247,7 @@ public fun stepOrderWithCommitment(
         commitmentRumor.asBoundRumor("kind:16 type=5 delivery commitment"),
     )
     requireSameOrder(order.order, proposal.order, commitment.order)
+    requireThisOrdersProvider(order.order, proposal, providerPubkey)
     val from = senderParty(proposal, commitment.sender, providerPubkey, tag = null)
     JsOrderOutcome(stepper.on(order.order, commitment.asOrderEvent(from)), null)
 }
@@ -257,7 +263,9 @@ public fun stepOrderWithCommitment(
  * 1. `OrderProposal.decode` and `DeliverableReleaseMessage.decode`, whose refusals come back as values;
  * 2. the proposal's `order` id against [order]'s — another is `ChannelRejection.DIFFERENT_ORDER`, and
  *    nothing is offered. The release's own id is **not** compared here: that is §10.3's binding, and
- *    `asOrderEvent` makes it below;
+ *    `asOrderEvent` makes it below. Then [providerPubkey] against the key the accepted order's
+ *    acceptance was checked against — another is `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79),
+ *    and nothing is offered;
  * 3. the party `OrderProposal.partyOf` maps the release's attributed sender to; `null` is
  *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
  * 4. `DeliverableReleaseMessage.asOrderEvent` against [order] from that party — another order's
@@ -287,6 +295,7 @@ public fun stepOrderWithRelease(
     val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
     val release = DeliverableReleaseMessage.decode(releaseRumor.asBoundRumor("kind:15 deliverable release"))
     requireSameOrder(order.order, proposal.order)
+    requireThisOrdersProvider(order.order, proposal, providerPubkey)
     val from = senderParty(proposal, release.sender, providerPubkey, tag = null)
     JsOrderOutcome(stepper.on(order.order, release.asOrderEvent(order.order, from)), null)
 }
@@ -300,6 +309,25 @@ private fun requireSameOrder(order: Order, vararg ids: OrderId) {
             "§7.4's `${ChannelVocabulary.ORDER}` id binds every message to one order, and a " +
                 "message offered here names a different one than the order being stepped; a " +
                 "message about another order moves nothing on this one",
+        )
+    }
+}
+
+/**
+ * Once [order] is accepted, `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` unless [providerPubkey], read
+ * and normalised as `OrderProposal.partyOf` reads it (a malformed one still
+ * `MALFORMED_PROVIDER_PUBKEY`), is the key its acceptance was checked against. At `proposed` no key
+ * is recorded, so none is compared. T79.
+ */
+private fun requireThisOrdersProvider(order: Order, proposal: OrderProposal, providerPubkey: String) {
+    val recorded = order.provider ?: return
+    if (proposal.resolvedProvider(providerPubkey) != recorded) {
+        throw ChannelException(
+            ChannelRejection.PROVIDER_NOT_THIS_ORDERS,
+            null,
+            "§7.6 checked this order's acceptance against one provider key, and the order recorded " +
+                "it; the key handed here is another, and mapping a sender against it would make " +
+                "that key the provider of an order it never accepted",
         )
     }
 }
