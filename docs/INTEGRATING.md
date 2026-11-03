@@ -235,7 +235,10 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    them again. That call *is* the proposal step: the order starts in `proposed`, and stepping it again
    with a `proposal` event is refused. It checks nothing about the provider; only step 5 moves the order
    on. Read the proposal with `decodeProposal` and keep its `terms`: step 8 checks the provider's
-   receipt against them.
+   receipt against them. Keep the opened proposal itself too: steps 5, 6 and 9 hand it back. They
+   refuse, with `NOT_THIS_ORDERS_PROPOSAL`, a proposal written by another key or one with other terms,
+   even under the same order id. They do not compare the fee recipient, so always hand back the copy
+   you kept.
 
    Calls: `buildProposalAgainst`, `buildProposalForBid`, `seal`, `open`, `openOrderFromProposal`, `decodeProposal`.
 5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
@@ -245,13 +248,18 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    answered it, and the provider's key as you know it from the listing or the bid, not from either
    message. It checks that both messages are for this order, and makes the same acceptance check as
    `checkAcceptance`, so a counter-proposal or an acceptance from another key does not move the order.
+   Once the order is accepted, it records the provider key the acceptance was checked against. From then
+   on, steps 6 and 9 and every later status update must be given that same key: another key is refused
+   with `PROVIDER_NOT_THIS_ORDERS`, and the order does not move.
 
    Calls: `open`, `decodeProposal`, `buildAgreementAgainst`, `seal`, `checkAcceptance`, `stepOrderWithStatusUpdate`.
 6. **Commit to the deliverable** (§10.1). The provider builds `buildCommitment`, seals and sends it. The
    buyer opens it and steps the order with `stepOrderWithCommitment`, giving it the proposal, the
-   commitment and the provider's key as in step 5. It refuses a commitment for another order, one that
-   carries the decryption key (§10.1), and one sealed by a key that is not a party to the order, and
-   then the order records that the key check was made. Read the commitment with `decodeCommitment` for
+   commitment and the provider's key as in step 5. Like step 5's call, it refuses a proposal from
+   another key or with other terms, and a provider key that is not the accepted one. It refuses a commitment for another
+   order, one that carries the decryption key (§10.1), and one sealed by a key that is not a party to the
+   order. A commitment the fee recipient sealed is refused too, with `WRONG_SENDER`: only the provider
+   commits. Otherwise the order records that the key check was made. Read the commitment with `decodeCommitment` for
    its `url`, which step 10 fetches from.
 
    Calls: `buildCommitment`, `seal`, `open`, `stepOrderWithCommitment`, `decodeCommitment`.
@@ -290,8 +298,10 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    commitment's order. For a free order, which has no payment to check, the provider builds
    `buildRelease` instead. The provider seals and sends the release. The buyer opens it and
    steps the order with `stepOrderWithRelease`, giving it the proposal, the release and the provider's
-   key as in step 5. It refuses a release for another order, and one sealed by a key that is not a
-   party to the order, and then the order records that the release was checked against this order.
+   key as in step 5. Like step 5's call, it refuses a proposal from another key or with other terms,
+   and a provider key that is not the accepted one. It refuses a release for another order, and one sealed by
+   a key that is not a party to the order. Otherwise the order records that the release was checked
+   against this order.
    A release whose values differ from the commitment moves the order to `disputed`, so read the
    answer's state rather than assuming `released`.
 
@@ -312,8 +322,12 @@ example `cancelled`) with `buildStatusUpdate`, reading a status update with `dec
 Step the order on a status update you receive with `stepOrderWithStatusUpdate`, as in step 5. It
 works out from the proposal which party sent the update, so do not say who sent it yourself: an
 update from a key that is not exactly one of the buyer, the provider and the fee recipient moves
-nothing, and the order decides what each party may do. To show who sent a chat message on an
-order, ask `partyOf` with the proposal, the provider's key and the key `open` gave for the message,
+nothing, and the order decides what each party may do. As in step 5, the proposal must have the
+author and the terms of the one the order was started from (the fee recipient is not compared), and
+once the order is accepted the provider key must be the accepted one; otherwise nothing moves. The three `stepOrderWith…` calls work only on an order started with
+`openOrderFromProposal`. An order started with `openOrder`, from an order id and terms you typed, has
+no proposal of its own to compare with, so all three refuse it with `NOT_THIS_ORDERS_PROPOSAL`.
+To show who sent a chat message on an order, ask `partyOf` with the proposal, the provider's key and the key `open` gave for the message,
 rather than labelling it yourself. It answers no party for a key that is not exactly one of those
 three. A private bid comes before any proposal, so `partyOf` cannot label one: its sender is the key
 `open` gave. Step the order with `clock_checked` whenever your client wants deadlines applied. An

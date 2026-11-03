@@ -1,9 +1,12 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
 import dev.eryalabs.nenya.delivery.DeliveryCheck
+import dev.eryalabs.nenya.envelope.EnvelopeFixtures
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.order.OrderFixtures
+import dev.eryalabs.nenya.order.TransitionRejection
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentFixtures
 import dev.eryalabs.nenya.payment.PaymentRejection
@@ -49,6 +52,12 @@ import kotlin.test.fail
  * through [stepOrderWithStatusUpdate], the commitment through [stepOrderWithCommitment], the release
  * through [stepOrderWithRelease] — so nothing here passes a `fromParty` or builds a [JsCommitment] or
  * [JsRelease] for a received message, and the settled order records both delivery checks.
+ *
+ * T81: three more cheats on those doors, each stepping nothing — a stranger's own `type=1` under the
+ * order's id and terms with its `cancelled` (T80's `NOT_THIS_ORDERS_PROPOSAL`), a stranger's commitment
+ * with the stranger named as the provider (T79's `PROVIDER_NOT_THIS_ORDERS`), and the fee recipient's
+ * commitment with the right provider (§11.2's `WRONG_SENDER`). The first two, offered to `stepOrder`
+ * with the `fromParty` a page would fill in, move the order, so each refusal is the door's.
  *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
@@ -180,7 +189,124 @@ class JsTradeWalkthroughTest {
         )
     }
 
+    /**
+     * T81, T80's cheat: a stranger writes its own `type=1` under the order's id and terms, and a
+     * `cancelled`, and seals both to the buyer. Stepped through the door against the stranger's
+     * proposal, nothing moves — `NOT_THIS_ORDERS_PROPOSAL`. The same update through `stepOrder`, with
+     * the `BUYER` a page would read off the stranger's own proposal, cancels the order: the refusal is
+     * the door's.
+     */
+    @Test
+    @JsName("a_stranger_s_proposal_and_cancellation_are_refused_NOT_THIS_ORDERS_PROPOSAL")
+    fun `a stranger's proposal and cancellation are refused NOT_THIS_ORDERS_PROPOSAL`() {
+        val trade = Trade()
+        val forged = trade.send(
+            buildProposalAgainst(
+                trade.listing,
+                trade.environment,
+                trade.envelope(trade.stranger, trade.provider),
+                trade.orderIdHex,
+                trade.proposedTerms,
+                feeRecipient = trade.feeRecipient.key,
+            ),
+            trade.stranger,
+            trade.buyer,
+        )
+        assertEquals(trade.orderIdHex, forged.orderIdHex, "the forgery names the order's own id")
+        val cancellation = trade.send(
+            buildStatusUpdate(trade.envelope(trade.stranger, trade.buyer), trade.orderIdHex, "cancelled"),
+            trade.stranger,
+            trade.buyer,
+        )
+
+        val door = stepOrderWithStatusUpdate(
+            trade.machine,
+            trade.proposed,
+            forged.toRecipient,
+            cancellation.toRecipient,
+            trade.provider.key,
+        )
+        assertNotStepped(door, ChannelRejection.NOT_THIS_ORDERS_PROPOSAL.name, "ChannelRejection")
+
+        val asBuyer = partyOf(forged.toRecipient, trade.provider.key, cancellation.toRecipient.author)
+        assertEquals("BUYER", asBuyer.party, "against its own proposal the stranger is the buyer")
+        val token = decodeStatusUpdate(cancellation.toRecipient).statusUpdate?.statusToken
+            ?: fail("the buyer reads the stranger's update")
+        val unchecked = stepOrder(
+            trade.machine,
+            trade.proposed,
+            JsOrderEvent(type = "status_update", statusToken = token, fromParty = asBuyer.party),
+        )
+        assertEquals("CANCELLED", unchecked.order?.state, "through `stepOrder` the stranger cancels: ${unchecked.reason}")
+    }
+
+    /**
+     * T81, T79's cheat: once the order is accepted, a stranger seals a commitment to the buyer, and a
+     * page names the stranger as the provider. The door refuses that key — `PROVIDER_NOT_THIS_ORDERS` —
+     * and nothing moves, where the same commitment through `stepOrder` as `PROVIDER` commits.
+     */
+    @Test
+    @JsName("a_stranger_s_commitment_with_the_stranger_as_provider_is_refused_PROVIDER_NOT_THIS_ORDERS")
+    fun `a stranger's commitment with the stranger as provider is refused PROVIDER_NOT_THIS_ORDERS`() {
+        val trade = Trade()
+        val forged = trade.commitmentFrom(trade.stranger)
+
+        val door = stepOrderWithCommitment(
+            trade.machine,
+            trade.accepted,
+            trade.proposal.toSelf,
+            forged.toRecipient,
+            trade.stranger.key,
+        )
+        assertNotStepped(door, ChannelRejection.PROVIDER_NOT_THIS_ORDERS.name, "ChannelRejection")
+
+        val read = decodeCommitment(forged.toRecipient).commitment ?: fail("the buyer reads the stranger's commitment")
+        val unchecked = stepOrder(
+            trade.machine,
+            trade.accepted,
+            JsOrderEvent(type = "delivery_committed", fromParty = "PROVIDER", commitment = read.commitment),
+        )
+        assertEquals("COMMITTED", unchecked.order?.state, "through `stepOrder` the stranger commits: ${unchecked.reason}")
+    }
+
+    /**
+     * T81, T77's reviewer: the fee recipient seals a commitment, and the page names the right provider.
+     * The door maps the sender to `FEE_RECIPIENT`, and §11.2 refuses that sender — `WRONG_SENDER` — so
+     * the order stays `accepted`.
+     */
+    @Test
+    @JsName("the_fee_recipient_s_commitment_with_the_right_provider_is_refused_WRONG_SENDER")
+    fun `the fee recipient's commitment with the right provider is refused WRONG_SENDER`() {
+        val trade = Trade()
+        val theirs = trade.commitmentFrom(trade.feeRecipient)
+        assertEquals(
+            "FEE_RECIPIENT",
+            partyOf(trade.proposal.toSelf, trade.provider.key, theirs.toRecipient.author).party,
+            "the sender is the order's fee recipient",
+        )
+
+        val door = stepOrderWithCommitment(
+            trade.machine,
+            trade.accepted,
+            trade.proposal.toSelf,
+            theirs.toRecipient,
+            trade.provider.key,
+        )
+        assertFalse(door.ok, "§11.2: a commitment is the provider's")
+        assertEquals(TransitionRejection.WRONG_SENDER.name, door.reason)
+        assertEquals("TransitionRejection", door.reasonVocabulary, "the machine's own refusal")
+        assertEquals("ACCEPTED", door.order?.state, "the order is handed back unchanged")
+    }
+
     // -----------------------------------------------------------------------------------------
+
+    /** [outcome] is a door's refusal [reason] from [vocabulary], with no event offered and so no order. */
+    private fun assertNotStepped(outcome: JsOrderOutcome, reason: String, vocabulary: String) {
+        assertFalse(outcome.ok, "the door must refuse: $reason")
+        assertEquals(reason, outcome.reason)
+        assertEquals(vocabulary, outcome.reasonVocabulary)
+        assertNull(outcome.order, "nothing was offered to the order, so there is no outcome order")
+    }
 
     /** One message as both parties hold it: the recipient's opened copy and the sender's `toSelf`. */
     private class Delivered(val toRecipient: JsRumor, val toSelf: JsRumor) {
@@ -211,6 +337,9 @@ class JsTradeWalkthroughTest {
         val buyer = Party(FakeCryptoSigner(FakeKey(BUYER_STREAM)))
         val provider = Party(FakeCryptoSigner(FakeKey(PROVIDER_STREAM)))
         val feeRecipient = Party(FakeCryptoSigner(FakeKey(FEE_RECIPIENT_STREAM)))
+
+        /** T81's cheats: `EnvelopeFixtures`' stranger stream, a key holding no role in this order. */
+        val stranger = Party(FakeCryptoSigner(FakeKey(EnvelopeFixtures.STRANGER_STREAM)))
 
         val environment: JsEnvironment = JsFlowFixtures.crossedEnvironment(
             clock = FakeClock(NOW),
@@ -493,7 +622,19 @@ class JsTradeWalkthroughTest {
 
         fun providerEnvelope(): JsRumorEnvelope = envelope(provider, buyer)
 
-        private fun envelope(author: Party, to: Party): JsRumorEnvelope =
+        /** Guide step 6's commitment, built and sealed to the buyer by [author] — for T81's cheats. */
+        fun commitmentFrom(author: Party): Delivered = send(
+            buildCommitment(
+                envelope(author, buyer),
+                orderIdHex,
+                JsFlowFixtures.crossed(OrderFixtures.blob.commitment),
+                DeliveryMessageFixtures.url(OrderFixtures.ORDER_INDEX),
+            ),
+            author,
+            buyer,
+        )
+
+        fun envelope(author: Party, to: Party): JsRumorEnvelope =
             JsRumorEnvelope(author.key, NOW.toString(), arrayOf(arrayOf(to.key)))
 
         /** The sighting a §8.4 door answered, which must be [point]'s. */

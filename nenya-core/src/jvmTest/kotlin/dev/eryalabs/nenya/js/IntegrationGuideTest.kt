@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.js
 
+import dev.eryalabs.nenya.conformance.MainClasses
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -264,6 +265,50 @@ class IntegrationGuideTest {
             assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
         }
 
+        /** A backticked text that reads as a constant's name: all of it, not a part of it. */
+        val CONSTANT_TOKEN: Regex = Regex("[A-Z][A-Z0-9_]{3,}")
+
+        /**
+         * T81: every backticked text in [text] that is wholly a [CONSTANT_TOKEN], in order of first
+         * appearance. Fenced code blocks are skipped — their lines are code, not inline spans — and an
+         * inline span may run across a line break, as Markdown allows. A text whose backticks outside
+         * the fences do not pair up fails rather than being read off by one.
+         */
+        fun constantTokens(text: String): Set<String> {
+            val prose = mutableListOf<String>()
+            var fenced = false
+            for (line in text.lines()) {
+                if (line.trimStart().startsWith("```")) fenced = !fenced else if (!fenced) prose += line
+            }
+            if (fenced) fail("the guide has an unclosed code fence")
+            val parts = prose.joinToString("\n").split('`')
+            if (parts.size % 2 == 0) fail("the guide's backticks outside code fences do not pair up")
+            return parts.filterIndexed { index, _ -> index % 2 == 1 }
+                .filter { CONSTANT_TOKEN.matches(it) }
+                .toCollection(LinkedHashSet())
+        }
+
+        /**
+         * Every constant of every enum this library publishes, by name — the class walk `JsSurfaceTest`
+         * uses, over every package `java.lang.reflect` finds in the main output.
+         */
+        val PUBLISHED_ENUM_CONSTANTS: Set<String> by lazy {
+            MainClasses.allPackages().flatMap { packageName ->
+                MainClasses.published(packageName).filter { it.isEnum }.flatMap { type ->
+                    type.enumConstants.map { (it as Enum<*>).name }
+                }
+            }.toSet()
+        }
+
+        /** Fails unless every constant-like token in [text] is a published enum constant, naming the rest. */
+        fun assertTokensAreConstants(text: String) {
+            assertEquals(
+                emptySet(),
+                constantTokens(text) - PUBLISHED_ENUM_CONSTANTS,
+                "backticked names in the guide that no published enum declares",
+            )
+        }
+
         /** [text] with its line at [index] removed. */
         fun withoutLine(text: String, index: Int): String =
             text.lines().filterIndexed { i, _ -> i != index }.joinToString("\n")
@@ -458,6 +503,39 @@ class IntegrationGuideTest {
                 assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
             }
         }
+    }
+
+    /**
+     * T81: every backticked text in the guide that reads as a constant's name is one — a constant of an
+     * enum the library publishes — so a page branching on a `reason` the guide names branches on a
+     * value the library can answer. T79's and T80's refusals are among them.
+     */
+    @Test
+    fun `every constant the guide names is a published enum constant`() {
+        val tokens = constantTokens(guide)
+        for (named in listOf("NOT_THIS_ORDERS_PROPOSAL", "PROVIDER_NOT_THIS_ORDERS", "WRONG_SENDER", "CANNOT_SAY")) {
+            assertTrue(named in tokens, "the guide names `$named`: $tokens")
+        }
+        assertTrue("spec/NENYA-1.md" !in tokens && "nenya.mjs" !in tokens, "only whole constant-like spans are read")
+        assertTokensAreConstants(guide)
+    }
+
+    /**
+     * Negative control: the guide with `NOT_THIS_ORDERS_PROPOSAL` misspelt fails, and so does any other
+     * name no enum declares; a span only partly constant-like, or a constant inside a code fence, is not read.
+     */
+    @Test
+    fun `the guide naming a constant no enum declares fails`() {
+        val misspelt = guide.replace("`NOT_THIS_ORDERS_PROPOSAL`", "`NOT_THIS_ORDER_PROPOSAL`")
+        assertNotEquals(guide, misspelt, "the guide names `NOT_THIS_ORDERS_PROPOSAL`")
+        assertFailsWith<AssertionError> { assertTokensAreConstants(misspelt) }
+        assertFailsWith<AssertionError> { assertTokensAreConstants("$guide\nRefused with `ESCROW_HELD`.\n") }
+
+        assertEquals(emptySet(), constantTokens("A `reason` such as `NOT_THIS_ORDERS_PROPOSAL.name` or `\"VALID\"`."))
+        assertEquals(emptySet(), constantTokens("```js\nconst `ESCROW_HELD` = 1;\n```\n"))
+        assertEquals(setOf("WRONG_SENDER"), constantTokens("Refused with\n`WRONG_SENDER`, `BID`."))
+        assertFailsWith<AssertionError> { constantTokens("An unpaired ` backtick.") }
+        assertFailsWith<AssertionError> { constantTokens("```js\nno closing fence\n") }
     }
 
     /** Negative control: a misplaced, doubled, stray or malformed `Calls:` line fails rather than being skipped. */
