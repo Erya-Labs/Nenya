@@ -339,6 +339,22 @@ public enum class ChannelRejection {
      */
     PROVIDER_NOT_THIS_ORDERS,
 
+    /**
+     * The `type=1` a `stepOrderWith…` door was handed is not the proposal the order was opened from.
+     * T80.
+     *
+     * The doors map every message's sender against the proposal they are handed, and before T80 they
+     * compared only its `order` id — so a `type=1` another key wrote under a known id made that key
+     * the `BUYER`, able to cancel. Now the order records the attributed author of the `type=1` it was
+     * opened from (`Order.buyer`, set only by `openOrderFromProposal`'s path), and a door refuses,
+     * nothing offered, when that record is absent (an order `openOrder` opened from a bare id and
+     * terms), when the proposal's author is another key, or when its terms are not equal to the
+     * order's. The fee recipient is **not** compared: `OrderTerms` carries no recipient.
+     *
+     * A local refusal, as [SENDER_NOT_A_PARTY] is: it names no tag.
+     */
+    NOT_THIS_ORDERS_PROPOSAL,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 

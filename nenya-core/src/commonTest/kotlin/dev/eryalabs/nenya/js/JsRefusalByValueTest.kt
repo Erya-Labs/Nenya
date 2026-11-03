@@ -1138,8 +1138,11 @@ class JsRefusalByValueTest {
         }
         for (clock in HOSTILE_CLOCKS) opened("openOrder under a hostile clock", at = JsOrderMachine(JsEnvironment(nowSeconds = clock)))
 
-        val proposed = JsOrder(OrderMachine().open(OrderEvent.Proposal(OrderFixtures.ORDER_ID, OrderFixtures.TERMS)))
         val messages = OrderFixtures.messages(OrderFixtures.ORDER_INDEX, stream = 0)
+        // T80: opened from the rumor the doors below are handed, so they reach their spoiled argument
+        // rather than refusing every call as NOT_THIS_ORDERS_PROPOSAL.
+        val proposed = openOrderFromProposal(machine, JsRumor(messages.proposalRumor)).order
+            ?: fail("the fixture proposal must open an order")
 
         // T72: the order opened from the rumor itself, so the machine and the rumor are what can be spoiled.
         fun openedFrom(what: String, at: JsOrderMachine = machine, rumor: JsRumor = JsRumor(messages.proposalRumor)) =

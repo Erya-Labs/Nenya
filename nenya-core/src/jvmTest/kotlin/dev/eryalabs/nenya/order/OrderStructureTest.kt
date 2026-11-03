@@ -149,6 +149,7 @@ class OrderStructureTest {
             "DisputeGround.valueOf",           // ditto
             "DeliveryFailure.valueOf",         // ditto
             "Party.valueOf",                   // ditto
+            "OrderEvent\$Proposal.<init>",     // T80: the internal door's buyer key, a pubkey, never a status
         )
 
         fun publishedClasses(): List<Class<*>> =

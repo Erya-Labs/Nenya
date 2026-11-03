@@ -158,7 +158,7 @@ public sealed interface OrderEvent {
      * It carries no [Party]: §7.4's table fixes the sender as the buyer, and there is nothing for
      * a sender field to discriminate.
      */
-    public class Proposal(
+    public class Proposal internal constructor(
 
         /**
          * §7.4's `order` id this proposal mints the order under — 32 bytes of randomness the buyer
@@ -176,8 +176,27 @@ public sealed interface OrderEvent {
         /** The terms the proposal states. A `FeeTerm.Absent` term is §8.1's zero-fee proposal. */
         public val terms: OrderTerms,
 
-        override val createdAt: Long? = null,
+        override val createdAt: Long?,
+
+        /**
+         * The key §7.2 attributed the `type=1` to — §7.4's buyer — or `null` when nobody read one
+         * off a sealed rumor. T80.
+         *
+         * **Not reachable from the published constructor.** `OrderProposal.asOrderEvent` is the one
+         * path that fills it, with the decoded proposal's attributed author, so the order records the
+         * buyer of the very `type=1` it was opened from. A caller assembling an id and terms by hand
+         * has read no seal, and the honest answer for such an event is that nobody knows who sent it.
+         * `Order.buyer` is what the `stepOrderWith…` doors compare a later proposal's author against.
+         */
+        public val buyer: String?,
     ) : Rumor {
+
+        /** The published door: an id and terms, and **no** buyer — nothing here read a seal. */
+        public constructor(
+            order: OrderId,
+            terms: OrderTerms,
+            createdAt: Long? = null,
+        ) : this(order, terms, createdAt, null)
 
         init {
             requireNonNegativeCreatedAt(createdAt)

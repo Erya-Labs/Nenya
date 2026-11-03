@@ -1108,5 +1108,7 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         "SettlementTags\$DecodedPayee.<init>" to "internal: the payee tag the settlement decoders already read",
         "FeeTermSighting.<init>" to "internal and checks nothing: its callers are `of`, swept here, and the decoded " +
             "doors over messages the rumor sweep sweeps",
+        "OrderEvent\$Proposal.<init>" to "internal and reads nothing: its one caller is OrderProposal.asOrderEvent, " +
+            "whose buyer is the attributed author of a rumor the rumor sweep sweeps (T80)",
     )
 }

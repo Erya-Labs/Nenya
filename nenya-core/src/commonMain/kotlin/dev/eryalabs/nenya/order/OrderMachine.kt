@@ -569,6 +569,20 @@ public sealed interface Order {
      */
     public val provider: String?
 
+    /**
+     * The key §7.2 attributed this order's `type=1` to — §7.4's buyer — or `null` when the order was
+     * opened from an id and terms nobody read off a sealed rumor. T80.
+     *
+     * Set once, at §11.2's genesis row, from `OrderEvent.Proposal.buyer`, which only
+     * `OrderProposal.asOrderEvent` fills; every transition carries it unchanged. Recorded because the
+     * `stepOrderWith…` doors take the proposal again with every message, and a `type=1` another key
+     * wrote under this order's id would otherwise make that key the buyer. Nothing in [OrderMachine]
+     * reads it.
+     *
+     * **It is never printed**, for the reason [provider] is not (§12 items 2 and 11).
+     */
+    public val buyer: String?
+
     /** §10.1's commitment, once the provider has sent one; `null` before `committed`. */
     public val commitment: DeliverableCommitment?
 
@@ -758,6 +772,8 @@ public class OrderMachine(
         // §11.2's genesis row is the buyer's own act: no acceptance has arrived, so there is no
         // checked provider key to record and nothing is invented to stand in for one.
         provider = null,
+        // The buyer the decoded `type=1` was attributed to, or `null` when nobody read a seal.
+        buyer = proposal.buyer,
         commitment = null,
         paidAt = null,
         releasedAt = null,
@@ -795,6 +811,7 @@ public class OrderMachine(
         // The sink is a thread a caller could not read, not one it took part in: §7.6 was never
         // reached, so there is no key an acceptance was compared against.
         provider = null,
+        buyer = null,
         commitment = null,
         paidAt = null,
         releasedAt = null,
@@ -1682,6 +1699,8 @@ private fun Order.with(
     state = state,
     terms = terms,
     provider = provider,
+    // Not a parameter either: no row of §11.2 changes who proposed the order.
+    buyer = buyer,
     commitment = commitment,
     paidAt = paidAt,
     releasedAt = releasedAt,
@@ -1698,6 +1717,7 @@ private class OpenOrder(
     override val state: OrderState,
     override val terms: OrderTerms,
     override val provider: String?,
+    override val buyer: String?,
     override val commitment: DeliverableCommitment?,
     override val paidAt: Long?,
     override val releasedAt: Long?,
@@ -1719,6 +1739,7 @@ private class OpenOrder(
      * later `id.toHex()` in a debugging line undoes without anybody noticing. [Order.provider] is
      * absent for the same reason under §12 item 2: it is a plain 64-character hex `String` with no
      * `toString` of its own to redact, so this is the only place that can keep it out of a log.
+     * [Order.buyer] is absent for the same reason.
      */
     override fun toString(): String =
         "Order(state=${state.token ?: "unknown"}, disputeGround=$disputeGround, " +

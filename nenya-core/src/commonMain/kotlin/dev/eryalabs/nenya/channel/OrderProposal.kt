@@ -408,8 +408,12 @@ public class OrderProposal internal constructor(
      *
      * The `created_at` rides along because `OrderEvent.Rumor` carries one so that §4.6 has a
      * subject; `OrderMachine` reads it nowhere, which is the point of the field.
+     *
+     * So does [buyer], through the event's internal constructor and no other path (T80): the order
+     * records who sent the `type=1` it was opened from, which is what lets a later door refuse a
+     * `type=1` another key wrote under the same id.
      */
-    public fun asOrderEvent(): OrderEvent.Proposal = OrderEvent.Proposal(order, terms, createdAt)
+    public fun asOrderEvent(): OrderEvent.Proposal = OrderEvent.Proposal(order, terms, createdAt, buyer)
 
     /**
      * §7.6, whole: is [update] an acceptance of *these* terms, a counter-proposal, or neither?
