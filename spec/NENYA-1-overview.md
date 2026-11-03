@@ -114,7 +114,9 @@ the fee payment request and the fee receipt; any divergence aborts the order.
 The buyer pays two invoices, never one invoice that a party splits: the provider's, for exactly
 the price, and the fee recipient's, for exactly the fee, sealed by the fee recipient's own key and
 accepted only in the transition into `awaiting_payment`. A payee is required only if the terms
-name it and its expected amount is non-zero, so a fee that computes to zero has no invoice.
+name it and its expected amount is non-zero, so a fee that computes to zero has no invoice. When
+an order with a non-zero fee is committed, the buyer sends the fee recipient a copy of the
+proposal, which tells it the order exists and is not evidence of anything else.
 
 Details: §4.4, §8.
 

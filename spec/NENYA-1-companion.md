@@ -28,6 +28,7 @@ NENYA-1 §0 names the current revision. No revision has changed the `["nenya", "
 | `1.11` | 2026-10-24 | The request-side `t` token renamed from `wtb` to `request` (§5.2, §5.3), after feedback on nips issue #2467; nothing was deployed, so nothing migrates. The offer-side `wts` token, the `["nenya", "1"]` tag and every other value unchanged. The five places quoting the token updated: §5.2's example, §5.3's prose, §5.5's filter example, §6's note and companion Appendix A. `nenya-1-11.2-transitions.psv` not regenerated: NENYA-1 still had 2 307 lines and the row block had not moved. |
 | `1.12` | 2026-10-31 | Prose condensed from 2 307 to 1 435 lines (45% fewer words). Each rule is stated once, in its home section; restatements removed; rationale and history moved here, including the `1.4`, `1.6` and `1.7` notes formerly in NENYA-1 §0; explanatory passages replaced by figures in `docs/`. No requirement changed: every keyword sentence of `1.11` was checked against `1.12`. Section numbers, `OPEN-n` identifiers, tables, worked examples, vectors and bounds unchanged. `spec/NENYA-1-overview.md` added (non-normative). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1767–1781 to 1079–1093), its `(from, to)` pairs unchanged. |
 | `1.13` | 2026-10-31 | Citation typo fixed: §5.3's `image` row and §5.4 cited "§12.10", but §12 is a numbered list with no subsections; both now cite §12 item 10. No requirement, keyword, identifier, wire value or section number changed; no line of NENYA-1 moved, so `nenya-1-11.2-transitions.psv` is unchanged. |
+| `1.14` | 2026-11-03 | §8.7: when an order whose `fee_msat` is not `0` enters `committed`, the buyer sends the fee recipient that order's `type=1`, unchanged, by §7.1's write procedure; the fee recipient does not treat the copy as evidence of an acceptance, a commitment or a payment. Before this revision nothing told a fee recipient that an order existed, so a fee-bearing order could not reach `awaiting_payment`. No tag, kind, state, transition or fee arithmetic changed, and the version tag is unchanged (Appendix B). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1079–1093 to 1083–1097), its `(from, to)` pairs unchanged. |
 
 ## 1. Motivation and scope
 
@@ -198,7 +199,10 @@ expires unpaid is not re-issued, and the order follows §11.2 instead. An expire
 at acceptance because the buyer would otherwise be shown a bill nothing will settle; §9.2 check 5
 remains for evidence checked against a store the implementation did not write. The fee-invoice
 binding of §8.7 uses only the checks §7.2 already requires, and makes the fee recipient a
-participant in the conversation rather than a line in a configuration file.
+participant in the conversation rather than a line in a configuration file. The buyer sends the
+fee recipient its copy of the proposal because the buyer wrote the fee term and is the one the fee
+invoice is addressed to, and sends it at `committed` because §8.5 and §11.2 refuse a fee invoice any
+earlier.
 
 ## 9. Payment evidence
 

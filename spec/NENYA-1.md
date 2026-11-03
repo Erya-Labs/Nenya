@@ -14,7 +14,7 @@ library, not an application or a service; `nenya-core` is one reference implemen
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.13`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.14`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and its reserved identifiers are not registered.
 
 A short non-normative summary is [the overview](NENYA-1-overview.md). The revision history is in
@@ -830,6 +830,10 @@ expired at the clock reading it would record for that acceptance (§9.2 check 5)
 A `type=2` with `["payee", "fee", ...]` MUST arrive in a gift wrap whose seal (`kind:13`) `pubkey`
 equals the fee-recipient pubkey named in the signed fee term; a fee invoice forwarded by the
 provider or from any other key MUST be rejected.
+
+When an order whose `fee_msat` (§8.3) is not `0` enters `committed`, the buyer MUST send the fee
+recipient named in its fee term that order's `type=1`, unchanged, by §7.1's write procedure. A fee
+recipient MUST NOT treat that copy as evidence of an acceptance, a commitment or a payment.
 
 `OPEN-7`: whether the transport binding above suffices for v1, or a stronger one is specified (a
 fee-recipient nostr signature over the invoice's `payment_hash`, or BOLT-11 node-key recovery

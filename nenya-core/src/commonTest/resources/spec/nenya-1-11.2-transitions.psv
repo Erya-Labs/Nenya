@@ -36,24 +36,28 @@
 # column changed, and the set of (from, to) pairs is identical, so `TransitionTotalityTest`'s
 # pair equality is untouched. This is a transcription change under STOP RULE 1: a fixture that
 # changes because the specification it transcribes moved.
+#
+# Regenerated for revision `1.14`, which added four lines to §8.7. The row block moved from
+# lines 1079–1093 to 1083–1097, a uniform +4 shift; only the first column changed, and the
+# set of (from, to) pairs is identical. A transcription change under STOP RULE 1, as above.
 
-1079 | — | proposed
-1080 | proposed | accepted
-1081 | proposed | cancelled
-1082 | proposed | expired
-1083 | accepted | committed
-1084 | accepted | cancelled
-1084 | accepted | expired
-1085 | committed | awaiting_payment
-1086 | committed | cancelled
-1086 | committed | expired
-1086 | committed | disputed
-1087 | awaiting_payment | paid
-1088 | awaiting_payment | cancelled
-1088 | awaiting_payment | expired
-1088 | awaiting_payment | disputed
-1089 | paid | released
-1090 | paid | disputed
-1091 | released | settled
-1092 | released | disputed
-1093 | released | disputed
+1083 | — | proposed
+1084 | proposed | accepted
+1085 | proposed | cancelled
+1086 | proposed | expired
+1087 | accepted | committed
+1088 | accepted | cancelled
+1088 | accepted | expired
+1089 | committed | awaiting_payment
+1090 | committed | cancelled
+1090 | committed | expired
+1090 | committed | disputed
+1091 | awaiting_payment | paid
+1092 | awaiting_payment | cancelled
+1092 | awaiting_payment | expired
+1092 | awaiting_payment | disputed
+1093 | paid | released
+1094 | paid | disputed
+1095 | released | settled
+1096 | released | disputed
+1097 | released | disputed
