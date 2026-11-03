@@ -6,6 +6,7 @@ import dev.eryalabs.nenya.channel.ChannelTags
 import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
 import dev.eryalabs.nenya.channel.OrderMessageKind
+import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.RumorBuild
 import dev.eryalabs.nenya.channel.RumorEnvelope
 import dev.eryalabs.nenya.channel.RumorKind
@@ -65,7 +66,10 @@ public sealed interface PaymentBuild {
         /** Which §8.6, §9.2, §9.4 or §10.3 rule refused the message, or `null` if §7.4's envelope did. */
         public val reason: SettlementRejection?,
 
-        /** Which §7.4, §4.1 or §4.5 rule refused it, or `null` if one of §8.6's own did. */
+        /**
+         * Which §7.4, §4.1 or §4.5 rule refused it — or, from `PaymentWriter.feeRequestFromProposal`,
+         * §8.7's [ChannelRejection.NOT_THE_FEE_RECIPIENT] — or `null` if one of §8.6's own did.
+         */
         public val channelReason: ChannelRejection?,
 
         /** The tag this refusal is about, or `null` where the rule names no single tag. */
@@ -286,6 +290,75 @@ public object PaymentWriter {
             // the invoice: the amount on a request *is* the invoice, and §9.2 check 4 reads it from
             // the human-readable part rather than from a tag beside it.
             amountMsat = null,
+        )
+    }
+
+    /**
+     * §8.6's `payee=fee` `type=2`, written by the fee recipient from §8.7's copy of the order's `type=1`
+     * (decision T). T87.
+     *
+     * [paymentRequest] has the caller type the order id, the recipient and the terms. Here all three
+     * come off [proposal] — the copy the fee recipient opened — so none is typed. The request is sealed
+     * to [OrderProposal.buyer], the proposal's author: §8.7's copy comes from the buyer, and the fee
+     * invoice is addressed to the buyer alone.
+     *
+     * Refused by value, nothing built, in this order:
+     *
+     * 1. no fee to request — a proposal with no `fee` term, or one whose `fee_msat` (§8.3) is `0`, so
+     *    `Payee.requiredPayees` does not name the fee recipient
+     *    ([SettlementRejection.PAYEE_NOT_REQUIRED], the decoder's refusal of the same request);
+     * 2. [envelope]'s author is not the recipient the fee term names
+     *    ([ChannelRejection.NOT_THE_FEE_RECIPIENT], on [PaymentBuild.Refused.channelReason]);
+     * 3. [invoice] is not for exactly `fee_msat` — §9.2 check 4 through `Settlement.checkAmount`, the
+     *    check `AcceptedPaymentRequest.accept` makes ([SettlementRejection.INVOICE_AMOUNT_MISSING],
+     *    [SettlementRejection.INVOICE_AMOUNT_MISMATCH], or Appendix C's refusal of the invoice);
+     *
+     * then [paymentRequest]'s own refusals.
+     *
+     * It reads no clock: the proposal's `expiration` is a deadline for acceptance (§7.5), and check 5
+     * is made when the buyer accepts the request. The copy is not evidence of an acceptance, a
+     * commitment or a payment (§8.7), and this does not treat it as one: whether the order was accepted
+     * and committed is the buyer's to check when the request arrives.
+     *
+     * @param envelope the fee recipient's own envelope; its author must be the fee term's recipient.
+     * @param proposal the `type=1` the buyer sent under §8.7, as the fee recipient opened and decoded it.
+     * @param invoice the fee recipient's BOLT-11 invoice for `fee_msat`.
+     */
+    public fun feeRequestFromProposal(
+        envelope: RumorEnvelope,
+        proposal: OrderProposal,
+        invoice: Bolt11Reference,
+    ): PaymentBuild {
+        val recipient = proposal.feeRecipient
+        if (recipient == null || Payee.FEE !in Payee.requiredPayees(proposal.terms.split)) {
+            return refused(
+                SettlementRejection.PAYEE_NOT_REQUIRED,
+                FEE,
+                "§8.6: when the fee amount (§8.3) is `0`, no fee payment request exists at all, and this " +
+                    "proposal's fee term owes the fee recipient nothing",
+            )
+        }
+        if (authorOf(envelope) != recipient) {
+            return PaymentBuild.Refused(
+                null,
+                ChannelRejection.NOT_THE_FEE_RECIPIENT,
+                null,
+                "§8.7: a fee payment request is sealed by the fee recipient named in the signed fee term, " +
+                    "and this envelope's author is another key",
+            )
+        }
+        try {
+            Settlement.checkAmount(invoice, Settlement.expectedAmount(Payee.FEE, proposal.terms.split))
+        } catch (refusal: SettlementException) {
+            return refused(refusal.reason, refusal.tag, refusal.message ?: refusal.reason.name)
+        }
+        return paymentRequest(
+            envelope = envelope,
+            order = proposal.order,
+            payee = Payee.FEE,
+            invoice = invoice,
+            feeRecipient = recipient,
+            terms = proposal.terms,
         )
     }
 

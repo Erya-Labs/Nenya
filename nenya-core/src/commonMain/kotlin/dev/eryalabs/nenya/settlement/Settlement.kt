@@ -991,6 +991,38 @@ public sealed interface Settlement {
             acceptedAt: Long,
             expected: Msat,
         ) {
+            checkParsedAmount(invoice, expected)
+            // See this function's note: the subtraction is what makes the comparison total.
+            if (invoice.expirySeconds < acceptedAt - invoice.timestamp) {
+                throw SettlementException(
+                    SettlementRejection.INVOICE_EXPIRED,
+                    SettlementVocabulary.PAYMENT,
+                    "§9.2 check 5: the invoice's `timestamp + expiry` was already in the past when " +
+                        "this implementation accepted it, measured against the value its injected " +
+                        "clock held at that moment (§4.6). The comparison is deliberately not made " +
+                        "against the clock as it reads now — an invoice that was live when the " +
+                        "buyer paid it does not become unpaid because it has since expired — so " +
+                        "this is an invoice that was dead on arrival and was stored anyway",
+                )
+            }
+        }
+
+        /**
+         * §9.2 check 4 alone, over an unparsed reference — for `PaymentWriter.feeRequestFromProposal`
+         * (T87), which writes a fee request and has no acceptance reading for check 5 to compare against.
+         *
+         * The same [checkParsedAmount] [checkAmountAndExpiry] makes, so the writer refuses exactly the
+         * invoices [AcceptedPaymentRequest.accept] would refuse for their amount, and no others.
+         *
+         * @throws SettlementException [SettlementRejection.INVOICE_AMOUNT_MISSING] or
+         *   [SettlementRejection.INVOICE_AMOUNT_MISMATCH], or any [SettlementRejection.APPENDIX_C_PARSER]
+         *   reason [Bolt11Invoice.parse] refuses the invoice with.
+         */
+        internal fun checkAmount(invoice: Bolt11Reference, expected: Msat) =
+            checkParsedAmount(Bolt11Invoice.parse(invoice), expected)
+
+        /** §9.2 check 4: see [checkParsedAmountAndExpiry]'s note on why absence is its own answer. */
+        private fun checkParsedAmount(invoice: Bolt11Invoice, expected: Msat) {
             val amount = invoice.amount ?: throw SettlementException(
                 SettlementRejection.INVOICE_AMOUNT_MISSING,
                 SettlementVocabulary.PAYMENT,
@@ -1008,19 +1040,6 @@ public sealed interface Settlement {
                         "`fee_msat` for the fee recipient — and this one does not. The rule is an " +
                         "equality in both directions: an invoice for more is an overcharge, and an " +
                         "invoice for less settles the order for a figure nobody agreed to",
-                )
-            }
-            // See this function's note: the subtraction is what makes the comparison total.
-            if (invoice.expirySeconds < acceptedAt - invoice.timestamp) {
-                throw SettlementException(
-                    SettlementRejection.INVOICE_EXPIRED,
-                    SettlementVocabulary.PAYMENT,
-                    "§9.2 check 5: the invoice's `timestamp + expiry` was already in the past when " +
-                        "this implementation accepted it, measured against the value its injected " +
-                        "clock held at that moment (§4.6). The comparison is deliberately not made " +
-                        "against the clock as it reads now — an invoice that was live when the " +
-                        "buyer paid it does not become unpaid because it has since expired — so " +
-                        "this is an invoice that was dead on arrival and was stored anyway",
                 )
             }
         }

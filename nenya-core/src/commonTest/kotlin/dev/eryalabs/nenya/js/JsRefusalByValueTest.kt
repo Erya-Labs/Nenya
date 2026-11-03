@@ -91,7 +91,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Forty-nine of `JsSurfaceTest.ENTRY_POINTS`' fifty: `capabilities` takes nothing, so it
+         * Fifty of `JsSurfaceTest.ENTRY_POINTS`' fifty-one: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -144,6 +144,7 @@ class JsRefusalByValueTest {
             "stepOrderWithCommitment",
             "stepOrderWithRelease",
             "proposalForFeeRecipient",
+            "buildFeeRequestFromProposal",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1326,6 +1327,26 @@ class JsRefusalByValueTest {
         copied("proposalForFeeRecipient of a proposed order", at = proposed)
         copied("proposalForFeeRecipient with a status update as the proposal", proposal = cancellation)
         copied("proposalForFeeRecipient of a chat", proposal = chat)
+
+        // T87: the fee recipient's request from that copy, so the envelope, the rumor and the invoice can be spoiled.
+        val feeEnvelope = JsRumorEnvelope(
+            SettlementFixtures.feeRecipient(OrderFixtures.ORDER_INDEX),
+            OrderFixtures.BEFORE_DEADLINES.toString(),
+            arrayOf(arrayOf(SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX))),
+        )
+        val feeInvoice = OrderFixtures.chain().requestInvoice(Payee.FEE)
+        fun requested(what: String, envelope: JsRumorEnvelope = feeEnvelope, proposal: JsRumor = JsRumor(messages.proposalRumor), invoice: String = feeInvoice) {
+            val answer = call(::buildFeeRequestFromProposal) { buildFeeRequestFromProposal(envelope, proposal, invoice) }
+            if (!answer.ok) {
+                assertNull(answer.event, "$what: a refusal builds nothing")
+                assertNull(answer.buyerPubkey, "$what: a refusal names no addressee")
+            }
+            record(what, answer.ok, answer.kind, answer.reason, answer.reasonVocabulary, answer.detail)
+        }
+        for (envelope in hostileEnvelopes(feeEnvelope)) requested("buildFeeRequestFromProposal envelope", envelope = envelope)
+        for (bad in HOSTILE_HEX + HOSTILE_TEXTS) requested("buildFeeRequestFromProposal invoice=`$bad`", invoice = bad)
+        requested("buildFeeRequestFromProposal with a status update as the proposal", proposal = cancellation)
+        requested("buildFeeRequestFromProposal of a chat", proposal = chat)
     }
 
     /**

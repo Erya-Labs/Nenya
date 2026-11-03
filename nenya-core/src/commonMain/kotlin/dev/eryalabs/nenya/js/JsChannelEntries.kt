@@ -434,6 +434,87 @@ public fun buildPaymentRequest(
     ).asJsBuildResult()
 }
 
+/**
+ * The fee recipient's `payee=fee` `type=2`, written from §8.7's copy of the order's `type=1`, through
+ * `PaymentWriter.feeRequestFromProposal` (decision T). T87.
+ *
+ * [buildPaymentRequest] has the page type the order id, the fee recipient and the terms. Here they come
+ * off [proposalRumor], and the answer names the buyer — the proposal's author — as the key to [seal] the
+ * request to, so the page types none of them. The facade performs **no check of its own**: one call to
+ * `OrderProposal.decode`, one to `Bolt11Reference.recognise`, then one to
+ * `PaymentWriter.feeRequestFromProposal`, whose refusals come back as values with nothing built:
+ * no fee to request (`PAYEE_NOT_REQUIRED`), an envelope author other than the fee term's recipient
+ * (`NOT_THE_FEE_RECIPIENT`), and an invoice not for exactly `fee_msat` (`INVOICE_AMOUNT_MISSING`,
+ * `INVOICE_AMOUNT_MISMATCH`).
+ *
+ * The copy is not evidence of an acceptance, a commitment or a payment (§8.7). The buyer checks the
+ * request against its own order when it arrives, through [acceptPaymentRequest].
+ *
+ * @param envelope the fee recipient's own envelope.
+ * @param proposalRumor the `kind:16` `type=1` the buyer sent under §8.7, as [open] handed it back.
+ * @param invoice the fee recipient's BOLT-11 invoice for `fee_msat`.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun buildFeeRequestFromProposal(
+    envelope: JsRumorEnvelope,
+    proposalRumor: JsRumor,
+    invoice: String,
+): JsFeeRequest = jsGuarded({ JsFeeRequest(jsRefused(it.reason, it.vocabulary, it.tag, it.tagReason, it.detail), null) }) {
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    val build = PaymentWriter.feeRequestFromProposal(
+        envelope = envelope.asRumorEnvelope(),
+        proposal = proposal,
+        invoice = Bolt11Reference.recognise(invoice),
+    ).asJsBuildResult()
+    JsFeeRequest(build, if (build.ok) proposal.buyer else null)
+}
+
+/**
+ * What [buildFeeRequestFromProposal] answered: the request and the key to seal it to, or the refusal.
+ *
+ * [event] goes to [seal] or [sealAsync] with [buyerPubkey] as the recipient, sealed with the fee
+ * recipient's own signer.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsFeeRequest internal constructor(
+    private val build: JsBuildResult,
+    private val buyer: String?,
+) {
+
+    /** `"built"` or `"refused"`. */
+    public val kind: String get() = build.kind
+
+    /** True exactly when [kind] is `"built"`. */
+    public val ok: Boolean get() = build.ok
+
+    /** The unsigned `type=2`, when [ok]. */
+    public val event: JsWireEvent? get() = build.event
+
+    /** The proposal's author — the buyer, whom the request is sealed to — when [ok]. */
+    public val buyerPubkey: String? get() = buyer
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = build.reason
+
+    /** Which rejection enum [reason] came from — `SettlementRejection`, `ChannelRejection`, … */
+    public val reasonVocabulary: String? get() = build.reasonVocabulary
+
+    /** The tag the refusal is about, or `null` where the rule names no single tag. */
+    public val tag: String? get() = build.tag
+
+    /** The tag layer's own `TagRejection.name`, where a tag codec refused the value. */
+    public val tagReason: String? get() = build.tagReason
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = build.detail
+
+    /** Names the kind or the refusal reason — never a key. */
+    override fun toString(): String =
+        if (ok) "JsFeeRequest(built)" else "JsFeeRequest(refused: $reason)"
+}
+
 /** §9.2's `kind:17` payment receipt, through `PaymentWriter.receipt`. */
 @OptIn(ExperimentalJsExport::class)
 @JsExport

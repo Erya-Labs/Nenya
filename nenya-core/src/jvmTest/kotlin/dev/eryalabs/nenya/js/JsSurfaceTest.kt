@@ -160,6 +160,8 @@ class JsSurfaceTest {
             "JsPartyResult",
             // T86's one: §8.7's copy of the `type=1` and its addressee, read by a page and sealed by it.
             "JsFeeRecipientCopy",
+            // T87's one: the fee recipient's `type=2` built from §8.7's copy, with the buyer's key to seal it to.
+            "JsFeeRequest",
         )
 
         /**
@@ -300,10 +302,10 @@ class JsSurfaceTest {
         )
 
         /**
-         * The fifty entry points this package exports: T42's thirteen, T43's six, T44's five,
+         * The fifty-one entry points this package exports: T42's thirteen, T43's six, T44's five,
          * T47's one, T48's two, T49's three, T50's one, T51's one, T52's one, T53's one, T55's two,
          * T59's one, T60's two, T61's one, T65's one, T71's three, T72's one, T75's one, T76's one,
-         * T77's two and T86's one.
+         * T77's two, T86's one and T87's one.
          *
          * Pinned so the sweep cannot pass over a package whose entry points were renamed or removed,
          * and so the counts in T42's, T43's and T44's text are facts about the compiled library
@@ -381,6 +383,8 @@ class JsSurfaceTest {
             "stepOrderWithRelease",
             // T86 — §8.7's copy of the `type=1` for the fee recipient, its addressee read off the fee term (decision T).
             "proposalForFeeRecipient",
+            // T87 — the fee recipient's `type=2` written from §8.7's copy, its order, terms and addressee read off it (decision T).
+            "buildFeeRequestFromProposal",
         )
 
         /**
@@ -397,6 +401,9 @@ class JsSurfaceTest {
             val covered = pinned + REFUSAL_BY_VALUE_EXEMPT
             return (ENTRY_POINTS - covered) to (covered - ENTRY_POINTS)
         }
+
+        /** T87's one, for the same reason [T42_ENTRY_POINTS] exists. */
+        val T87_ENTRY_POINTS: Set<String> = setOf("buildFeeRequestFromProposal")
 
         /** T86's one, for the same reason [T42_ENTRY_POINTS] exists. */
         val T86_ENTRY_POINTS: Set<String> = setOf("proposalForFeeRecipient")
@@ -599,11 +606,13 @@ class JsSurfaceTest {
         assertEquals(13, T42_ENTRY_POINTS.size, "T42's text says thirteen")
         assertEquals(5, T44_ENTRY_POINTS.size, "T44's text names three gaps and five entry points")
         assertEquals(
-            50,
+            51,
             ENTRY_POINTS.size,
-            "T86's one on top of T77's two on top of T76's one on top of T75's one on top of T72's one on top of T71's three on top of T65's one on top of T61's one on top of T60's two on top of T59's one on top of T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
+            "T87's one on top of T86's one on top of T77's two on top of T76's one on top of T75's one on top of T72's one on top of T71's three on top of T65's one on top of T61's one on top of T60's two on top of T59's one on top of T55's two on top of T53's one on top of T52's one on top of T51's one on top of T50's one on top of T49's three on top of T48's two on top of T47's one on top of T44's five " +
                 "on top of T43's six on top of T42's thirteen",
         )
+        assertEquals(1, T87_ENTRY_POINTS.size, "T87's text crosses one")
+        assertTrue(T87_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T87's `buildFeeRequestFromProposal` is exported")
         assertEquals(1, T86_ENTRY_POINTS.size, "T86's text crosses one")
         assertTrue(T86_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T86's `proposalForFeeRecipient` is exported")
         assertEquals(2, T77_ENTRY_POINTS.size, "T77's text crosses two")
@@ -654,7 +663,7 @@ class JsSurfaceTest {
                 T49_ENTRY_POINTS - T50_ENTRY_POINTS - T51_ENTRY_POINTS - T52_ENTRY_POINTS -
                 T53_ENTRY_POINTS - T55_ENTRY_POINTS - T59_ENTRY_POINTS - T60_ENTRY_POINTS -
                 T61_ENTRY_POINTS - T65_ENTRY_POINTS - T71_ENTRY_POINTS - T72_ENTRY_POINTS -
-                T75_ENTRY_POINTS - T76_ENTRY_POINTS - T77_ENTRY_POINTS - T86_ENTRY_POINTS).size,
+                T75_ENTRY_POINTS - T76_ENTRY_POINTS - T77_ENTRY_POINTS - T86_ENTRY_POINTS - T87_ENTRY_POINTS).size,
             "T43's text says six: seal, open, the two settlement checks, openOrder and stepOrder",
         )
         assertTrue(T42_ENTRY_POINTS.all { it in ENTRY_POINTS }, "T42's thirteen are still exported")
@@ -685,7 +694,7 @@ class JsSurfaceTest {
             pinned.none { it in REFUSAL_BY_VALUE_EXEMPT },
             "an exempt entry point is also pinned as swept, so one of the two lists is not what it says",
         )
-        assertEquals(49, pinned.size, "fifty entry points less `capabilities`")
+        assertEquals(50, pinned.size, "fifty-one entry points less `capabilities`")
     }
 
     /** The control for the test above: a pin missing any one entry point fails the equality. */

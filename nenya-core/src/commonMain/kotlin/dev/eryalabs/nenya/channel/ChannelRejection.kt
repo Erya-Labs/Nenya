@@ -377,6 +377,18 @@ public enum class ChannelRejection {
      */
     NO_FEE_TO_REQUEST,
 
+    /**
+     * A fee payment request written from §8.7's copy of the `type=1` by a key other than the fee
+     * recipient that copy's fee term names. T87.
+     *
+     * §8.7 makes the fee recipient in the signed fee term the only key a `payee=fee` request may be
+     * sealed by, and `AcceptedPaymentRequest.accept` refuses any other. So
+     * `PaymentWriter.feeRequestFromProposal` builds nothing when the envelope's author is not that
+     * recipient: the request would be refused on arrival, and a page writing one has opened somebody
+     * else's copy. Names no tag: the rule is about who writes, not about a tag's value.
+     */
+    NOT_THE_FEE_RECIPIENT,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 

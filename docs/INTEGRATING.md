@@ -463,4 +463,5 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `stepOrderWithCommitment` — applies a received delivery commitment to an order, read from the message, so the order records §10.1's check that it carries no key (§10.1, §11.2).
 - `stepOrderWithRelease` — applies a received release to an order, read from the message, so the order records §10.3's check that it names this order (§10.3, §11.2).
 - `proposalForFeeRecipient` — gives the buyer the order's proposal, unchanged, to seal to the fee recipient once the order is committed, and the fee recipient's key read from the fee term (§8.7).
+- `buildFeeRequestFromProposal` — builds the fee recipient's payment request from the proposal the buyer sent it, with the order, the terms and the buyer's key to seal it to read from that proposal (§8.6, §8.7).
 - `capabilities` — the library's own statement of what it does and does not check (§17).
