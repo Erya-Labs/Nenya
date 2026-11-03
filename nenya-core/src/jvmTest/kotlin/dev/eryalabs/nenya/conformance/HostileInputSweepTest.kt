@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.bid.AuthoredBid
 import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.bid.BidWriter
 import dev.eryalabs.nenya.channel.AttributedRumor
+import dev.eryalabs.nenya.channel.OrderBinding
 import dev.eryalabs.nenya.channel.RumorWriterFixtures
 import dev.eryalabs.nenya.delivery.DeliverableCommitment
 import dev.eryalabs.nenya.delivery.DeliverableHash
@@ -20,6 +21,7 @@ import dev.eryalabs.nenya.listing.ListingWriter
 import dev.eryalabs.nenya.money.FeeTerm
 import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.order.OrderFixtures
+import dev.eryalabs.nenya.order.OrderState
 import dev.eryalabs.nenya.order.OrderStatusCodec
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.PaymentHash
@@ -31,6 +33,7 @@ import dev.eryalabs.nenya.settlement.FeeTermSighting
 import dev.eryalabs.nenya.settlement.PaymentMedium
 import dev.eryalabs.nenya.settlement.PaymentWriter
 import dev.eryalabs.nenya.settlement.ReleaseFixtures
+import dev.eryalabs.nenya.settlement.SettlementFixtures
 import dev.eryalabs.nenya.tag.Coordinate
 import dev.eryalabs.nenya.tag.ImageRef
 import dev.eryalabs.nenya.tag.ItemRef
@@ -86,7 +89,7 @@ import kotlin.test.fail
  *
  * The money path is swept the same way again: the BOLT-11 recogniser and parser over
  * `HostileCorpus.invoiceCorpus`, and the hex, token and byte decoders in `settlement`, `payment`,
- * `delivery` and `order` over every tag value of the other two corpora — with its own probe control,
+ * `delivery`, `order` and `channel` over every tag value of the other two corpora — with a probe control,
  * and with every published function or constructor there taking a `String`, a `ByteArray` or a
  * `List<String>` held equal to the swept set plus a pinned exemption list, each exemption with its
  * reason.
@@ -800,38 +803,15 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
 
     // -----------------------------------------------------------------------------------------
     // The money path: the BOLT-11 reader, and the hex, token and byte decoders a counterparty's
-    // values reach in `settlement`, `payment`, `delivery` and `order`.
+    // values reach in `settlement`, `payment`, `delivery` and `order`, and the keys `channel` reads (T84).
     // -----------------------------------------------------------------------------------------
 
     /**
-     * One money-path sweep input: a redacted description, the strings it carries, and the tags it
-     * carries.
-     *
-     * Drawn from all three corpora: every tag value and hostile string of [HostileCorpus.corpus] and
-     * [HostileCorpus.rumorCorpus] — the values a counterparty's event hands these decoders — and every
-     * entry of [HostileCorpus.invoiceCorpus]. A value or a tag already seen is not repeated, so the
-     * sweep's cost is the corpora's distinct values rather than their size.
+     * One swept money-path entry point: its label, and the calls it makes for one [MoneyInput] — the
+     * inputs, and [moneyInputs] which draws them, live in the common base so T84's sender control runs
+     * as JavaScript too.
      */
-    private class MoneyInput(val described: String, val values: List<String>, val tags: List<List<String>>)
-
-    /** One swept money-path entry point: its label, and the calls it makes for one [MoneyInput]. */
     private class MoneyTarget(val label: String, val calls: (MoneyInput) -> List<() -> Unit>)
-
-    private fun moneyInputs(): List<MoneyInput> {
-        val seenValues = HashSet<String>()
-        val seenTags = HashSet<List<String>>()
-        val out = ArrayList<MoneyInput>()
-        fun add(described: String, input: HostileCorpus.Input) {
-            val values = (input.tags.flatMap { it.drop(1) } + listOf(input.text, input.hex, input.coordinate, input.decimal))
-                .filter { seenValues.add(it) }
-            val tags = input.tags.filter { seenTags.add(it) }
-            if (values.isNotEmpty() || tags.isNotEmpty()) out += MoneyInput(described, values, tags)
-        }
-        for (input in HostileCorpus.corpus(CORPUS)) add("$input", input)
-        for (rumor in HostileCorpus.rumorCorpus(RUMOR_CORPUS)) add("$rumor", rumor.input)
-        for (invoice in HostileCorpus.invoiceCorpus()) out += MoneyInput("$invoice", listOf(invoice.invoice), emptyList())
-        return out
-    }
 
     /**
      * Every money-path entry point a counterparty's string, bytes or tag reaches, each over every
@@ -861,6 +841,11 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         val invoice = request.invoice ?: fail("$request carries no invoice")
         val commitment = ReleaseFixtures.commitment()
         val payment = OrderFixtures.receipt(Payee.PROVIDER)
+        val chain = OrderFixtures.chain()
+        val orders = OrderFixtures.orders()
+        val boundOrders = listOf(orders.getValue(OrderState.PROPOSED), orders.getValue(OrderState.ACCEPTED))
+        val buyer = SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX)
+        val provider = SettlementFixtures.provider(OrderFixtures.ORDER_INDEX)
 
         fun bytes(m: MoneyInput): List<ByteArray> =
             m.values.flatMap { listOf(it.encodeToByteArray(), it.encodeToByteArray().copyOf(PaymentHash.BYTE_LENGTH)) }
@@ -942,6 +927,35 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
                     )
                 }
             },
+            // T84: the keys a page reads off hostile events and hands `channel`'s binding functions, each
+            // in every `String` parameter with the honest chain's proposal, update and orders beside it.
+            MoneyTarget("OrderProposal.accepts") { m ->
+                m.values.map { v -> { chain.proposal.accepts(chain.update, v); Unit } }
+            },
+            MoneyTarget("OrderProposal.partyOf") { m ->
+                m.values.flatMap { v ->
+                    listOf<() -> Unit>(
+                        { chain.proposal.partyOf(v, provider); Unit },
+                        { chain.proposal.partyOf(buyer, v); Unit },
+                    )
+                }
+            },
+            // At `proposed` no provider key is recorded and at `accepted` one is, so both of `check`'s
+            // branches over the key are reached.
+            MoneyTarget("OrderBinding.check") { m ->
+                m.values.flatMap { v ->
+                    boundOrders.map { order -> { OrderBinding.check(order, chain.proposal, v, chain.update.order); Unit } }
+                }
+            },
+            MoneyTarget("OrderBinding.sender") { m ->
+                m.values.flatMap { v ->
+                    listOf<() -> Unit>(
+                        { OrderBinding.sender(chain.proposal, v, provider, null); Unit },
+                        { OrderBinding.sender(chain.proposal, provider, v, null); Unit },
+                        { OrderBinding.sender(chain.proposal, provider, provider, v); Unit },
+                    )
+                }
+            },
         )
     }
 
@@ -1002,7 +1016,7 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
     }
 
     /**
-     * Every published function or constructor in the four money packages taking a `String`, a
+     * Every published function or constructor in the five money packages taking a `String`, a
      * `ByteArray` or a `List<String>` is swept or pinned exempt with a reason — the swept set plus
      * [MONEY_EXEMPT] **equals** the reflected one, and the two are disjoint.
      */
@@ -1023,6 +1037,14 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         }
     }
 
+    /** T84's control by name: `partyOf` is swept, never exempt, so dropping it is a gap. */
+    @Test
+    fun `dropping partyOf from the swept set fails the equality`() {
+        val swept = moneySwept().map { it.label }.toSet()
+        assertTrue("OrderProposal.partyOf" in swept, "partyOf is not swept: $swept")
+        assertEquals(setOf("OrderProposal.partyOf"), moneyGap(swept - "OrderProposal.partyOf"))
+    }
+
     /**
      * Everything the reflected set and the claimed one disagree on: a published entry point neither
      * swept nor exempt, a claim nothing publishes, a label both swept and exempt, and a pinned
@@ -1037,7 +1059,7 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
 
     /**
      * Every public method and every JVM-public constructor — the synthetic ones included, since a Java
-     * client reaches those — in the four money packages with a parameter of one of [MONEY_SHAPES].
+     * client reaches those — in the five money packages with a parameter of one of [MONEY_SHAPES].
      */
     private fun reflectedMoneyEntryPoints(): Set<String> {
         val found = mutableSetOf<String>()
@@ -1081,6 +1103,7 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
         "dev.eryalabs.nenya.payment",
         "dev.eryalabs.nenya.delivery",
         "dev.eryalabs.nenya.order",
+        "dev.eryalabs.nenya.channel",
     )
 
     /** The three parameter shapes a counterparty's value reaches these packages in, by generic type name. */
@@ -1110,5 +1133,27 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
             "doors over messages the rumor sweep sweeps",
         "OrderEvent\$Proposal.<init>" to "internal and reads nothing: its one caller is OrderProposal.asOrderEvent, " +
             "whose buyer is the attributed author of a rumor the rumor sweep sweeps (T80)",
+        // T84: `channel`. Its key-reading functions are swept above; everything else the filter names is here.
+        "ChannelException.<init>" to "a refusal: a reason and a detail this library wrote; it reads nothing",
+        "RumorBuild\$Refused.<init>" to "a writer's refusal value: a tag name and a detail this library wrote",
+        "RumorEnvelope.<init>" to "a writer's input: the author pubkey and content the client writes itself " +
+            "(ChannelStructureTest's category 6)",
+        "RumorWriter.proposal" to "a writer: takes values the client writes itself (ChannelStructureTest's category 6)",
+        "RumorWriter.statusUpdate" to "a writer: takes values the client writes itself (ChannelStructureTest's category 6)",
+        "RumorWriter.privateBid" to "a writer: takes values the client writes itself (ChannelStructureTest's category 6)",
+        "RumorWriter.commitment" to "a writer: takes values the client writes itself (ChannelStructureTest's category 6)",
+        "RumorWriter.release" to "a writer: takes values the client writes itself (ChannelStructureTest's category 6)",
+        "ListingOrderWriter.proposal" to "a writer: takes values the client writes itself (ChannelStructureTest's " +
+            "category 6)",
+        "AttributedRumor\$Companion.attribute" to "swept by the rumor sweep (T64), under every hostile string as the " +
+            "seal's pubkey",
+        "Acceptance\$Accepted.<init>" to "internal: its one caller is OrderProposal.accepts, swept here",
+        "Acceptance\$CounterProposal.<init>" to "internal: its one caller is OrderProposal.accepts, swept here",
+        "SignedTerms.<init>" to "internal: built only by OrderProposal.decode and OrderStatusMessage.decode, which the " +
+            "rumor sweep sweeps",
+        "DeliverableTags.<init>" to "internal: built only by DeliveryCommitmentMessage.decode and " +
+            "DeliverableReleaseMessage.decode, which the rumor sweep sweeps",
+        "DeliveryCommitmentMessage.<init>" to "internal: its one caller is DeliveryCommitmentMessage.decode, which the " +
+            "rumor sweep sweeps",
     )
 }

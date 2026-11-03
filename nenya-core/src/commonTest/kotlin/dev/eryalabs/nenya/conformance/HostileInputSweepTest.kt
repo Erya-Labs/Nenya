@@ -2,8 +2,11 @@ package dev.eryalabs.nenya.conformance
 
 import dev.eryalabs.nenya.bid.Bid
 import dev.eryalabs.nenya.channel.AttributedRumor
+import dev.eryalabs.nenya.channel.ChannelException
+import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
+import dev.eryalabs.nenya.channel.OrderBinding
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.channel.PrivateBid
@@ -12,6 +15,7 @@ import dev.eryalabs.nenya.channel.RumorWriterFixtures.Shape
 import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.money.FeeSplit
 import dev.eryalabs.nenya.money.Msat
+import dev.eryalabs.nenya.order.OrderFixtures
 import dev.eryalabs.nenya.order.OrderTerms
 import dev.eryalabs.nenya.payment.Payee
 import dev.eryalabs.nenya.payment.Preimage
@@ -22,6 +26,7 @@ import dev.eryalabs.nenya.settlement.PaymentMedium
 import dev.eryalabs.nenya.settlement.PaymentReceipt
 import dev.eryalabs.nenya.settlement.PaymentRequest
 import dev.eryalabs.nenya.settlement.SettlementException
+import dev.eryalabs.nenya.settlement.SettlementFixtures
 import dev.eryalabs.nenya.settlement.SettlementRejection
 import dev.eryalabs.nenya.tag.NenyaKind
 import dev.eryalabs.nenya.tag.TagContext
@@ -32,14 +37,17 @@ import dev.eryalabs.nenya.wire.WireEvent
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * The half of `HostileInputSweepTest` that is common Kotlin: the corpus floors. [HostileCorpus]
  * carries every mutation kind, reproducibly; its inputs reach the tag, listing and bid codecs and
- * round-trip through them; and every mutation reaches a decoder on every listing kind.
+ * round-trip through them; and every mutation reaches a decoder on every listing kind. Also the money
+ * path's inputs, and T84's control that no hostile sender among them is mapped to a party.
  *
  * Abstract, and run as `HostileInputSweepTest` on every target, so every test keeps its name. The
  * sweep itself, its harness control and its completeness check recognise a named rejection and
@@ -609,5 +617,60 @@ abstract class PortableHostileInputSweepTest {
             reached < INVOICE_REACH_FLOOR,
             "$reached raw string edits reached past the checksum, so the floor does not need the composer",
         )
+    }
+
+    /**
+     * One money-path sweep input: a redacted description, the strings it carries, and the tags it
+     * carries.
+     *
+     * Drawn from all three corpora: every tag value and hostile string of [HostileCorpus.corpus] and
+     * [HostileCorpus.rumorCorpus] — the values a counterparty's event hands these decoders — and every
+     * entry of [HostileCorpus.invoiceCorpus]. A value or a tag already seen is not repeated, so the
+     * sweep's cost is the corpora's distinct values rather than their size.
+     */
+    protected class MoneyInput(val described: String, val values: List<String>, val tags: List<List<String>>)
+
+    protected fun moneyInputs(): List<MoneyInput> {
+        val seenValues = HashSet<String>()
+        val seenTags = HashSet<List<String>>()
+        val out = ArrayList<MoneyInput>()
+        fun add(described: String, input: HostileCorpus.Input) {
+            val values = (input.tags.flatMap { it.drop(1) } + listOf(input.text, input.hex, input.coordinate, input.decimal))
+                .filter { seenValues.add(it) }
+            val tags = input.tags.filter { seenTags.add(it) }
+            if (values.isNotEmpty() || tags.isNotEmpty()) out += MoneyInput(described, values, tags)
+        }
+        for (input in HostileCorpus.corpus(CORPUS)) add("$input", input)
+        for (rumor in HostileCorpus.rumorCorpus(RUMOR_CORPUS)) add("$rumor", rumor.input)
+        for (invoice in HostileCorpus.invoiceCorpus()) out += MoneyInput("$invoice", listOf(invoice.invoice), emptyList())
+        return out
+    }
+
+    /**
+     * T84: every hostile sender the money path's corpora carry that is not one of the honest proposal's
+     * three keys maps to no party — `partyOf` answers `null` and `OrderBinding.sender` refuses
+     * `SENDER_NOT_A_PARTY` — so no hostile string is made a party by being unreadable. Common, because a
+     * page calls both through the JavaScript build with keys it read off hostile events.
+     */
+    @JsName("every_hostile_sender_that_is_none_of_the_proposal_s_three_keys_maps_to_no_party")
+    @Test
+    fun `every hostile sender that is none of the proposal's three keys maps to no party`() {
+        val chain = OrderFixtures.chain()
+        val index = OrderFixtures.ORDER_INDEX
+        val provider = SettlementFixtures.provider(index)
+        val keys = setOf(SettlementFixtures.buyer(index), provider, SettlementFixtures.feeRecipient(index))
+        var swept = 0
+        for (input in moneyInputs()) {
+            for (sender in input.values) {
+                if (sender.lowercase() in keys) continue
+                swept++
+                assertNull(chain.proposal.partyOf(sender, provider), "partyOf mapped a hostile sender to a party on ${input.described}")
+                val refused = assertFailsWith<ChannelException>("sender on ${input.described}") {
+                    OrderBinding.sender(chain.proposal, sender, provider, null)
+                }
+                assertEquals(ChannelRejection.SENDER_NOT_A_PARTY, refused.reason, "sender on ${input.described}")
+            }
+        }
+        assertTrue(swept > 200, "only $swept hostile senders were tried")
     }
 }

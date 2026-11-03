@@ -229,9 +229,11 @@ class ErasedReflectionSweepTest {
             // two reads, unchanged, declared on the same terms; its own reflection reads
             // `genericParameterTypes` too. T70 moved them to 673 and 778 with one import and the §12
             // item 2 scan's sweep target — the same two reads, unchanged, declared on the same terms.
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:673" to
+            // T84 moved them to 676 and 781 with the three imports `channel`'s sweep needs — the same
+            // two reads, unchanged, declared on the same terms.
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:676" to
                 "dispatches through Enum::class.java.isAssignableFrom",
-            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:778" to
+            "src/jvmTest/kotlin/dev/eryalabs/nenya/conformance/HostileInputSweepTest.kt:781" to
                 "tests membership in hostileShapes(), a set of Class objects; its KDoc says the " +
                 "erasure is deliberate, because a filter written against the parameterised type " +
                 "would see nothing at all",
