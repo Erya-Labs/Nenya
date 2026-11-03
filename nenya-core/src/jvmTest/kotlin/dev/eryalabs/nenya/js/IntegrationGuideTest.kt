@@ -574,7 +574,14 @@ class IntegrationGuideTest {
     @Test
     fun `every constant the guide names is a published enum constant`() {
         val tokens = constantTokens(guide)
-        for (named in listOf("NOT_THIS_ORDERS_PROPOSAL", "PROVIDER_NOT_THIS_ORDERS", "WRONG_SENDER", "CANNOT_SAY")) {
+        val refusals = listOf(
+            "NOT_THIS_ORDERS_PROPOSAL",
+            "PROVIDER_NOT_THIS_ORDERS",
+            "WRONG_SENDER",
+            "CANNOT_SAY",
+            "NOT_ADDRESSED_TO_BUYER",
+        )
+        for (named in refusals) {
             assertTrue(named in tokens, "the guide names `$named`: $tokens")
         }
         assertTrue("spec/NENYA-1.md" !in tokens && "nenya.mjs" !in tokens, "only whole constant-like spans are read")
@@ -582,7 +589,7 @@ class IntegrationGuideTest {
     }
 
     /**
-     * Negative control: the guide with `NOT_THIS_ORDERS_PROPOSAL` misspelt fails, and so does any other
+     * Negative control: the guide with `NOT_THIS_ORDERS_PROPOSAL` or `NOT_ADDRESSED_TO_BUYER` misspelt fails, and so does any other
      * name no enum declares; a span only partly constant-like, or a constant inside a code fence, is not read.
      */
     @Test
@@ -590,6 +597,10 @@ class IntegrationGuideTest {
         val misspelt = guide.replace("`NOT_THIS_ORDERS_PROPOSAL`", "`NOT_THIS_ORDER_PROPOSAL`")
         assertNotEquals(guide, misspelt, "the guide names `NOT_THIS_ORDERS_PROPOSAL`")
         assertFailsWith<AssertionError> { assertTokensAreConstants(misspelt) }
+        // T91: T89's refusal, which the fee recipient's step 2 names.
+        val misspeltT89 = guide.replace("`NOT_ADDRESSED_TO_BUYER`", "`NOT_ADDRESSED_TO_THE_BUYER`")
+        assertNotEquals(guide, misspeltT89, "the guide names `NOT_ADDRESSED_TO_BUYER`")
+        assertFailsWith<AssertionError> { assertTokensAreConstants(misspeltT89) }
         assertFailsWith<AssertionError> { assertTokensAreConstants("$guide\nRefused with `ESCROW_HELD`.\n") }
 
         assertEquals(emptySet(), constantTokens("A `reason` such as `NOT_THIS_ORDERS_PROPOSAL.name` or `\"VALID\"`."))

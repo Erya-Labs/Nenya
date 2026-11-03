@@ -236,9 +236,8 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    with a `proposal` event is refused. It checks nothing about the provider; only step 5 moves the order
    on. Read the proposal with `decodeProposal` and keep its `terms`: step 8 checks the provider's
    receipt against them. Keep the opened proposal itself too: steps 5, 6 and 9 hand it back. They
-   refuse, with `NOT_THIS_ORDERS_PROPOSAL`, a proposal written by another key or one with other terms,
-   even under the same order id. They do not compare the fee recipient, so always hand back the copy
-   you kept.
+   refuse, with `NOT_THIS_ORDERS_PROPOSAL`, a proposal written by another key, one with other terms, or
+   one naming another fee recipient, even under the same order id. Always hand back the copy you kept.
 
    Calls: `buildProposalAgainst`, `buildProposalForBid`, `seal`, `open`, `openOrderFromProposal`, `decodeProposal`.
 5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
@@ -268,8 +267,9 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    order, the proposal you kept in step 4 and the provider's key as in step 5. It answers the proposal,
    unchanged, as an `event`, and the fee recipient's key, read from the fee term, as `recipientPubkey`.
    Seal and send that `event` to `recipientPubkey`. It is refused, and gives nothing to send, for an
-   order that is not `committed` (`ORDER_NOT_COMMITTED`), for a proposal another key wrote or with other
-   terms, and for an order that owes no fee (`NO_FEE_TO_REQUEST`). Without this copy the fee recipient
+   order that is not `committed` (`ORDER_NOT_COMMITTED`), for a proposal another key wrote, with other
+   terms or naming another fee recipient (`NOT_THIS_ORDERS_PROPOSAL`), and for an order that owes no fee
+   (`NO_FEE_TO_REQUEST`). Without this copy the fee recipient
    knows of no order and sends no request, so the order cannot reach `awaiting_payment`. The provider
    builds `buildPaymentRequest`, seals and sends it; the fee recipient builds its own from the copy, as
    [The fee recipient's side](#the-fee-recipients-side) says. The buyer opens each and accepts it with
@@ -331,7 +331,8 @@ Step the order on a status update you receive with `stepOrderWithStatusUpdate`, 
 works out from the proposal which party sent the update, so do not say who sent it yourself: an
 update from a key that is not exactly one of the buyer, the provider and the fee recipient moves
 nothing, and the order decides what each party may do. As in step 5, the proposal must have the
-author and the terms of the one the order was started from (the fee recipient is not compared), and
+author, the terms and the fee recipient of the one the order was started from (a proposal naming
+another fee recipient is refused `NOT_THIS_ORDERS_PROPOSAL`), and
 once the order is accepted the provider key must be the accepted one; otherwise nothing moves. The three `stepOrderWith…` calls work only on an order started with
 `openOrderFromProposal`. An order started with `openOrder`, from an order id and terms you typed, has
 no proposal of its own to compare with, so all three refuse it with `NOT_THIS_ORDERS_PROPOSAL`.
@@ -421,7 +422,8 @@ provider (§8.1), the provider receives the proposal a second time, as this copy
    `buildFeeRequestFromProposal`, giving it an envelope with your own key as the author and the copy's
    `author` as the one `p` key, the copy, and your invoice for exactly the fee. It reads the order id,
    the terms and your key as the fee recipient from the copy. It is refused, and builds nothing, when
-   your key is not the fee recipient the copy names (`NOT_THE_FEE_RECIPIENT`), when the copy owes no fee
+   your key is not the fee recipient the copy names (`NOT_THE_FEE_RECIPIENT`), when the envelope's `p`
+   keys are anything but the copy's `author` alone (`NOT_ADDRESSED_TO_BUYER`), when the copy owes no fee
    (`PAYEE_NOT_REQUIRED`), and when the invoice is not for exactly the fee (`INVOICE_AMOUNT_MISMATCH`, or
    `INVOICE_AMOUNT_MISSING` for an invoice with no amount). The answer's `buyerPubkey` is the copy's
    author: seal and send the `event` to that key.

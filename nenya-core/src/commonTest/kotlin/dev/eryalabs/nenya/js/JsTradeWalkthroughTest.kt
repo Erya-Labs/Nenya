@@ -65,6 +65,11 @@ import kotlin.test.fail
  * and no buyer key. A buyer that sends no copy leaves it nothing to build from, and the order stays
  * `committed`.
  *
+ * T91: two cheats on those doors, each sending nothing — the buyer's second `type=1` under the order's
+ * id and terms naming a stranger as the fee recipient (T90's `NOT_THIS_ORDERS_PROPOSAL` from
+ * [proposalForFeeRecipient]), and the fee recipient's request with the provider as its `p` (T89's
+ * `NOT_ADDRESSED_TO_BUYER` from [buildFeeRequestFromProposal]).
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -328,6 +333,74 @@ class JsTradeWalkthroughTest {
         assertEquals(TransitionRejection.WRONG_SENDER.name, door.reason)
         assertEquals("TransitionRejection", door.reasonVocabulary, "the machine's own refusal")
         assertEquals("ACCEPTED", door.order?.state, "the order is handed back unchanged")
+    }
+
+    /**
+     * T91, T90's cheat: the buyer writes a second `type=1` under the order's id and terms naming a
+     * stranger as the fee recipient. `proposalForFeeRecipient` over the committed order refuses it —
+     * `NOT_THIS_ORDERS_PROPOSAL` — so there is no copy to seal and the stranger's inbox stays empty; the
+     * one copy sent went to the order's own fee recipient.
+     */
+    @Test
+    @JsName("the_buyer_s_second_proposal_naming_a_stranger_as_fee_recipient_gets_no_copy")
+    fun `the buyer's second proposal naming a stranger as fee recipient gets no copy`() {
+        val trade = Trade()
+        val second = trade.send(
+            buildProposalAgainst(
+                trade.listing,
+                trade.environment,
+                trade.buyerEnvelope(),
+                trade.orderIdHex,
+                trade.proposedTerms,
+                feeRecipient = trade.stranger.key,
+            ),
+            trade.buyer,
+            trade.provider,
+        )
+        assertEquals(trade.orderIdHex, second.orderIdHex, "the second proposal names the order's own id")
+        val read = decodeProposal(second.toSelf).proposal ?: fail("the buyer reads its second proposal")
+        assertEquals(trade.stranger.key, read.feeRecipient, "and the stranger as its fee recipient")
+
+        val copy = proposalForFeeRecipient(trade.committed, second.toSelf, trade.provider.key)
+        assertFalse(copy.ok, "§8.7: the copy is the order's own `type=1`")
+        assertEquals(ChannelRejection.NOT_THIS_ORDERS_PROPOSAL.name, copy.reason)
+        assertEquals("ChannelRejection", copy.reasonVocabulary)
+        assertNull(copy.event, "a refusal gives nothing to seal")
+        assertNull(copy.recipientPubkey, "and names no key to seal it to")
+        copy.event?.let { trade.send(it, trade.buyer, trade.stranger) }
+        assertEquals(emptyList(), trade.inbox(trade.stranger), "nothing reached the stranger")
+        assertEquals(
+            listOf(trade.proposal.toSelf.idHex),
+            trade.inbox(trade.feeRecipient).map { it.idHex },
+            "the order's fee recipient holds the order's own proposal, and nothing else",
+        )
+    }
+
+    /**
+     * T91, T89's cheat: the fee recipient builds its request from the copy it opened, with the provider
+     * as the envelope's `p`. `buildFeeRequestFromProposal` refuses it — `NOT_ADDRESSED_TO_BUYER` — and
+     * nothing is sent; the same copy with its author as the one `p` builds, so the refusal is the `p`'s.
+     */
+    @Test
+    @JsName("the_fee_recipient_s_request_addressed_to_the_provider_is_refused_NOT_ADDRESSED_TO_BUYER")
+    fun `the fee recipient's request addressed to the provider is refused NOT_ADDRESSED_TO_BUYER`() {
+        val trade = Trade()
+        val copy = trade.inbox(trade.feeRecipient).single()
+        val providerInbox = trade.inbox(trade.provider)
+        val buyerInbox = trade.inbox(trade.buyer)
+
+        val answer = buildFeeRequestFromProposal(trade.envelope(trade.feeRecipient, trade.provider), copy, trade.feeInvoice)
+        assertFalse(answer.ok, "§8.7: the fee request is addressed to the buyer alone")
+        assertEquals(ChannelRejection.NOT_ADDRESSED_TO_BUYER.name, answer.reason)
+        assertEquals("ChannelRejection", answer.reasonVocabulary)
+        assertNull(answer.event, "a refusal builds nothing")
+        assertNull(answer.buyerPubkey, "and names no key to seal it to")
+        answer.event?.let { trade.send(it, trade.feeRecipient, trade.provider) }
+        assertEquals(providerInbox, trade.inbox(trade.provider), "nothing reached the provider")
+        assertEquals(buyerInbox, trade.inbox(trade.buyer), "nor the buyer")
+
+        val honest = buildFeeRequestFromProposal(trade.envelope(trade.feeRecipient, trade.buyer), copy, trade.feeInvoice)
+        assertTrue(honest.ok, "the same copy addressed to its author builds: ${honest.reason} — ${honest.detail}")
     }
 
     // -----------------------------------------------------------------------------------------
