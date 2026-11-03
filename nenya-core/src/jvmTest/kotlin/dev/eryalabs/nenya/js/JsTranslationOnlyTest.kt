@@ -15,8 +15,10 @@ import kotlin.test.fail
  * Decision P says the layer "adds no rule", and any check it makes "must be the same call the JVM side
  * makes". T82 moved the last checks the layer made of its own into `channel.OrderBinding`. A check
  * written back into `js/` would show as one of four things: a `throw …Exception(` the layer raises
- * itself, a `throw e` rethrowing a library exception it caught, a `…Rejection.CONSTANT` it names to
- * refuse with, or an `import` of such a constant so it can name it bare. So every `.kt` file in the
+ * itself, a `throw e` (or `throw (e)`, `throw(e)`, ``throw `e` ``) rethrowing a library exception it
+ * caught, a `…Rejection.CONSTANT` it names to refuse with (whitespace or a line break around the dot
+ * included), or an `import` of such a constant so it can name it bare, or of the type under an alias
+ * so it can name `R.CONSTANT` (T96). So every `.kt` file in the
  * layer is held to none of these, in every part of it that is code. KDoc and comments may name a
  * rejection — the doors' own KDoc says what the library refuses with — and the layer may throw
  * [JsCrossing], its one crossing failure.
@@ -50,12 +52,14 @@ class JsTranslationOnlyTest {
         val RULES: List<Regex> = listOf(
             // a library exception thrown, its name on the same line or a later one
             Regex("""throw\s+[A-Z]\w*Exception\b"""),
-            // a caught value rethrown: `throw e`
-            Regex("""\bthrow\s+[a-z_]"""),
-            // a rejection constant named
-            Regex("""\b[A-Z]\w*Rejection\.[A-Z][A-Z0-9_]+\b"""),
+            // a caught value rethrown: `throw e`, `throw (e)`, `throw(e)`, ``throw `e` ``
+            Regex("""\bthrow(\s+[a-z_`]|\s*\()"""),
+            // a rejection constant named, with or without whitespace or a line break around the dot
+            Regex("""\b[A-Z]\w*Rejection\s*\.\s*[A-Z][A-Z0-9_]+\b"""),
             // a rejection's constants imported, all of them or one, so they can be named bare
             Regex("""\bimport\s+[\w.]*\b[A-Z]\w*Rejection\s*\.\s*(\*|[A-Z][A-Z0-9_]*\b)"""),
+            // a rejection type imported under another name, so `R.CONSTANT` names it unseen
+            Regex("""\bimport\s+[\w.]*\b[A-Z]\w*Rejection\s+as\b"""),
         )
 
         /**
@@ -288,6 +292,50 @@ class JsTranslationOnlyTest {
         assertEquals(listOf("1: val t = \"\${f(\"//\")}\"; throw e"), violations("val t = \"\${f(\"//\")}\"; throw e"))
         assertEquals(listOf("1: val r = \"\"\"//\"\"\"; throw e"), violations("val r = \"\"\"//\"\"\"; throw e"))
         assertEquals(listOf("1: val s = \"ChannelRejection.DIFFERENT_ORDER\""), violations("val s = \"ChannelRejection.DIFFERENT_ORDER\""))
+    }
+
+    @Test
+    fun `a value rethrown in parentheses or backticks is reported`() {
+        assertEquals(listOf("1: } catch (e: ChannelException) { throw (e) }"), violations("} catch (e: ChannelException) { throw (e) }"))
+        assertEquals(listOf("1: } catch (e: ChannelException) { throw(e) }"), violations("} catch (e: ChannelException) { throw(e) }"))
+        assertEquals(listOf("1: } catch (`e`: ChannelException) { throw `e` }"), violations("} catch (`e`: ChannelException) { throw `e` }"))
+        assertEquals(listOf("1: throw"), violations("throw\n    (caught)"))
+    }
+
+    @Test
+    fun `a rejection constant with whitespace or a line break around the dot is reported`() {
+        assertEquals(listOf("1: ChannelRejection"), violations("ChannelRejection\n    .DIFFERENT_ORDER"))
+        assertEquals(listOf("1: val r = ChannelRejection . DIFFERENT_ORDER"), violations("val r = ChannelRejection . DIFFERENT_ORDER"))
+        assertEquals(listOf("1: val r = ChannelRejection // why"), violations("val r = ChannelRejection // why\n    .DIFFERENT_ORDER"))
+    }
+
+    @Test
+    fun `an aliased import of a rejection type is reported`() {
+        assertEquals(
+            listOf("2: import dev.eryalabs.nenya.channel.ChannelRejection as R"),
+            violations("package x\nimport dev.eryalabs.nenya.channel.ChannelRejection as R\nval r = R.DIFFERENT_ORDER"),
+        )
+        assertEquals(emptyList(), violations("import dev.eryalabs.nenya.channel.ChannelRejection"))
+        assertEquals(emptyList(), violations("import dev.eryalabs.nenya.channel.ChannelRejectionAssert"))
+    }
+
+    @Test
+    fun `T96's shapes inside KDoc or a comment are not reported`() {
+        val shapes = listOf(
+            "throw (e)",
+            "throw(e)",
+            "throw `e`",
+            "ChannelRejection\n.DIFFERENT_ORDER",
+            "ChannelRejection . DIFFERENT_ORDER",
+            "import dev.eryalabs.nenya.channel.ChannelRejection as R",
+        )
+        for (shape in shapes) {
+            val kdoc = "/**\n" + shape.lines().joinToString("\n") { " * $it" } + "\n */\nval x = 1"
+            assertEquals(emptyList(), violations(kdoc), kdoc)
+            val comment = shape.lines().joinToString("\n") { "// $it" } + "\nval x = 1"
+            assertEquals(emptyList(), violations(comment), comment)
+            assertTrue(violations(shape).isNotEmpty(), "outside a comment, $shape is reported")
+        }
     }
 
     @Test
