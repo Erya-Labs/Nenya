@@ -537,7 +537,7 @@ public class OrderProposal internal constructor(
      * [accepts]' first two refusals, which are about the **argument**: the caller's provider key
      * read as §4.3 reads one, and refused if it is this proposal's own author. One function, shared
      * with [partyOf], so the two cannot come to disagree about which provider keys are usable — and
-     * with the `stepOrderWith…` doors (T79), which compare its answer to the key an accepted order
+     * with `OrderBinding.check` (T79, T82), which compares its answer to the key an accepted order
      * recorded, so a key read differently there could never be the one `partyOf` maps.
      */
     @JvmSynthetic

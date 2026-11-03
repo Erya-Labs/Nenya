@@ -1,11 +1,10 @@
 package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.channel.Acceptance
-import dev.eryalabs.nenya.channel.ChannelException
-import dev.eryalabs.nenya.channel.ChannelRejection
 import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
+import dev.eryalabs.nenya.channel.OrderBinding
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
 import dev.eryalabs.nenya.delivery.DeliveryEvidence
@@ -156,7 +155,8 @@ public fun stepOrder(
  * rumors and the provider key, and the facade performs **no check of its own**:
  *
  * 1. `OrderProposal.decode` and `OrderStatusMessage.decode`, whose refusals come back as values;
- * 2. the proposal's and the update's `order` ids against [order]'s — either other is
+ * 2. `OrderBinding.check` (T82, the call a Kotlin client makes): the proposal's and the update's
+ *    `order` ids against [order]'s — either other is
  *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order; then the proposal against
  *    the one [order] was opened from — another author or other terms, or an order [openOrder] opened, is
  *    `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80; the fee recipient is not compared), and nothing is
@@ -165,7 +165,8 @@ public fun stepOrder(
  * 3. a `status=accepted` goes exactly where [stepOrder]'s `acceptance_received` sends it — §7.6's
  *    checked answer through `OrderProposal.accepts` (decision J), so a counter-proposal or an update
  *    from the wrong key is refused as it is there;
- * 4. any other status is `OrderEvent.StatusUpdate` from the party `OrderProposal.partyOf` maps the
+ * 4. any other status is `OrderEvent.StatusUpdate` from the party `OrderBinding.sender` — that is,
+ *    `OrderProposal.partyOf` — maps the
  *    update's attributed sender to; `null` — a stranger, or a key holding two roles — is
  *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
  * 5. then `OrderMachine.on`, whose own sender rules decide what that party may do.
@@ -191,9 +192,7 @@ public fun stepOrderWithStatusUpdate(
     val stepper = machine.asOrderMachine()
     val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
     val update = OrderStatusMessage.decode(statusRumor.asBoundRumor("kind:16 type=3 status update"))
-    requireSameOrder(order.order, proposal.order, update.order)
-    requireThisOrdersProposal(order.order, proposal)
-    requireThisOrdersProvider(order.order, proposal, providerPubkey)
+    OrderBinding.check(order.order, proposal, providerPubkey, update.order)
     val event = if (update.status == OrderState.ACCEPTED) {
         OrderEvent.AcceptanceReceived(
             acceptance = crossedAcceptance(
@@ -205,7 +204,7 @@ public fun stepOrderWithStatusUpdate(
             createdAt = update.createdAt,
         )
     } else {
-        val from = senderParty(proposal, update.sender, providerPubkey, ChannelVocabulary.STATUS)
+        val from = OrderBinding.sender(proposal, update.sender, providerPubkey, ChannelVocabulary.STATUS)
         OrderEvent.StatusUpdate(update.status, from, createdAt = update.createdAt)
     }
     JsOrderOutcome(stepper.on(order.order, event), null)
@@ -221,13 +220,15 @@ public fun stepOrderWithStatusUpdate(
  *
  * 1. `OrderProposal.decode` and `DeliveryCommitmentMessage.decode`, whose refusals come back as
  *    values — among them §10.1's `COMMITMENT_CARRIES_KEY`;
- * 2. the proposal's and the commitment's `order` ids against [order]'s — either other is
+ * 2. `OrderBinding.check` (T82, the call a Kotlin client makes): the proposal's and the commitment's
+ *    `order` ids against [order]'s — either other is
  *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order; then the proposal against
  *    the one [order] was opened from — another author or other terms, or an order [openOrder] opened, is
  *    `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80; the fee recipient is not compared), and nothing is
  *    offered; then [providerPubkey] against the key the accepted order's acceptance was checked against — another is
  *    `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79), and nothing is offered;
- * 3. the party `OrderProposal.partyOf` maps the commitment's attributed sender to; `null` is
+ * 3. the party `OrderBinding.sender` — that is, `OrderProposal.partyOf` — maps the commitment's
+ *    attributed sender to; `null` is
  *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
  * 4. `DeliveryCommitmentMessage.asOrderEvent` from that party, carrying the checks its decode made;
  * 5. then `OrderMachine.on`, whose own sender rules decide what that party may do.
@@ -255,10 +256,8 @@ public fun stepOrderWithCommitment(
     val commitment = DeliveryCommitmentMessage.decode(
         commitmentRumor.asBoundRumor("kind:16 type=5 delivery commitment"),
     )
-    requireSameOrder(order.order, proposal.order, commitment.order)
-    requireThisOrdersProposal(order.order, proposal)
-    requireThisOrdersProvider(order.order, proposal, providerPubkey)
-    val from = senderParty(proposal, commitment.sender, providerPubkey, tag = null)
+    OrderBinding.check(order.order, proposal, providerPubkey, commitment.order)
+    val from = OrderBinding.sender(proposal, commitment.sender, providerPubkey, tag = null)
     JsOrderOutcome(stepper.on(order.order, commitment.asOrderEvent(from)), null)
 }
 
@@ -271,14 +270,16 @@ public fun stepOrderWithCommitment(
  * performs **no check of its own**:
  *
  * 1. `OrderProposal.decode` and `DeliverableReleaseMessage.decode`, whose refusals come back as values;
- * 2. the proposal's `order` id against [order]'s — another is `ChannelRejection.DIFFERENT_ORDER`, and
+ * 2. `OrderBinding.check` (T82, the call a Kotlin client makes), passed no message id: the proposal's
+ *    `order` id against [order]'s — another is `ChannelRejection.DIFFERENT_ORDER`, and
  *    nothing is offered. The release's own id is **not** compared here: that is §10.3's binding, and
  *    `asOrderEvent` makes it below. Then the proposal against the one [order] was opened from — another
  *    author or other terms, or an order [openOrder] opened, is `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL`
  *    (T80; the fee recipient is not compared), and nothing is offered. Then [providerPubkey] against the key the accepted order's
  *    acceptance was checked against — another is `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79),
  *    and nothing is offered;
- * 3. the party `OrderProposal.partyOf` maps the release's attributed sender to; `null` is
+ * 3. the party `OrderBinding.sender` — that is, `OrderProposal.partyOf` — maps the release's
+ *    attributed sender to; `null` is
  *    `ChannelRejection.SENDER_NOT_A_PARTY`, and nothing is offered;
  * 4. `DeliverableReleaseMessage.asOrderEvent` against [order] from that party — another order's
  *    release is its `RELEASE_FOR_ANOTHER_ORDER`, an order not in `paid` its `RELEASE_ORDER_NOT_PAID`;
@@ -308,76 +309,10 @@ public fun stepOrderWithRelease(
     val stepper = machine.asOrderMachine()
     val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
     val release = DeliverableReleaseMessage.decode(releaseRumor.asBoundRumor("kind:15 deliverable release"))
-    requireSameOrder(order.order, proposal.order)
-    requireThisOrdersProposal(order.order, proposal)
-    requireThisOrdersProvider(order.order, proposal, providerPubkey)
-    val from = senderParty(proposal, release.sender, providerPubkey, tag = null)
+    OrderBinding.check(order.order, proposal, providerPubkey)
+    val from = OrderBinding.sender(proposal, release.sender, providerPubkey, tag = null)
     JsOrderOutcome(stepper.on(order.order, release.asOrderEvent(order.order, from)), null)
 }
-
-/** `ChannelRejection.DIFFERENT_ORDER` unless every one of [ids] is [order]'s own. T76, T77. */
-private fun requireSameOrder(order: Order, vararg ids: OrderId) {
-    if (ids.any { it != order.id }) {
-        throw ChannelException(
-            ChannelRejection.DIFFERENT_ORDER,
-            ChannelVocabulary.ORDER,
-            "§7.4's `${ChannelVocabulary.ORDER}` id binds every message to one order, and a " +
-                "message offered here names a different one than the order being stepped; a " +
-                "message about another order moves nothing on this one",
-        )
-    }
-}
-
-/**
- * `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` unless [proposal] is the `type=1` [order] was opened
- * from: [order] records a buyer (only `openOrderFromProposal`'s path records one), [proposal]'s
- * attributed author is that buyer, and its terms equal [order]'s. The fee recipient is not compared:
- * `OrderTerms` carries none. T80.
- */
-private fun requireThisOrdersProposal(order: Order, proposal: OrderProposal) {
-    val recorded = order.buyer
-    if (recorded == null || recorded != proposal.buyer || order.terms != proposal.terms) {
-        throw ChannelException(
-            ChannelRejection.NOT_THIS_ORDERS_PROPOSAL,
-            null,
-            "every sender is mapped against the proposal handed here, and it is not the type=1 this " +
-                "order was opened from — another author, other terms, or an order opened without " +
-                "one; mapping against it would let its author act as this order's buyer",
-        )
-    }
-}
-
-/**
- * Once [order] is accepted, `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` unless [providerPubkey], read
- * and normalised as `OrderProposal.partyOf` reads it (a malformed one still
- * `MALFORMED_PROVIDER_PUBKEY`), is the key its acceptance was checked against. At `proposed` no key
- * is recorded, so none is compared. T79.
- */
-private fun requireThisOrdersProvider(order: Order, proposal: OrderProposal, providerPubkey: String) {
-    val recorded = order.provider ?: return
-    if (proposal.resolvedProvider(providerPubkey) != recorded) {
-        throw ChannelException(
-            ChannelRejection.PROVIDER_NOT_THIS_ORDERS,
-            null,
-            "§7.6 checked this order's acceptance against one provider key, and the order recorded " +
-                "it; the key handed here is another, and mapping a sender against it would make " +
-                "that key the provider of an order it never accepted",
-        )
-    }
-}
-
-/**
- * The party `OrderProposal.partyOf` maps [sender] to, or `ChannelRejection.SENDER_NOT_A_PARTY`
- * naming [tag]. T76, T77.
- */
-private fun senderParty(proposal: OrderProposal, sender: String, providerPubkey: String, tag: String?): Party =
-    proposal.partyOf(sender, providerPubkey) ?: throw ChannelException(
-        ChannelRejection.SENDER_NOT_A_PARTY,
-        tag,
-        "§11.2's sender rules are written in parties, and the key §7.2 attributed this message " +
-            "to is not exactly one of the proposal's buyer, the provider and the fee recipient; " +
-            "there is no party to offer it from, and none is chosen on its behalf",
-    )
 
 /**
  * §10.4 **step 1 alone**: the served bytes hashed here and compared to the commitment's `x`.

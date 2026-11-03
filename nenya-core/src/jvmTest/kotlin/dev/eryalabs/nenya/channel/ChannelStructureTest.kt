@@ -129,6 +129,8 @@ class ChannelStructureTest {
             "PrivateBid\$Companion",
             // T61's proposal from a chosen bid, refusing one sent between the wrong keys.
             "ListingOrderBuild\$WrongParties",
+            // T82's order binding, moved out of the JavaScript layer's doors.
+            "OrderBinding",
         )
 
         /**
@@ -178,6 +180,12 @@ class ChannelStructureTest {
             // already established. Both are 64 hex characters compared against the proposal's own
             // three keys; neither is a claim this codec believes, and the answer is a `Party?`.
             "OrderProposal.partyOf",
+            // T82: the same two keys again — the caller-resolved provider key, read and refused by
+            // `partyOf`'s own reading and compared with the one the order recorded, and §7.2's
+            // attributed sender — moved here unchanged from the JavaScript layer's doors. `sender`'s
+            // `tag` is category 2: the tag name a refusal names, which decides nothing.
+            "OrderBinding.check",
+            "OrderBinding.sender",
             "Acceptance\$Accepted.<init>",          // that same checked key, carried on the answer
             // §10.1's `["url", …]`, the one value a delivery message publishes as a bare string.
             // It *is* something a counterparty wrote, and it is deliberately not a term: nothing in
