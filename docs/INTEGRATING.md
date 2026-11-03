@@ -229,8 +229,18 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    bid's price, `fee`, fee recipient and `deliver_by`, so do not type them again. It is refused unless
    the buyer sends it to the provider — on a request, the request's author to the bidder; on an
    offer, the bidder to the offer's author. Its `acceptBy` is the proposal's `expiration`, and must
-   be before the bid's `deliver_by`; once the clock has reached either, nothing is built. The buyer then
-   opens the `toSelf` copy of its proposal and keeps it. It starts its order from that copy with
+   be before the bid's `deliver_by`; once the clock has reached either, nothing is built. Either call
+   also builds nothing when the fee recipient is the buyer's own key, the envelope's author
+   (`FEE_RECIPIENT_IS_BUYER`): §8.1 says the buyer is never its own fee recipient. For a bid, that is
+   the fee recipient the bid names.
+
+   Before publishing the proposal, open the `toSelf` copy of it that `seal` answered and read it with
+   `decodeProposal`. When its `feeConfirmationRequired` is true, the fee is above §8.1's line: show the
+   user `feeBasisPoints`, `feeMsat` and `totalMsat`, and publish nothing until they confirm. That
+   value is an answer, not a refusal: nothing in this library checks that you asked. The listing and
+   the bid carry `feeConfirmationRequired` too, so you can warn the user before building.
+
+   The buyer keeps the `toSelf` copy of its proposal. It starts its order from that copy with
    `openOrderFromProposal`, which takes the order id and terms from the proposal itself, so do not type
    them again. That call *is* the proposal step: the order starts in `proposed`, and stepping it again
    with a `proposal` event is refused. It checks nothing about the provider; only step 5 moves the order
@@ -240,8 +250,10 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    one naming another fee recipient, even under the same order id. Always hand back the copy you kept.
 
    Calls: `buildProposalAgainst`, `buildProposalForBid`, `seal`, `open`, `openOrderFromProposal`, `decodeProposal`.
-5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, builds the
-   acceptance with `buildAgreementAgainst`, then seals and sends it. The buyer opens it, can ask
+5. **Accept** (§7.6). The provider opens the proposal, reads it with `decodeProposal`, and, when its
+   `feeConfirmationRequired` is true, gets the user's confirmation of the fee first, as
+   [The provider's side](#the-providers-side) says. It then builds the acceptance with
+   `buildAgreementAgainst`, then seals and sends it. The buyer opens it, can ask
    `checkAcceptance` whether it is an acceptance or a counter-proposal, and steps the order with
    `stepOrderWithStatusUpdate`. Give it the proposal you kept in step 4, the acceptance as `open`
    answered it, and the provider's key as you know it from the listing or the bid, not from either
@@ -362,7 +374,10 @@ own messages from their `toSelf` copies. Keep each one.
 
    Calls: `buildListingOffer`, `decodeListing`, `matchesBoard`, `checkDeadlines`, `buildBid`, `buildPrivateBid`, `seal`.
 2. **Open and answer a proposal** (§7.5, §7.6). Open the buyer's proposal and read its terms with
-   `decodeProposal`, and keep its `terms`: step 5 checks the buyer's receipt against them. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
+   `decodeProposal`, and keep its `terms`: step 5 checks the buyer's receipt against them. When its
+   `feeConfirmationRequired` is true, the fee is above §8.1's line: before building the acceptance,
+   show the user `feeBasisPoints`, `feeMsat` and `totalMsat` and build nothing until they confirm.
+   Nothing in this library checks that you asked. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
    listing the proposal is for. It is refused, and builds nothing, when the proposal is for another
    listing, when the listing has expired, or when the clock has reached the proposal's own
    `expiration`, which is the deadline for accepting it. Where either carries a deadline and your

@@ -70,6 +70,9 @@ import kotlin.test.fail
  * [proposalForFeeRecipient]), and the fee recipient's request with the provider as its `p` (T89's
  * `NOT_ADDRESSED_TO_BUYER` from [buildFeeRequestFromProposal]).
  *
+ * T95: one more, at step 4 — the buyer proposing with itself as the fee recipient (T93's
+ * `FEE_RECIPIENT_IS_BUYER` from [buildProposalAgainst]), which seals nothing.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -403,6 +406,30 @@ class JsTradeWalkthroughTest {
         assertTrue(honest.ok, "the same copy addressed to its author builds: ${honest.reason} — ${honest.detail}")
     }
 
+    /**
+     * T95, T93's cheat: the buyer proposes with its own key as the fee recipient. `buildProposalAgainst`
+     * refuses it — `FEE_RECIPIENT_IS_BUYER` — so nothing is sealed and the provider's inbox is empty; the
+     * same proposal naming the order's fee recipient builds, and is the one the provider opened.
+     */
+    @Test
+    @JsName("the_buyer_s_proposal_naming_itself_as_fee_recipient_is_refused_FEE_RECIPIENT_IS_BUYER")
+    fun `the buyer's proposal naming itself as fee recipient is refused FEE_RECIPIENT_IS_BUYER`() {
+        val trade = Trade()
+        val cheat = trade.selfFeeProposal
+        assertFalse(cheat.ok, "§8.1: the fee recipient MUST NOT be the buyer's pubkey")
+        assertEquals(ChannelRejection.FEE_RECIPIENT_IS_BUYER.name, cheat.reason)
+        assertEquals("ChannelRejection", cheat.reasonVocabulary)
+        assertNull(cheat.event, "a refusal builds nothing to seal")
+        assertEquals(emptyList(), trade.providerInboxAfterSelfFeeProposal, "nothing reached the provider")
+
+        assertEquals(
+            listOf(trade.proposal.toRecipient.idHex),
+            trade.inbox(trade.provider).take(1).map { it.idHex },
+            "the honest proposal, naming the order's fee recipient, is the first thing the provider opened",
+        )
+        assertEquals(trade.feeRecipient.key, decodeProposal(trade.proposal.toRecipient).proposal?.feeRecipient)
+    }
+
     // -----------------------------------------------------------------------------------------
 
     /** [outcome] is a door's refusal [reason] from [vocabulary], with no event offered and so no order. */
@@ -497,6 +524,24 @@ class JsTradeWalkthroughTest {
             assertEquals("ACTIVE", listingActivity(listing, environment), "§5.6: a listing with no `expiration`")
             assertTrue(checkDeadlines(listing, null, environment).permitted, "§5.6 permits acting on it")
             listing
+        }
+
+        /**
+         * T95's cheat at guide step 4, tried before the honest proposal so nothing has reached the
+         * provider yet: the buyer names itself as the fee recipient. Whatever it builds is sealed to the
+         * provider; [providerInboxAfterSelfFeeProposal] is the provider's inbox once that is done.
+         */
+        val selfFeeProposal: JsBuildResult = buildProposalAgainst(
+            listing,
+            environment,
+            buyerEnvelope(),
+            orderIdHex,
+            proposedTerms,
+            feeRecipient = buyer.key,
+        )
+        val providerInboxAfterSelfFeeProposal: List<JsRumor> = run {
+            selfFeeProposal.event?.let { send(it, buyer, provider) }
+            inbox(provider)
         }
 
         // Guide step 4 — the buyer proposes and opens its order.

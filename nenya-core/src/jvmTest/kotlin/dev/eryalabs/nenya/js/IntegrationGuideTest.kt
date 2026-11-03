@@ -580,6 +580,7 @@ class IntegrationGuideTest {
             "WRONG_SENDER",
             "CANNOT_SAY",
             "NOT_ADDRESSED_TO_BUYER",
+            "FEE_RECIPIENT_IS_BUYER",
         )
         for (named in refusals) {
             assertTrue(named in tokens, "the guide names `$named`: $tokens")
@@ -589,7 +590,7 @@ class IntegrationGuideTest {
     }
 
     /**
-     * Negative control: the guide with `NOT_THIS_ORDERS_PROPOSAL` or `NOT_ADDRESSED_TO_BUYER` misspelt fails, and so does any other
+     * Negative control: the guide with `NOT_THIS_ORDERS_PROPOSAL`, `NOT_ADDRESSED_TO_BUYER` or `FEE_RECIPIENT_IS_BUYER` misspelt fails, and so does any other
      * name no enum declares; a span only partly constant-like, or a constant inside a code fence, is not read.
      */
     @Test
@@ -601,6 +602,10 @@ class IntegrationGuideTest {
         val misspeltT89 = guide.replace("`NOT_ADDRESSED_TO_BUYER`", "`NOT_ADDRESSED_TO_THE_BUYER`")
         assertNotEquals(guide, misspeltT89, "the guide names `NOT_ADDRESSED_TO_BUYER`")
         assertFailsWith<AssertionError> { assertTokensAreConstants(misspeltT89) }
+        // T95: T93's refusal, which the buyer's step 4 names.
+        val misspeltT93 = guide.replace("`FEE_RECIPIENT_IS_BUYER`", "`FEE_RECIPIENT_IS_THE_BUYER`")
+        assertNotEquals(guide, misspeltT93, "the guide names `FEE_RECIPIENT_IS_BUYER`")
+        assertFailsWith<AssertionError> { assertTokensAreConstants(misspeltT93) }
         assertFailsWith<AssertionError> { assertTokensAreConstants("$guide\nRefused with `ESCROW_HELD`.\n") }
 
         assertEquals(emptySet(), constantTokens("A `reason` such as `NOT_THIS_ORDERS_PROPOSAL.name` or `\"VALID\"`."))
