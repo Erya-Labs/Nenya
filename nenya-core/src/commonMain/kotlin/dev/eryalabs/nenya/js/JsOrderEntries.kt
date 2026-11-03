@@ -806,6 +806,9 @@ public class JsOrder internal constructor(internal val order: Order) {
         dev.eryalabs.nenya.money.FeeTerm.Absent -> null
     }
 
+    /** §8.1's confirmation line for the accepted fee. See [JsListing.feeConfirmationRequired]. */
+    public val feeConfirmationRequired: Boolean get() = order.terms.split.term.confirmationRequired
+
     /** True exactly when §8.3's split requires a `payee=fee` invoice and receipt at all. */
     public val feePayeeRequired: Boolean get() = order.terms.split.feePayeeRequired
 

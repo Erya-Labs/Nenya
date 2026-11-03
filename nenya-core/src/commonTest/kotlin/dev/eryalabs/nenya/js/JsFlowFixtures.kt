@@ -670,6 +670,11 @@ internal object JsFlowFixtures {
             JsBoundaryFixtures.basisPointsOf(expected.terms.split.term),
         ),
         JsBoundaryFixtures.Field(
+            "feeConfirmationRequired",
+            crossed.feeConfirmationRequired,
+            expected.terms.split.term.confirmationRequired,
+        ),
+        JsBoundaryFixtures.Field(
             "feePayeeRequired",
             crossed.feePayeeRequired,
             expected.terms.split.feePayeeRequired,

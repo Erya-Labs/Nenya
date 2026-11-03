@@ -55,6 +55,18 @@ public sealed interface FeeTerm {
     public val namesRecipient: Boolean
 
     /**
+     * Whether §8.1 requires the user's explicit confirmation of this fee — showing basis points,
+     * absolute amount and total (§8.2) — before the order is proposed or accepted: true exactly when
+     * the basis points are above [CONFIRMATION_ABOVE_BPS]. [Absent] and `Stated(0)` are both false.
+     *
+     * An answer, not a check. Asking the user is the embedding client's, so nothing in this library
+     * refuses to build or accept an order because this is true, and nothing records that anybody
+     * confirmed. §8.1 also lets a client ask at or below the line; `false` means only that this rule
+     * does not require it.
+     */
+    public val confirmationRequired: Boolean get() = basisPoints > CONFIRMATION_ABOVE_BPS
+
+    /**
      * The fee this term levies on [price], as §8.3 defines it:
      * `fee_msat = floor(price_msat × bps / 10000)`.
      *
@@ -160,6 +172,13 @@ public sealed interface FeeTerm {
          * may be charged.
          */
         public const val MAX_BASIS_POINTS: Int = 10_000
+
+        /**
+         * §8.1's `500`: above this many basis points (5%) a fee needs the user's explicit
+         * confirmation before proposing or accepting. Exclusive — `500` itself does not. See
+         * [confirmationRequired].
+         */
+        public const val CONFIRMATION_ABOVE_BPS: Int = 500
 
         /**
          * A stated fee term of [basisPoints].

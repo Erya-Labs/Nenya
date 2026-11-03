@@ -989,7 +989,7 @@ class JsSurfaceTest {
         val proposal = decodeProposal(JsRumor(proposalRumor)).proposal
             ?: fail("the generated proposal must decode")
         assertEquals(
-            publishedPropertyNames(typeNamed("JsOrderProposal"), floor = 17),
+            publishedPropertyNames(typeNamed("JsOrderProposal"), floor = 18),
             JsMessageFixtures.proposalFields(proposal, OrderProposal.decode(proposalRumor))
                 .map { it.name }.toSet(),
             "JsMessageFixtures.proposalFields must name every value JsOrderProposal publishes",
@@ -1020,15 +1020,15 @@ class JsSurfaceTest {
             "JsMessageFixtures.releaseFields must name every value JsReleaseMessage publishes",
         )
 
-        // T59's §6.1 private bid, on the same terms: fifteen values, the proposal's seventeen less the
-        // order id a `type=6` does not carry and T72's `terms`.
+        // T59's §6.1 private bid, on the same terms: sixteen values, the proposal's eighteen less the
+        // order id a `type=6` does not carry and T72's `terms`. T94's `feeConfirmationRequired` is on both.
         val bidCase = RumorWriterFixtures.cases(RumorWriterFixtures.Shape.entries.size)
             .single { it.shape == RumorWriterFixtures.Shape.PRIVATE_BID }
         val bidRumor = RumorWriterFixtures.bound(RumorWriterFixtures.build(bidCase))
         val bid = decodePrivateBid(JsRumor(bidRumor)).privateBid
             ?: fail("the generated private bid must decode")
         assertEquals(
-            publishedPropertyNames(typeNamed("JsPrivateBid"), floor = 15),
+            publishedPropertyNames(typeNamed("JsPrivateBid"), floor = 16),
             JsMessageFixtures.privateBidFields(bid, PrivateBid.decode(bidRumor)).map { it.name }.toSet(),
             "JsMessageFixtures.privateBidFields must name every value JsPrivateBid publishes",
         )
@@ -1096,6 +1096,74 @@ class JsSurfaceTest {
             "JsCapabilitiesEqualityTest compares exactly these; a new getter must join it",
         )
     }
+
+    // -----------------------------------------------------------------------------------------
+    // T94: every fee a page reads carries §8.1's confirmation line beside it.
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * §8.1: above `500` bps the user confirms the fee before proposing or accepting. A page reads
+     * whether that applies from `feeConfirmationRequired`, so every read type publishing
+     * `feeBasisPoints` must publish it too — a sixth decoded type added without it would leave a page
+     * hardcoding the line for that one.
+     *
+     * The rule covers the types with an `internal` constructor, [CROSSED_OUT], which are the ones a
+     * page reads. The input types publishing `feeBasisPoints` take it *from* the page and decide
+     * nothing; they are named below, so a seventh input type with a fee turns this red until somebody
+     * says which kind it is. In `jvmTest` because it is `java.lang.reflect` over build output (STOP
+     * RULE 15).
+     */
+    @Test
+    fun `every read type publishing a fee publishes section 8_1's confirmation line`() {
+        val read = CROSSED_OUT.map(::typeNamed)
+        assertEquals(
+            emptyList(),
+            feeWithoutConfirmation(read),
+            "these read types publish feeBasisPoints and no feeConfirmationRequired",
+        )
+        assertEquals(
+            setOf("JsListing", "JsBid", "JsPrivateBid", "JsOrderProposal", "JsOrder"),
+            read.filter { FEE_BASIS_POINTS in publishedProperties(it) }.map { it.simpleName }.toSet(),
+            "the five decoded types T94 names, and the sweep is looking at them",
+        )
+        val inputs = CROSSED_IN.map(::typeNamed).filter { FEE_BASIS_POINTS in publishedProperties(it) }
+        assertEquals(
+            setOf("JsOrderTerms", "JsAuthoredListing", "JsAuthoredBid"),
+            inputs.map { it.simpleName }.toSet(),
+            "the input types carrying a fee, excluded from the rule by their public constructors",
+        )
+    }
+
+    /** The control: a type publishing a fee without the line is reported, and one with both is not. */
+    @Test
+    fun `the confirmation sweep reports a probe publishing a fee without the line`() {
+        assertEquals(
+            listOf(FeeWithoutConfirmationProbe::class.java.simpleName),
+            feeWithoutConfirmation(listOf(FeeWithoutConfirmationProbe::class.java, FeeWithConfirmationProbe::class.java)),
+        )
+    }
+
+    private class FeeWithoutConfirmationProbe {
+        val feeBasisPoints: Int? = 600
+    }
+
+    private class FeeWithConfirmationProbe {
+        val feeBasisPoints: Int? = 600
+        val feeConfirmationRequired: Boolean = true
+    }
+
+    /** The simple names of [types] publishing `feeBasisPoints` and no `feeConfirmationRequired`. */
+    private fun feeWithoutConfirmation(types: List<Class<*>>): List<String> =
+        types.filter {
+            val properties = publishedProperties(it)
+            FEE_BASIS_POINTS in properties && FEE_CONFIRMATION_REQUIRED !in properties
+        }.map { it.simpleName }
+
+    private val FEE_BASIS_POINTS: String = "feeBasisPoints"
+    private val FEE_CONFIRMATION_REQUIRED: String = "feeConfirmationRequired"
+
+    private fun publishedProperties(type: Class<*>): Set<String> =
+        crossingMethods(type).mapNotNull { propertyName(it) }.toSet()
 
     /**
      * §10.3's key and nonce reach no published value of this package, which is the privacy half of

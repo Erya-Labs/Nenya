@@ -158,6 +158,7 @@ public fun decodePrivateBid(rumor: JsRumor): JsPrivateBidResult =
  * does on [JsOrder], because the three are different facts: the amount is §8.3's arithmetic, the
  * basis points are §8.1's signed term, and whether a fee payee is owed anything at all is §8.3's
  * deadlock rule. A page shown only the first cannot tell §8.1's absent term from a stated zero.
+ * [feeConfirmationRequired] is a fourth: §8.1's line above which the user confirms the fee.
  */
 @OptIn(ExperimentalJsExport::class)
 @JsExport
@@ -195,6 +196,9 @@ public class JsOrderProposal internal constructor(private val proposal: OrderPro
         is FeeTerm.Stated -> fee.basisPoints
         FeeTerm.Absent -> null
     }
+
+    /** §8.1's confirmation line for this fee. See [JsListing.feeConfirmationRequired]. */
+    public val feeConfirmationRequired: Boolean get() = proposal.terms.split.term.confirmationRequired
 
     /** True exactly when §8.3's split requires a `payee=fee` invoice and receipt at all. */
     public val feePayeeRequired: Boolean get() = proposal.terms.split.feePayeeRequired
@@ -273,8 +277,9 @@ public class JsProposalResult internal constructor(
 /**
  * §6.1's private bid as the page reads it: who bid, on which listing, and on what terms.
  *
- * The fee crosses as [feeMsat], [feeBasisPoints] and [feePayeeRequired], as on [JsOrderProposal] and
- * for the same reason: an absent fee term and a stated zero are different signed statements (§8.1).
+ * The fee crosses as [feeMsat], [feeBasisPoints], [feePayeeRequired] and [feeConfirmationRequired], as
+ * on [JsOrderProposal] and for the same reason: an absent fee term and a stated zero are different
+ * signed statements (§8.1).
  */
 @OptIn(ExperimentalJsExport::class)
 @JsExport
@@ -309,6 +314,9 @@ public class JsPrivateBid internal constructor(private val bid: PrivateBid) {
         is FeeTerm.Stated -> fee.basisPoints
         FeeTerm.Absent -> null
     }
+
+    /** §8.1's confirmation line for this fee. See [JsListing.feeConfirmationRequired]. */
+    public val feeConfirmationRequired: Boolean get() = bid.fee.confirmationRequired
 
     /** True exactly when §8.3's split on these terms would require a `payee=fee` invoice at all. */
     public val feePayeeRequired: Boolean get() = bid.split.feePayeeRequired

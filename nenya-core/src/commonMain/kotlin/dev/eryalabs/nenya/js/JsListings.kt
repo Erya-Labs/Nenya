@@ -114,6 +114,16 @@ public class JsListing internal constructor(
         FeeTerm.Absent -> null
     }
 
+    /**
+     * True exactly when §8.1 requires the user's explicit confirmation of this fee — above `500`
+     * basis points — before proposing or accepting, so a page reads the line here rather than
+     * hardcoding it. `false` for an absent fee term and for a stated zero.
+     *
+     * An answer, not a refusal: the page shows the basis points, the fee and the total and asks.
+     * Nothing in this library checks that it did.
+     */
+    public val feeConfirmationRequired: Boolean get() = listing.fee.confirmationRequired
+
     /** §8.4's `fee` recipient. */
     public val feeRecipient: String? get() = listing.feeRecipient
 
@@ -186,6 +196,9 @@ public class JsBid internal constructor(
         is FeeTerm.Stated -> fee.basisPoints
         FeeTerm.Absent -> null
     }
+
+    /** §8.1's confirmation line for this fee. See [JsListing.feeConfirmationRequired]. */
+    public val feeConfirmationRequired: Boolean get() = bid.fee.confirmationRequired
 
     /** §8.4's `fee` recipient. */
     public val feeRecipient: String? get() = bid.feeRecipient

@@ -112,6 +112,11 @@ internal object JsMessageFixtures {
             JsBoundaryFixtures.basisPointsOf(expected.terms.split.term),
         ),
         JsBoundaryFixtures.Field(
+            "feeConfirmationRequired",
+            crossed.feeConfirmationRequired,
+            expected.terms.split.term.confirmationRequired,
+        ),
+        JsBoundaryFixtures.Field(
             "feePayeeRequired",
             crossed.feePayeeRequired,
             expected.terms.split.feePayeeRequired,
@@ -215,6 +220,11 @@ internal object JsMessageFixtures {
             "feeBasisPoints",
             crossed.feeBasisPoints,
             JsBoundaryFixtures.basisPointsOf(expected.fee),
+        ),
+        JsBoundaryFixtures.Field(
+            "feeConfirmationRequired",
+            crossed.feeConfirmationRequired,
+            expected.fee.confirmationRequired,
         ),
         JsBoundaryFixtures.Field(
             "feePayeeRequired",
