@@ -444,7 +444,8 @@ public fun buildPaymentRequest(
  * `OrderProposal.decode`, one to `Bolt11Reference.recognise`, then one to
  * `PaymentWriter.feeRequestFromProposal`, whose refusals come back as values with nothing built:
  * no fee to request (`PAYEE_NOT_REQUIRED`), an envelope author other than the fee term's recipient
- * (`NOT_THE_FEE_RECIPIENT`), and an invoice not for exactly `fee_msat` (`INVOICE_AMOUNT_MISSING`,
+ * (`NOT_THE_FEE_RECIPIENT`), an envelope whose `p` list is not exactly the buyer (`NOT_ADDRESSED_TO_BUYER`),
+ * and an invoice not for exactly `fee_msat` (`INVOICE_AMOUNT_MISSING`,
  * `INVOICE_AMOUNT_MISMATCH`).
  *
  * The copy is not evidence of an acceptance, a commitment or a payment (§8.7). The buyer checks the

@@ -68,7 +68,8 @@ public sealed interface PaymentBuild {
 
         /**
          * Which §7.4, §4.1 or §4.5 rule refused it — or, from `PaymentWriter.feeRequestFromProposal`,
-         * §8.7's [ChannelRejection.NOT_THE_FEE_RECIPIENT] — or `null` if one of §8.6's own did.
+         * §8.7's [ChannelRejection.NOT_THE_FEE_RECIPIENT] or [ChannelRejection.NOT_ADDRESSED_TO_BUYER] — or
+         * `null` if one of §8.6's own did.
          */
         public val channelReason: ChannelRejection?,
 
@@ -309,7 +310,10 @@ public object PaymentWriter {
      *    ([SettlementRejection.PAYEE_NOT_REQUIRED], the decoder's refusal of the same request);
      * 2. [envelope]'s author is not the recipient the fee term names
      *    ([ChannelRejection.NOT_THE_FEE_RECIPIENT], on [PaymentBuild.Refused.channelReason]);
-     * 3. [invoice] is not for exactly `fee_msat` — §9.2 check 4 through `Settlement.checkAmount`, the
+     * 3. [envelope]'s counterparties are not exactly the buyer — another key, the buyer beside a second
+     *    one, or none ([ChannelRejection.NOT_ADDRESSED_TO_BUYER], on [PaymentBuild.Refused.channelReason]),
+     *    so a page cannot address the fee invoice to anyone but the proposal's author (T89);
+     * 4. [invoice] is not for exactly `fee_msat` — §9.2 check 4 through `Settlement.checkAmount`, the
      *    check `AcceptedPaymentRequest.accept` makes ([SettlementRejection.INVOICE_AMOUNT_MISSING],
      *    [SettlementRejection.INVOICE_AMOUNT_MISMATCH], or Appendix C's refusal of the invoice);
      *
@@ -320,7 +324,8 @@ public object PaymentWriter {
      * commitment or a payment (§8.7), and this does not treat it as one: whether the order was accepted
      * and committed is the buyer's to check when the request arrives.
      *
-     * @param envelope the fee recipient's own envelope; its author must be the fee term's recipient.
+     * @param envelope the fee recipient's own envelope; its author must be the fee term's recipient, and
+     *   its one counterparty the buyer.
      * @param proposal the `type=1` the buyer sent under §8.7, as the fee recipient opened and decoded it.
      * @param invoice the fee recipient's BOLT-11 invoice for `fee_msat`.
      */
@@ -345,6 +350,18 @@ public object PaymentWriter {
                 null,
                 "§8.7: a fee payment request is sealed by the fee recipient named in the signed fee term, " +
                     "and this envelope's author is another key",
+            )
+        }
+        // Both sides are §4.3's lowercase: a `PubkeyRef` normalises on read, and the proposal's buyer is
+        // its attributed author, which `AttributedRumor` normalises.
+        if (envelope.counterparties.map { it.pubkey } != listOf(proposal.buyer)) {
+            return PaymentBuild.Refused(
+                null,
+                ChannelRejection.NOT_ADDRESSED_TO_BUYER,
+                null,
+                "§8.7: the fee payment request answers the buyer's copy of the order's `type=1`, so its " +
+                    "envelope names the buyer — the proposal's author — as its one counterparty, and this " +
+                    "envelope names another key, more than one, or none",
             )
         }
         try {

@@ -389,6 +389,18 @@ public enum class ChannelRejection {
      */
     NOT_THE_FEE_RECIPIENT,
 
+    /**
+     * A fee payment request written from §8.7's copy of the `type=1` whose envelope does not name the
+     * buyer — the proposal's author — as its one counterparty. T89.
+     *
+     * Decision T addresses the fee invoice to the buyer alone: §8.7's copy comes from the buyer, and
+     * only the buyer's `AcceptedPaymentRequest.accept` can store it. So
+     * `PaymentWriter.feeRequestFromProposal` builds nothing when the envelope's `p` list is another key,
+     * the buyer beside a second key, or empty: the page would otherwise address the request by a key it
+     * typed. Names no tag: the rule is about who the request is for, not about a tag's value.
+     */
+    NOT_ADDRESSED_TO_BUYER,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 

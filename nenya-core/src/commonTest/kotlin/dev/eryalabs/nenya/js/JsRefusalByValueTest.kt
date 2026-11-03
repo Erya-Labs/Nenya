@@ -1347,6 +1347,18 @@ class JsRefusalByValueTest {
         for (bad in HOSTILE_HEX + HOSTILE_TEXTS) requested("buildFeeRequestFromProposal invoice=`$bad`", invoice = bad)
         requested("buildFeeRequestFromProposal with a status update as the proposal", proposal = cancellation)
         requested("buildFeeRequestFromProposal of a chat", proposal = chat)
+        // T89: the envelope's `p` list spoiled — the provider, a stranger beside the buyer, none.
+        for ((what, to) in listOf(
+            "p = the provider" to arrayOf(arrayOf(provider)),
+            "p = the buyer and a stranger" to arrayOf(arrayOf(SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX)), arrayOf(SettlementFixtures.stranger(OrderFixtures.ORDER_INDEX))),
+            "no p" to emptyArray(),
+        )) {
+            requested(
+                "buildFeeRequestFromProposal $what",
+                envelope = JsRumorEnvelope(feeEnvelope.authorPubkey, feeEnvelope.createdAtSeconds, to),
+            )
+        }
+        assertTrue("NOT_ADDRESSED_TO_BUYER" in reasons, "decision T's addressee: $reasons")
     }
 
     /**
@@ -1685,9 +1697,10 @@ class JsRefusalByValueTest {
         // 15 and 6 over T42's thirteen entry points; 59 and 15, measured, once T54 swept all thirty-three;
         // 61, measured, once T59's `decodePrivateBid` joined the sweep; 62, measured, once T61's
         // `buildProposalForBid` added `WRONG_PARTIES`; 63, measured, once T62's added `DELIVERY_PASSED`;
-        // 67, measured, once T65's `buildReleaseAfterPayment` added its four `RELEASE_…` refusals.
+        // 67, measured, once T65's `buildReleaseAfterPayment` added its four `RELEASE_…` refusals; 73,
+        // measured, once T89's `NOT_ADDRESSED_TO_BUYER` joined the refusals T76–T87 added unpinned.
         assertTrue(
-            reasons.size >= 67,
+            reasons.size >= 73,
             "only ${reasons.size} distinct refusal(s) were reached — $reasons — which is not the " +
                 "breadth these cases are written for",
         )

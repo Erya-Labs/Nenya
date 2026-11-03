@@ -145,6 +145,33 @@ class JsFeeRequestFromProposalTest {
         }
     }
 
+    /**
+     * T89: the library addresses the request to the buyer. `p` = the provider, the buyer beside a stranger,
+     * and no `p` each build nothing, and each crossed refusal equals the Kotlin call's.
+     */
+    @Test
+    @JsName("an_envelope_not_addressed_to_exactly_the_buyer_builds_nothing_crossed_equal_to_kotlin")
+    fun `an envelope not addressed to exactly the buyer builds nothing, crossed equal to Kotlin`() {
+        val trade = Trade(feeBearing, feeRecipient.key)
+        val copy = trade.copyOpenedByFeeRecipient()
+        val proposal = OrderProposal.decode(copy.rumor as? AttributedRumor.Bound ?: fail("the copy is a bound rumor"))
+        for ((what, to) in listOf(
+            "p = the provider" to arrayOf(arrayOf(provider.key)),
+            "p = the buyer and a stranger" to arrayOf(arrayOf(buyer.key), arrayOf(stranger.key)),
+            "no p" to emptyArray(),
+        )) {
+            val envelope = JsRumorEnvelope(feeRecipient.key, NOW.toString(), to)
+            val answer = buildFeeRequestFromProposal(envelope, copy, feeInvoice)
+            assertBuildsNothing(answer, ChannelRejection.NOT_ADDRESSED_TO_BUYER.name, "ChannelRejection", null, what)
+            val kotlin = PaymentWriter.feeRequestFromProposal(envelope.asRumorEnvelope(), proposal, Bolt11Reference.recognise(feeInvoice))
+                .asJsBuildResult()
+            assertEquals(kotlin.reason, answer.reason, "$what: crossed equals Kotlin")
+            assertEquals(kotlin.reasonVocabulary, answer.reasonVocabulary, what)
+            assertEquals(kotlin.tag, answer.tag, what)
+            assertEquals(kotlin.detail, answer.detail, what)
+        }
+    }
+
     /** §8.3's own zero-fee example — 1 bps on 3 000 msat — names a recipient yet owes it `0`. */
     @Test
     @JsName("a_proposal_whose_fee_is_zero_builds_nothing")

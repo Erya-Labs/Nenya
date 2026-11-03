@@ -35,8 +35,8 @@ class FeeRequestFromProposalTest {
     private val feeRecipient = SettlementFixtures.feeRecipient(index)
     private val stranger = SettlementFixtures.stranger(index)
 
-    private fun envelope(author: String): RumorEnvelope =
-        RumorEnvelope(author, SettlementFixtures.ACCEPTED_AT, listOf(PubkeyRef(buyer)))
+    private fun envelope(author: String, to: List<String> = listOf(buyer)): RumorEnvelope =
+        RumorEnvelope(author, SettlementFixtures.ACCEPTED_AT, to.map { PubkeyRef(it) })
 
     private fun feeInvoice(proposal: OrderProposal = chain.proposal): Bolt11Reference =
         Bolt11Reference.recognise(SettlementFixtures.invoice(PaymentFixtures.preimageHex(1).single(), proposal.terms.split.fee))
@@ -104,6 +104,35 @@ class FeeRequestFromProposalTest {
                 what,
             )
         }
+    }
+
+    /**
+     * T89: the request is addressed to the buyer alone. `p` = the provider, the buyer beside a stranger, the
+     * stranger beside the buyer, and no `p` each build nothing; the buyer's key in uppercase, which §4.3
+     * normalises, builds.
+     */
+    @Test
+    @JsName("an_envelope_not_addressed_to_exactly_the_buyer_builds_nothing")
+    fun `an envelope not addressed to exactly the buyer builds nothing`() {
+        for ((what, to) in listOf(
+            "p = the provider" to listOf(provider),
+            "p = the fee recipient itself" to listOf(feeRecipient),
+            "p = the buyer and a stranger" to listOf(buyer, stranger),
+            "p = a stranger and the buyer" to listOf(stranger, buyer),
+            "p = the buyer twice" to listOf(buyer, buyer),
+            "no p" to emptyList(),
+        )) {
+            assertRefused(
+                PaymentWriter.feeRequestFromProposal(envelope(feeRecipient, to), chain.proposal, feeInvoice()),
+                null,
+                ChannelRejection.NOT_ADDRESSED_TO_BUYER,
+                null,
+                what,
+            )
+        }
+        val built = PaymentWriter.feeRequestFromProposal(envelope(feeRecipient, listOf(buyer.uppercase())), chain.proposal, feeInvoice())
+            as? PaymentBuild.Built ?: fail("the control: the buyer's key, in either case, builds")
+        assertEquals(listOf("p", buyer), built.event.tags.single { it[0] == "p" }, "the request names the buyer, lowercase")
     }
 
     /** No fee term, `["fee", "0"]` and §8.3's 1 bps on 3 000 msat each owe no fee: `PAYEE_NOT_REQUIRED`, naming `fee`. */
