@@ -3,6 +3,7 @@ package dev.eryalabs.nenya.js
 import dev.eryalabs.nenya.bid.BidFixtures
 import dev.eryalabs.nenya.bid.BidWriterFixtures
 import dev.eryalabs.nenya.channel.ChannelFixtures
+import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.DeliveryMessageFixtures
 import dev.eryalabs.nenya.channel.ListingOrderBuild
 import dev.eryalabs.nenya.channel.ListingOrderWriter
@@ -674,6 +675,18 @@ class JsRefusalByValueTest {
                 call(::buildPrivateBid) { buildPrivateBid(proposalEnvelope, bad, proposalTerms, PROPOSAL.feeRecipient) },
             )
         }
+        // T93: the envelope's own author as fee recipient, in either case, on fee-bearing terms.
+        val feeBearing = JsOrderTerms(
+            priceMsat = OrderFixtures.TERMS.split.price.millisatoshis.toString(),
+            feeBasisPoints = OrderFixtures.FEE_BASIS_POINTS,
+        )
+        for (author in listOf(proposalEnvelope.authorPubkey, proposalEnvelope.authorPubkey.uppercase())) {
+            record(
+                "proposal feeRecipient = the author",
+                call(::buildProposal) { buildProposal(proposalEnvelope, proposalOrder, item, feeBearing, author) },
+            )
+        }
+        assertTrue("FEE_RECIPIENT_IS_BUYER" in reasons, "§8.1's buyer as fee recipient: $reasons")
 
         val updateEnvelope = JsBoundaryFixtures.crossed(UPDATE.envelope)
         val updateOrder = (UPDATE.order ?: fail("the update must carry an order id")).toHex()
@@ -1405,6 +1418,26 @@ class JsRefusalByValueTest {
             val decoded = call(::decodeCommitment) { decodeCommitment(rumor) }
             record("decodeCommitment of $what", decoded.ok, decoded.kind, decoded.reason, decoded.reasonVocabulary, decoded.detail)
         }
+        // T93: §8.1's "The recipient MUST NOT be the buyer's pubkey", a `type=1` naming its own author.
+        val selfPaying = JsRumor(
+            ProposalFixtures.bound(
+                ProposalFixtures.proposalTags(
+                    index = OrderFixtures.ORDER_INDEX,
+                    fee = listOf(
+                        ChannelVocabulary.FEE,
+                        OrderFixtures.FEE_BASIS_POINTS.toString(),
+                        SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX),
+                    ),
+                ),
+                OrderFixtures.ORDER_INDEX,
+            ),
+        )
+        val selfPaid = call(::decodeProposal) { decodeProposal(selfPaying) }
+        record(
+            "decodeProposal naming the buyer as fee recipient",
+            selfPaid.ok, selfPaid.kind, selfPaid.reason, selfPaid.reasonVocabulary, selfPaid.detail,
+        )
+        assertTrue("FEE_RECIPIENT_IS_BUYER" in reasons, "§8.1's buyer as fee recipient: $reasons")
     }
 
     /** §10.4 step 1, §6's bid builder and §7.6's verdict, with every string-bearing value spoiled. */
@@ -1698,9 +1731,10 @@ class JsRefusalByValueTest {
         // 61, measured, once T59's `decodePrivateBid` joined the sweep; 62, measured, once T61's
         // `buildProposalForBid` added `WRONG_PARTIES`; 63, measured, once T62's added `DELIVERY_PASSED`;
         // 67, measured, once T65's `buildReleaseAfterPayment` added its four `RELEASE_…` refusals; 73,
-        // measured, once T89's `NOT_ADDRESSED_TO_BUYER` joined the refusals T76–T87 added unpinned.
+        // measured, once T89's `NOT_ADDRESSED_TO_BUYER` joined the refusals T76–T87 added unpinned; 74,
+        // measured, once T93's `FEE_RECIPIENT_IS_BUYER` joined.
         assertTrue(
-            reasons.size >= 73,
+            reasons.size >= 74,
             "only ${reasons.size} distinct refusal(s) were reached — $reasons — which is not the " +
                 "breadth these cases are written for",
         )

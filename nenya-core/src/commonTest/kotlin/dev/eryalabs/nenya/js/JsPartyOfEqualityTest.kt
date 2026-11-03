@@ -147,6 +147,9 @@ class JsPartyOfEqualityTest {
     /**
      * A key holding two roles is no party, never a pick: the control the task's mutation names. A
      * `partyOf` that tests `PROVIDER` before counting roles answers `PROVIDER` for the provider here.
+     *
+     * Only the provider can hold two roles (§8.1's MAY). The buyer-as-fee-recipient half this test
+     * once carried is now refused before any party is mapped — a declared fixture change (T93).
      */
     @Test
     @JsName("a_key_holding_two_roles_is_no_party_on_either_side_of_the_boundary")
@@ -154,24 +157,50 @@ class JsPartyOfEqualityTest {
         val index = OrderFixtures.ORDER_INDEX
         val buyer = SettlementFixtures.buyer(index)
         val provider = SettlementFixtures.provider(index)
-        for ((holder, other) in listOf(provider to buyer, buyer to provider)) {
-            val tags = ProposalFixtures.proposalTags(
-                index = index,
-                fee = listOf(ChannelVocabulary.FEE, OrderFixtures.FEE_BASIS_POINTS.toString(), holder),
-            )
-            val rumor = ProposalFixtures.bound(tags, index)
-            val decoded = OrderProposal.decode(rumor)
-            val name = if (holder == provider) "provider" else "buyer"
-            assertEquals(buyer, decoded.buyer, "§7.4's sender is the buyer")
-            assertEquals(holder, decoded.feeRecipient, "the proposal names the $name's key as fee recipient")
-            val roles = Roles("fee recipient = $name", rumor, buyer, provider, holder, SettlementFixtures.stranger(index))
-            assertCrossedEquals(roles, holder, null, "the key holding two roles")
-            assertCrossedEquals(
-                roles,
-                other,
-                if (other == buyer) Party.BUYER else Party.PROVIDER,
-                "the other party, unaffected",
-            )
+        val tags = ProposalFixtures.proposalTags(
+            index = index,
+            fee = listOf(ChannelVocabulary.FEE, OrderFixtures.FEE_BASIS_POINTS.toString(), provider),
+        )
+        val rumor = ProposalFixtures.bound(tags, index)
+        val decoded = OrderProposal.decode(rumor)
+        assertEquals(buyer, decoded.buyer, "§7.4's sender is the buyer")
+        assertEquals(provider, decoded.feeRecipient, "the proposal names the provider's key as fee recipient")
+        val roles = Roles("fee recipient = provider", rumor, buyer, provider, provider, SettlementFixtures.stranger(index))
+        assertCrossedEquals(roles, provider, null, "the key holding two roles")
+        assertCrossedEquals(roles, buyer, Party.BUYER, "the other party, unaffected")
+    }
+
+    /**
+     * §8.1: "The recipient MUST NOT be the buyer's pubkey." A proposal naming its buyer as fee recipient
+     * no longer decodes, so `partyOf` refuses it as a value naming `FEE_RECIPIENT_IS_BUYER` (T93).
+     */
+    @Test
+    @JsName("a_proposal_naming_its_buyer_as_fee_recipient_is_refused_before_any_party_is_mapped")
+    fun `a proposal naming its buyer as fee recipient is refused before any party is mapped`() {
+        val index = OrderFixtures.ORDER_INDEX
+        val buyer = SettlementFixtures.buyer(index)
+        val provider = SettlementFixtures.provider(index)
+        val tags = ProposalFixtures.proposalTags(
+            index = index,
+            fee = listOf(ChannelVocabulary.FEE, OrderFixtures.FEE_BASIS_POINTS.toString(), buyer),
+        )
+        val rumor = ProposalFixtures.bound(tags, index)
+        val kotlin = try {
+            OrderProposal.decode(rumor)
+            fail("§8.1 forbids the buyer as fee recipient")
+        } catch (refused: ChannelException) {
+            refused
+        }
+        assertEquals(ChannelRejection.FEE_RECIPIENT_IS_BUYER, kotlin.reason)
+        assertEquals(ChannelVocabulary.FEE, kotlin.tag)
+        for (sender in listOf(buyer, provider)) {
+            val crossed = partyOf(JsRumor(rumor), provider, sender)
+            assertFalse(crossed.ok)
+            assertEquals("refused", crossed.kind)
+            assertNull(crossed.party, "a refusal names no party")
+            assertEquals(ChannelRejection.FEE_RECIPIENT_IS_BUYER.name, crossed.reason)
+            assertEquals("ChannelRejection", crossed.reasonVocabulary)
+            assertEquals(ChannelVocabulary.FEE, crossed.tag)
         }
     }
 

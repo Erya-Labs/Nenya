@@ -436,6 +436,11 @@ public object RumorWriter {
      *   Emitted only when present, and the writer refuses a value that disagrees with
      *   `amount_msat` by the same rule §7.5 makes the *decoder* enforce — "the implementation MUST
      *   reject the message. It MUST NOT prefer one and continue."
+     *
+     * A [feeRecipient] equal to the envelope's author is [ChannelRejection.FEE_RECIPIENT_IS_BUYER]
+     * and builds nothing: §8.1 says the recipient MUST NOT be the buyer's pubkey, and the author of a
+     * `type=1` is the buyer (T93). Checked after every other rule, on a message that would otherwise
+     * have been built, so both keys have already been read as §4.3 reads one.
      */
     public fun proposal(
         envelope: RumorEnvelope,
@@ -444,7 +449,7 @@ public object RumorWriter {
         terms: OrderTerms,
         feeRecipient: String? = null,
         amountSat: Long? = null,
-    ): RumorBuild = assemble(
+    ): RumorBuild = refusingBuyerAsFeeRecipient(envelope, feeRecipient, assemble(
         Message(
             kind = RumorKind.ORDER_MESSAGE,
             type = OrderMessageKind.PROPOSAL,
@@ -461,7 +466,28 @@ public object RumorWriter {
             amountSat = amountSat,
         ),
         envelope,
-    )
+    ))
+
+    /** [proposal]'s §8.1 rule, over the answer [assemble] gave: only a [RumorBuild.Built] is refused. */
+    private fun refusingBuyerAsFeeRecipient(
+        envelope: RumorEnvelope,
+        feeRecipient: String?,
+        build: RumorBuild,
+    ): RumorBuild =
+        if (
+            build is RumorBuild.Built &&
+            feeRecipient != null &&
+            feeRecipient.lowercase() == envelope.authorPubkey.lowercase()
+        ) {
+            refusal(
+                ChannelRejection.FEE_RECIPIENT_IS_BUYER,
+                ChannelVocabulary.FEE,
+                "§8.1 says the `fee` recipient MUST NOT be the buyer's pubkey, and the author of a " +
+                    "`type=1` is its buyer",
+            )
+        } else {
+            build
+        }
 
     /**
      * §7.4's `kind:16` `type=3` status update — the message §7.6 makes acceptance out of.

@@ -503,10 +503,12 @@ public class OrderProposal internal constructor(
      * ### `null` is "not one party", and never a pick
      *
      * A key that is none of the three — a stranger, or a string that is not a pubkey at all — is
-     * `null`. So is a key holding **two** of those roles: a proposal naming its buyer or its provider
-     * as fee recipient makes that key both, and §11.2's rules differ between them (a cancellation
-     * from the provider ends the order, one from the fee recipient does not). Choosing either would
-     * be this function deciding the sender's standing, so it chooses neither.
+     * `null`. So is a key holding **two** of those roles: a proposal naming its provider as fee
+     * recipient (§8.1's MAY) makes that key both, and §11.2's rules differ between them (a
+     * cancellation from the provider ends the order, one from the fee recipient does not). Choosing
+     * either would be this function deciding the sender's standing, so it chooses neither. A proposal
+     * naming its buyer as fee recipient never reaches here: [decode] refuses it as
+     * [ChannelRejection.FEE_RECIPIENT_IS_BUYER] (§8.1, T93).
      *
      * Performs no other check: it reads no message, no status and no clock, and it never moves an
      * order. Whatever party it answers is still offered to `OrderMachine`, whose own sender rules
@@ -615,6 +617,17 @@ public class OrderProposal internal constructor(
             // `["fee", "0"]`, because §8.4 requires the pair `(0, —)` be reproducible as what it
             // was. Validated above, never wrapped in a `try`: STOP RULE 1.
             val terms = OrderTerms.of(price, rumor.tags.fee, expiration, deliverBy)
+            // §8.1: "The recipient MUST NOT be the buyer's pubkey" — and §7.4 makes the buyer this
+            // rumor's author. Compared lowercased on both sides, as `ListingOrderWriter` compares keys.
+            val feeRecipient = rumor.tags.feeRecipient
+            if (feeRecipient != null && feeRecipient.lowercase() == rumor.author.lowercase()) {
+                throw ChannelException(
+                    ChannelRejection.FEE_RECIPIENT_IS_BUYER,
+                    ChannelVocabulary.FEE,
+                    "§8.1 says the `fee` recipient MUST NOT be the buyer's pubkey, and this proposal's " +
+                        "`fee` names the key that sealed it",
+                )
+            }
             return OrderProposal(rumor, order, item, terms, ChannelTerms.signedTerms(rumor))
         }
 

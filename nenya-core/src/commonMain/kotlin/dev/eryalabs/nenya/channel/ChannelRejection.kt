@@ -402,6 +402,18 @@ public enum class ChannelRejection {
      */
     NOT_ADDRESSED_TO_BUYER,
 
+    /**
+     * A `type=1` whose `fee` term names its own author — the buyer — as the fee recipient. T93.
+     *
+     * §8.1: "The recipient MUST NOT be the buyer's pubkey." A buyer paying a fee to itself makes one
+     * key both the buyer and the fee recipient, and §11.2's sender rules differ between the two. So
+     * `OrderProposal.decode` refuses such a proposal once its fee term is read, and
+     * `RumorWriter.proposal` builds nothing whose envelope author is the recipient it was handed.
+     * Names the `fee` tag, whose third element is the reason. The provider as fee recipient is §8.1's
+     * MAY and is not this refusal.
+     */
+    FEE_RECIPIENT_IS_BUYER,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 
