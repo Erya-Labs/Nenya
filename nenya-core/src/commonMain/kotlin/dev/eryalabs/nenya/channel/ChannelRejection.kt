@@ -349,7 +349,8 @@ public enum class ChannelRejection {
      * opened from (`Order.buyer`, set only by `openOrderFromProposal`'s path), and a door refuses,
      * nothing offered, when that record is absent (an order `openOrder` opened from a bare id and
      * terms), when the proposal's author is another key, or when its terms are not equal to the
-     * order's. The fee recipient is **not** compared: `OrderTerms` carries no recipient.
+     * order's — or, since T90, when it names another fee recipient than `Order.feeRecipient`, which
+     * the order records beside the buyer because `OrderTerms` carries no recipient.
      *
      * A local refusal, as [SENDER_NOT_A_PARTY] is: it names no tag.
      */

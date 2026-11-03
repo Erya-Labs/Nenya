@@ -42,9 +42,10 @@ public class FeeRecipientCopy internal constructor(
          *
          * 1. `OrderBinding.check(order, proposal, providerPubkey)` — [proposal] must be the `type=1`
          *    [order] was opened from, and [providerPubkey] the key its acceptance was checked
-         *    against, with that call's own refusals (T79, T80, T82). That call compares the author and
-         *    the terms and **not the fee recipient** (`OrderTerms` carries none), so a second `type=1`
-         *    the buyer itself wrote under the same id and terms, naming another recipient, passes it;
+         *    against, with that call's own refusals (T79, T80, T82). That call compares the author, the
+         *    terms and the fee recipient the order recorded (T90), so a second `type=1` the buyer itself
+         *    wrote under the same id and terms, naming another recipient, is refused there and that
+         *    recipient is sent no copy;
          * 2. [order] in `committed` — any other state is [ChannelRejection.ORDER_NOT_COMMITTED].
          *    Decision T sends the copy when the order enters `committed`, the first state §8.5 and
          *    §11.2 accept a fee invoice from;

@@ -189,14 +189,26 @@ public sealed interface OrderEvent {
          * `Order.buyer` is what the `stepOrderWith…` doors compare a later proposal's author against.
          */
         public val buyer: String?,
+
+        /**
+         * §8.1's fee recipient the `type=1` named — the third element of its `fee` term — or `null`
+         * when it named none, or when nobody read one off a sealed rumor. T90.
+         *
+         * **Not reachable from the published constructor**, for the reason [buyer] is not:
+         * `OrderProposal.asOrderEvent` is the one path that fills it. `OrderTerms` carries no
+         * recipient, so without it a second `type=1` under the same id and terms naming another
+         * recipient is indistinguishable from the first. `Order.feeRecipient` is what
+         * `OrderBinding.check` compares a later proposal's recipient against.
+         */
+        public val feeRecipient: String?,
     ) : Rumor {
 
-        /** The published door: an id and terms, and **no** buyer — nothing here read a seal. */
+        /** The published door: an id and terms, and **no** buyer or fee recipient — nothing here read a seal. */
         public constructor(
             order: OrderId,
             terms: OrderTerms,
             createdAt: Long? = null,
-        ) : this(order, terms, createdAt, null)
+        ) : this(order, terms, createdAt, null, null)
 
         init {
             requireNonNegativeCreatedAt(createdAt)

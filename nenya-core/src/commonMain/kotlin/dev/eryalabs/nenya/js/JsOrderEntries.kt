@@ -159,8 +159,8 @@ public fun stepOrder(
  * 2. `OrderBinding.check` (T82, the call a Kotlin client makes): the proposal's and the update's
  *    `order` ids against [order]'s — either other is
  *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order; then the proposal against
- *    the one [order] was opened from — another author or other terms, or an order [openOrder] opened, is
- *    `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80; the fee recipient is not compared), and nothing is
+ *    the one [order] was opened from — another author, other terms or another fee recipient, or an order
+ *    [openOrder] opened, is `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80, T90), and nothing is
  *    offered; then, once [order] is accepted, [providerPubkey] against the key its acceptance was checked against — another is
  *    `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79), and nothing is offered;
  * 3. a `status=accepted` goes exactly where [stepOrder]'s `acceptance_received` sends it — §7.6's
@@ -224,8 +224,8 @@ public fun stepOrderWithStatusUpdate(
  * 2. `OrderBinding.check` (T82, the call a Kotlin client makes): the proposal's and the commitment's
  *    `order` ids against [order]'s — either other is
  *    `ChannelRejection.DIFFERENT_ORDER`, and nothing is offered to the order; then the proposal against
- *    the one [order] was opened from — another author or other terms, or an order [openOrder] opened, is
- *    `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80; the fee recipient is not compared), and nothing is
+ *    the one [order] was opened from — another author, other terms or another fee recipient, or an order
+ *    [openOrder] opened, is `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80, T90), and nothing is
  *    offered; then [providerPubkey] against the key the accepted order's acceptance was checked against — another is
  *    `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79), and nothing is offered;
  * 3. the party `OrderBinding.sender` — that is, `OrderProposal.partyOf` — maps the commitment's
@@ -275,8 +275,8 @@ public fun stepOrderWithCommitment(
  *    `order` id against [order]'s — another is `ChannelRejection.DIFFERENT_ORDER`, and
  *    nothing is offered. The release's own id is **not** compared here: that is §10.3's binding, and
  *    `asOrderEvent` makes it below. Then the proposal against the one [order] was opened from — another
- *    author or other terms, or an order [openOrder] opened, is `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL`
- *    (T80; the fee recipient is not compared), and nothing is offered. Then [providerPubkey] against the key the accepted order's
+ *    author, other terms or another fee recipient, or an order [openOrder] opened, is
+ *    `ChannelRejection.NOT_THIS_ORDERS_PROPOSAL` (T80, T90), and nothing is offered. Then [providerPubkey] against the key the accepted order's
  *    acceptance was checked against — another is `ChannelRejection.PROVIDER_NOT_THIS_ORDERS` (T79),
  *    and nothing is offered;
  * 3. the party `OrderBinding.sender` — that is, `OrderProposal.partyOf` — maps the release's

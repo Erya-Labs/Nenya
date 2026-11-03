@@ -27,9 +27,9 @@ public object OrderBinding {
      *    whose own id is bound by a later call — §10.3's release, through
      *    `DeliverableReleaseMessage.asOrderEvent` — is simply not passed;
      * 2. [proposal] against the `type=1` [order] was opened from — an order recording no buyer (only
-     *    `OrderProposal.asOrderEvent` records one), another author or other terms is
-     *    [ChannelRejection.NOT_THIS_ORDERS_PROPOSAL] (T80). The fee recipient is not compared:
-     *    `OrderTerms` carries none;
+     *    `OrderProposal.asOrderEvent` records one), another author, other terms or another fee
+     *    recipient is [ChannelRejection.NOT_THIS_ORDERS_PROPOSAL] (T80, T90). `OrderTerms` carries no
+     *    recipient, so the one `Order.feeRecipient` recorded is compared beside them;
      * 3. once [order] is accepted, [providerPubkey], read and normalised as `OrderProposal.partyOf`
      *    reads it (a malformed one still [ChannelRejection.MALFORMED_PROVIDER_PUBKEY]), against the key
      *    its acceptance was checked against — another is [ChannelRejection.PROVIDER_NOT_THIS_ORDERS]
@@ -86,18 +86,21 @@ public object OrderBinding {
 
     /**
      * [ChannelRejection.NOT_THIS_ORDERS_PROPOSAL] unless [proposal] is the `type=1` [order] was opened
-     * from: [order] records a buyer, [proposal]'s attributed author is that buyer, and its terms equal
-     * [order]'s.
+     * from: [order] records a buyer, [proposal]'s attributed author is that buyer, its terms equal
+     * [order]'s, and its fee recipient is the one [order] recorded.
      */
     private fun requireThisOrdersProposal(order: Order, proposal: OrderProposal) {
         val recorded = order.buyer
-        if (recorded == null || recorded != proposal.buyer || order.terms != proposal.terms) {
+        if (recorded == null || recorded != proposal.buyer || order.terms != proposal.terms ||
+            order.feeRecipient != proposal.feeRecipient
+        ) {
             throw ChannelException(
                 ChannelRejection.NOT_THIS_ORDERS_PROPOSAL,
                 null,
                 "every sender is mapped against the proposal handed here, and it is not the type=1 this " +
-                    "order was opened from — another author, other terms, or an order opened without " +
-                    "one; mapping against it would let its author act as this order's buyer",
+                    "order was opened from — another author, other terms, another fee recipient, or an " +
+                    "order opened without one; mapping against it would let its author act as this " +
+                    "order's buyer, or its fee recipient as this order's",
             )
         }
     }

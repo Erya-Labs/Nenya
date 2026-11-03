@@ -411,9 +411,11 @@ public class OrderProposal internal constructor(
      *
      * So does [buyer], through the event's internal constructor and no other path (T80): the order
      * records who sent the `type=1` it was opened from, which is what lets a later door refuse a
-     * `type=1` another key wrote under the same id.
+     * `type=1` another key wrote under the same id. And so does [feeRecipient] (T90), which lets that
+     * door refuse the buyer's own second `type=1` naming another recipient under the same id and terms.
      */
-    public fun asOrderEvent(): OrderEvent.Proposal = OrderEvent.Proposal(order, terms, createdAt, buyer)
+    public fun asOrderEvent(): OrderEvent.Proposal =
+        OrderEvent.Proposal(order, terms, createdAt, buyer, feeRecipient)
 
     /**
      * §7.6, whole: is [update] an acceptance of *these* terms, a counter-proposal, or neither?
