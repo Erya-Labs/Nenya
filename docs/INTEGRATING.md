@@ -462,4 +462,5 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `stepOrderWithStatusUpdate` — applies a received status update to an order, with the sender's party and the order id read from the messages (§7.6, §11.2).
 - `stepOrderWithCommitment` — applies a received delivery commitment to an order, read from the message, so the order records §10.1's check that it carries no key (§10.1, §11.2).
 - `stepOrderWithRelease` — applies a received release to an order, read from the message, so the order records §10.3's check that it names this order (§10.3, §11.2).
+- `proposalForFeeRecipient` — gives the buyer the order's proposal, unchanged, to seal to the fee recipient once the order is committed, and the fee recipient's key read from the fee term (§8.7).
 - `capabilities` — the library's own statement of what it does and does not check (§17).

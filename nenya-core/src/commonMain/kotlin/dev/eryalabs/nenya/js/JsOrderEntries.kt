@@ -4,6 +4,7 @@ import dev.eryalabs.nenya.channel.Acceptance
 import dev.eryalabs.nenya.channel.ChannelVocabulary
 import dev.eryalabs.nenya.channel.DeliverableReleaseMessage
 import dev.eryalabs.nenya.channel.DeliveryCommitmentMessage
+import dev.eryalabs.nenya.channel.FeeRecipientCopy
 import dev.eryalabs.nenya.channel.OrderBinding
 import dev.eryalabs.nenya.channel.OrderProposal
 import dev.eryalabs.nenya.channel.OrderStatusMessage
@@ -429,6 +430,43 @@ public fun partyOf(
     JsPartyResult(proposal.partyOf(senderPubkey, providerPubkey), null)
 }
 
+/**
+ * §8.7's copy of the order's `type=1` for the fee recipient, and the key to seal it to (decision T).
+ * T86.
+ *
+ * Revision `1.14`: when an order whose fee is not `0` enters `committed`, the buyer MUST send the fee
+ * recipient that order's `type=1`, unchanged. This answers the recipient's key, read off the
+ * proposal's own fee term, and the proposal as the [JsWireEvent] [seal] and [sealAsync] take, so a
+ * page types neither. The facade performs **no check of its own**: one call to
+ * `OrderProposal.decode`, then one to `FeeRecipientCopy.of`, which makes three, each refusal a value
+ * and nothing built:
+ *
+ * 1. `OrderBinding.check` — the proposal must be the one [order] was opened from and [providerPubkey]
+ *    the key its acceptance was checked against (`DIFFERENT_ORDER`, `NOT_THIS_ORDERS_PROPOSAL`,
+ *    `PROVIDER_NOT_THIS_ORDERS`, and the two refusals of a malformed or buyer's provider key);
+ * 2. [order] in `committed`, else `ORDER_NOT_COMMITTED`;
+ * 3. a fee to request — no fee term, `["fee", "0"]` or a fee that rounds to `0` is
+ *    `NO_FEE_TO_REQUEST`.
+ *
+ * It seals and signs nothing, and the copy is not evidence of anything (§8.7).
+ *
+ * @param order the buyer's order as it stands, from [openOrderFromProposal] and the steps after it.
+ * @param proposalRumor the `kind:16` `type=1` this order was opened on — the buyer's own `toSelf`
+ *   copy, as [open] handed it back.
+ * @param providerPubkey the provider key the page resolved **independently of every message** — see
+ *   [JsOrderEvent.providerPubkey].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public fun proposalForFeeRecipient(
+    order: JsOrder,
+    proposalRumor: JsRumor,
+    providerPubkey: String,
+): JsFeeRecipientCopy = jsGuarded({ JsFeeRecipientCopy(null, it) }) {
+    val proposal = OrderProposal.decode(proposalRumor.asBoundRumor("kind:16 type=1 order proposal"))
+    JsFeeRecipientCopy(FeeRecipientCopy.of(order.order, proposal, providerPubkey), null)
+}
+
 // =================================================================================================
 // The boundary types.
 // =================================================================================================
@@ -573,6 +611,48 @@ public class JsPartyResult internal constructor(
     /** Names the party or the refusal reason — never a key. */
     override fun toString(): String =
         if (ok) "JsPartyResult(${party ?: kind})" else "JsPartyResult(refused: $reason)"
+}
+
+/**
+ * What [proposalForFeeRecipient] answered: the copy and its addressee, or the refusal.
+ *
+ * [event] goes to [seal] or [sealAsync] with [recipientPubkey] as the recipient, sealed with the
+ * buyer's own signer. Neither is evidence of anything (§8.7).
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsFeeRecipientCopy internal constructor(
+    private val copy: FeeRecipientCopy?,
+    private val refusal: JsRefusal?,
+) {
+
+    /** `"built"` or `"refused"`. */
+    public val kind: String get() = if (copy != null) "built" else "refused"
+
+    /** True exactly when [kind] is `"built"`. */
+    public val ok: Boolean get() = copy != null
+
+    /** The fee recipient named in the proposal's fee term, 64 lowercase hex characters, when [ok]. */
+    public val recipientPubkey: String? get() = copy?.recipient
+
+    /** The order's `type=1`, unchanged and unsigned, when [ok]. */
+    public val event: JsWireEvent? get() = copy?.let { JsWireEvent(it.encode()) }
+
+    /** The rejection constant's `name`, when not [ok]. */
+    public val reason: String? get() = refusal?.reason
+
+    /** Which rejection enum [reason] came from — `ChannelRejection` for every refusal but a crossing's. */
+    public val reasonVocabulary: String? get() = refusal?.vocabulary
+
+    /** The tag the refusal is about, where the rule names one — `fee` for `NO_FEE_TO_REQUEST`. */
+    public val tag: String? get() = refusal?.tag
+
+    /** Why, in words. Never echoes an input (§12 item 11). */
+    public val detail: String? get() = refusal?.detail
+
+    /** Names the kind or the refusal reason — never a key. */
+    override fun toString(): String =
+        if (ok) "JsFeeRecipientCopy(built)" else "JsFeeRecipientCopy(refused: $reason)"
 }
 
 /**

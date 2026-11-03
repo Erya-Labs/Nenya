@@ -131,6 +131,9 @@ class ChannelStructureTest {
             "ListingOrderBuild\$WrongParties",
             // T82's order binding, moved out of the JavaScript layer's doors.
             "OrderBinding",
+            // T86's §8.7 copy of the `type=1` for the fee recipient (decision T).
+            "FeeRecipientCopy",
+            "FeeRecipientCopy\$Companion",
         )
 
         /**
@@ -186,6 +189,11 @@ class ChannelStructureTest {
             // `tag` is category 2: the tag name a refusal names, which decides nothing.
             "OrderBinding.check",
             "OrderBinding.sender",
+            // T86: the same caller-resolved provider key, handed straight to `OrderBinding.check`; and,
+            // on the internal constructor, §8.1's fee recipient that `of` read off the bound proposal's
+            // own `fee` term — category 1, a key read from the checked proposal, never one a caller types.
+            "FeeRecipientCopy\$Companion.of",
+            "FeeRecipientCopy.<init>",
             "Acceptance\$Accepted.<init>",          // that same checked key, carried on the answer
             // §10.1's `["url", …]`, the one value a delivery message publishes as a bare string.
             // It *is* something a counterparty wrote, and it is deliberately not a term: nothing in

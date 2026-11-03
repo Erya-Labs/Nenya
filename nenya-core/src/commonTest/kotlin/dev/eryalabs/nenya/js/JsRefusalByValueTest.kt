@@ -91,7 +91,7 @@ class JsRefusalByValueTest {
         /**
          * Every entry point the sweep in `the hostile sweep reaches every entry point …` must record.
          *
-         * Forty-six of `JsSurfaceTest.ENTRY_POINTS`' forty-seven: `capabilities` takes nothing, so it
+         * Forty-nine of `JsSurfaceTest.ENTRY_POINTS`' fifty: `capabilities` takes nothing, so it
          * has no hostile value to be handed and is that file's one named exemption.
          */
         val SWEPT_ENTRY_POINTS: Set<String> = setOf(
@@ -143,6 +143,7 @@ class JsRefusalByValueTest {
             "stepOrderWithStatusUpdate",
             "stepOrderWithCommitment",
             "stepOrderWithRelease",
+            "proposalForFeeRecipient",
         )
 
         /** Decimal fields, spoiled. Each is a form [JsDecimal] does not write and must not read. */
@@ -1306,6 +1307,25 @@ class JsRefusalByValueTest {
                 call(::stepOrderWithCommitment) { stepOrderWithCommitment(machine, accepted, JsRumor(messages.proposalRumor), commitmentRumor, bad) },
             )
         }
+
+        // T86: §8.7's copy over the committed order, so the provider key, the rumor and the state can be spoiled.
+        val committedOrder = stepOrderWithCommitment(
+            machine, accepted, JsRumor(messages.proposalRumor), commitmentRumor, provider,
+        ).order ?: fail("the honest commitment steps")
+        fun copied(what: String, at: JsOrder = committedOrder, proposal: JsRumor = JsRumor(messages.proposalRumor), providerKey: String = provider) {
+            val answer = call(::proposalForFeeRecipient) { proposalForFeeRecipient(at, proposal, providerKey) }
+            if (!answer.ok) {
+                assertNull(answer.event, "$what: a refusal builds nothing")
+                assertNull(answer.recipientPubkey, "$what: a refusal names no recipient")
+            }
+            record(what, answer.ok, answer.kind, answer.reason, answer.reasonVocabulary, answer.detail)
+        }
+        for (bad in HOSTILE_HEX + HOSTILE_TEXTS) {
+            copied("proposalForFeeRecipient providerPubkey=`$bad`", providerKey = bad)
+        }
+        copied("proposalForFeeRecipient of a proposed order", at = proposed)
+        copied("proposalForFeeRecipient with a status update as the proposal", proposal = cancellation)
+        copied("proposalForFeeRecipient of a chat", proposal = chat)
     }
 
     /**

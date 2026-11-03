@@ -956,6 +956,13 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
                     )
                 }
             },
+            // T86: the same provider key, handed to §8.7's copy over the honest `committed` order, so the key
+            // is read by `OrderBinding.check` there. Named in full so no import moves this file's pinned lines.
+            MoneyTarget("FeeRecipientCopy\$Companion.of") { m ->
+                m.values.map { v ->
+                    { dev.eryalabs.nenya.channel.FeeRecipientCopy.of(orders.getValue(OrderState.COMMITTED), chain.proposal, v); Unit }
+                }
+            },
         )
     }
 
@@ -1155,5 +1162,6 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
             "DeliverableReleaseMessage.decode, which the rumor sweep sweeps",
         "DeliveryCommitmentMessage.<init>" to "internal: its one caller is DeliveryCommitmentMessage.decode, which the " +
             "rumor sweep sweeps",
+        "FeeRecipientCopy.<init>" to "internal: its one caller is FeeRecipientCopy.of, swept here (T86)",
     )
 }

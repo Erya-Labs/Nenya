@@ -355,6 +355,28 @@ public enum class ChannelRejection {
      */
     NOT_THIS_ORDERS_PROPOSAL,
 
+    /**
+     * §8.7's copy of the `type=1` asked for on an order that is not in `committed`. T86.
+     *
+     * Decision T fixes the moment: the buyer sends the fee recipient the order's `type=1` when the
+     * order **enters** `committed`, because §8.5 and §11.2 refuse a fee invoice any earlier. Before
+     * it there is no commitment the fee recipient could invoice against, and after it the moment has
+     * passed. So `FeeRecipientCopy.of` builds nothing from any other state. A local refusal of the
+     * order handed in: it names no tag.
+     */
+    ORDER_NOT_COMMITTED,
+
+    /**
+     * §8.7's copy of the `type=1` asked for on an order with no fee to request. T86.
+     *
+     * §8.7 sends the copy only for an order whose `fee_msat` (§8.3) is not `0`, and §8.3 and §8.6
+     * say no fee payment request may exist for one that is: a proposal with no `fee` tag (§8.1's read
+     * rule), `["fee", "0"]`, or a non-zero rate that rounds to `0` on this price. There is nobody to
+     * send the copy to and nothing for them to invoice, so `FeeRecipientCopy.of` builds nothing. Names
+     * the `fee` tag, whose term is the reason.
+     */
+    NO_FEE_TO_REQUEST,
+
     /** §7.4's unknown-`type` sink is a treatment of somebody else's value, so it has no wire form. */
     UNKNOWN_IS_NOT_EMITTABLE,
 
