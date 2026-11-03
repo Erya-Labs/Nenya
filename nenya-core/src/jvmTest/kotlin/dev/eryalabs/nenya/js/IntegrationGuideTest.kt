@@ -101,7 +101,9 @@ class IntegrationGuideTest {
 
         const val PROVIDER_HEADING: String = "## The provider's side"
 
-        val TRADE_HEADINGS: List<String> = listOf(BUYER_HEADING, PROVIDER_HEADING)
+        const val FEE_RECIPIENT_HEADING: String = "## The fee recipient's side"
+
+        val TRADE_HEADINGS: List<String> = listOf(BUYER_HEADING, PROVIDER_HEADING, FEE_RECIPIENT_HEADING)
 
         const val CALLS: String = "Calls:"
 
@@ -257,12 +259,42 @@ class IntegrationGuideTest {
             return lines.joinToString("\n")
         }
 
-        /** Every check above, over both trade sections of [text]. */
+        /**
+         * T88: decision T's two doors, each pinned to the step that uses it — the buyer's step 7 sends
+         * §8.7's copy through `proposalForFeeRecipient`, and the fee recipient's step 2 builds its request
+         * from that copy through `buildFeeRequestFromProposal`.
+         */
+        val FEE_RECIPIENT_DOORS: Map<Pair<String, Int>, String> = mapOf(
+            (BUYER_HEADING to 7) to "proposalForFeeRecipient",
+            (FEE_RECIPIENT_HEADING to 2) to "buildFeeRequestFromProposal",
+        )
+
+        /** Fails unless each step in [FEE_RECIPIENT_DOORS] names its door on its `Calls:` line. */
+        fun assertFeeRecipientDoors(text: String) {
+            val missing = FEE_RECIPIENT_DOORS.filter { (step, door) ->
+                val (heading, number) = step
+                door !in (tradeSteps(text, heading).singleOrNull { it.number == number }?.calls ?: emptyList())
+            }
+            assertEquals(emptyMap(), missing, "(section, step) to the decision T door its `$CALLS` line omits")
+        }
+
+        /** [text] with [name] removed from the one `Calls:` line under [heading] that names it. */
+        fun withoutCall(text: String, heading: String, name: String): String {
+            val lines = text.lines().toMutableList()
+            val start = lines.indexOf(heading)
+            val end = (start + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
+            val index = (start + 1 until end).single { lines[it].trimStart().startsWith(CALLS) && "`$name`" in lines[it] }
+            lines[index] = lines[index].replace(", `$name`", "").replace("`$name`, ", "")
+            return lines.joinToString("\n")
+        }
+
+        /** Every check above, over every trade section of [text]. */
         fun assertTradeSections(text: String) {
             for (heading in TRADE_HEADINGS) assertStepsHeld(heading, tradeSteps(text, heading))
             assertProviderReleasesAfterPayment(tradeSteps(text, PROVIDER_HEADING))
             assertBuyerTakesDoors(tradeSteps(text, BUYER_HEADING))
             assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
+            assertFeeRecipientDoors(text)
         }
 
         /** A backticked text that reads as a constant's name: all of it, not a part of it. */
@@ -501,6 +533,35 @@ class IntegrationGuideTest {
             assertTrue(door !in step.calls, "`$door` must be gone from step $number's `$CALLS` line")
             assertFailsWith<AssertionError>("step $number without `$door` must fail") {
                 assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
+            }
+        }
+    }
+
+    /**
+     * T88: the buyer's step 7 calls `proposalForFeeRecipient` and the fee recipient's step 2
+     * `buildFeeRequestFromProposal`; the fee recipient's section follows the provider's and comes before
+     * `## What Nenya does not check`, and its steps hold.
+     */
+    @Test
+    fun `decision T's doors are pinned to the buyer's step 7 and the fee recipient's step 2`() {
+        assertFeeRecipientDoors(guide)
+        assertStepsHeld(FEE_RECIPIENT_HEADING, tradeSteps(guide, FEE_RECIPIENT_HEADING))
+        assertTrue(FEE_RECIPIENT_DOORS.values.all { it in JsSurfaceTest.ENTRY_POINTS }, "the doors are exported")
+        val lines = guide.lines()
+        val at = lines.indexOf(FEE_RECIPIENT_HEADING)
+        assertTrue(at > lines.indexOf(PROVIDER_HEADING), "`$FEE_RECIPIENT_HEADING` follows `$PROVIDER_HEADING`")
+        assertTrue(at < lines.indexOf("## What Nenya does not check"), "and comes before `## What Nenya does not check`")
+    }
+
+    /** Negative control: either door dropped from its step's `Calls:` line fails. */
+    @Test
+    fun `decision T's doors with either one dropped from its Calls line fail`() {
+        for ((step, door) in FEE_RECIPIENT_DOORS) {
+            val (heading, number) = step
+            val text = withoutCall(guide, heading, door)
+            assertTrue(door !in tradeSteps(text, heading).single { it.number == number }.calls, "`$door` must be gone")
+            assertFailsWith<AssertionError>("step $number of `$heading` without `$door` must fail") {
+                assertFeeRecipientDoors(text)
             }
         }
     }

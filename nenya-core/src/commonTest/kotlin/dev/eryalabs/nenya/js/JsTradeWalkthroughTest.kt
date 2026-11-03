@@ -59,6 +59,12 @@ import kotlin.test.fail
  * commitment with the right provider (§11.2's `WRONG_SENDER`). The first two, offered to `stepOrder`
  * with the `fromParty` a page would fill in, move the order, so each refusal is the door's.
  *
+ * T88: the fee recipient learns of the order as §8.7 says (decision T). At step 7 the buyer seals the
+ * copy [proposalForFeeRecipient] answers, and the fee recipient builds its request with
+ * [buildFeeRequestFromProposal] from the one rumor in its inbox, so it is handed no terms, no order id
+ * and no buyer key. A buyer that sends no copy leaves it nothing to build from, and the order stays
+ * `committed`.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -99,6 +105,32 @@ class JsTradeWalkthroughTest {
             assertTrue(check.name in settled.deliveryChecksPerformed, "§17: ${check.name} performed")
             assertFalse(check.name in settled.deliveryChecksNotPerformedHere, "and not also listed as not performed")
         }
+    }
+
+    /**
+     * T88's control: the same fee-bearing trade with no §8.7 copy. The fee recipient opened nothing, so
+     * it has no request to send; the buyer holds only the provider's, and `payment_requests_received`
+     * with it alone is refused `PAYMENT_REQUESTS_INCOMPLETE`, the order still `committed`. With the copy
+     * sent, the fee recipient's inbox holds exactly the order's proposal, and the order moves.
+     */
+    @Test
+    @JsName("a_fee_bearing_trade_whose_buyer_sends_no_copy_has_no_fee_request_and_stays_committed")
+    fun `a fee-bearing trade whose buyer sends no copy has no fee request and stays committed`() {
+        val silent = Trade(sendsCopy = false)
+        assertEquals(emptyList(), silent.inbox(silent.feeRecipient), "the fee recipient opened nothing")
+        assertNull(silent.feeRequest, "so it has no order to request a fee for")
+        assertEquals(listOf("provider"), silent.buyerRecords.map { it.payee }, "the buyer holds the provider's alone")
+        val outcome = silent.requestsReceived
+        assertFalse(outcome.ok, "§11.2: every required payee's request, or the order does not move")
+        assertEquals(TransitionRejection.PAYMENT_REQUESTS_INCOMPLETE.name, outcome.reason)
+        assertEquals("COMMITTED", outcome.order?.state, "the order is handed back unchanged")
+
+        val told = Trade()
+        val copy = told.inbox(told.feeRecipient).single()
+        assertEquals(told.proposal.toSelf.idHex, copy.idHex, "§8.7: the order's own `type=1`, unchanged")
+        assertEquals(told.buyer.key, copy.author, "sealed by the buyer")
+        assertEquals(listOf("provider", "fee"), told.buyerRecords.map { it.payee })
+        assertEquals("AWAITING_PAYMENT", told.awaitingPayment.state)
     }
 
     /**
@@ -314,10 +346,11 @@ class JsTradeWalkthroughTest {
     }
 
     /**
-     * One trade, walked to `awaiting_payment` on construction — guide steps 1, 2 and 4 to 7 — with
-     * the rest left to each test.
+     * One trade, walked through guide steps 1, 2 and 4 to 7 on construction — to `awaiting_payment` the
+     * first time [awaitingPayment] is read — with the rest left to each test. [sendsCopy] false skips
+     * §8.7's copy at step 7, for the control that the fee recipient then has nothing to act on.
      */
-    private class Trade {
+    private class Trade(val sendsCopy: Boolean = true) {
 
         companion object {
             /** Small streams are free for named parties (`FakeKeyRanges`). */
@@ -366,6 +399,9 @@ class JsTradeWalkthroughTest {
 
         val buyerStore = JsFlowFixtures.CrossedStore()
         val providerStore = JsFlowFixtures.CrossedStore()
+
+        /** Each rumor a party opened from a wrap sealed to it, with that party; read through [inbox]. */
+        private val received = mutableListOf<Pair<Party, JsRumor>>()
 
         // Guide step 1 — the provider posts an offer.
         private val offer: JsBuildResult = buildListingOffer(
@@ -459,30 +495,51 @@ class JsTradeWalkthroughTest {
             }
         }
 
-        // Guide step 7 — both payees request payment; the buyer accepts each into its store, and the
+        // Guide step 7 opens with §8.7's copy (T86): the buyer's door reads the fee recipient off the
+        // committed order's own proposal, and the buyer seals that proposal, unchanged, to it.
+        init {
+            if (sendsCopy) {
+                val copy = proposalForFeeRecipient(committed, proposal.toSelf, provider.key)
+                assertTrue(copy.ok, "the committed order has a copy: ${copy.reason} — ${copy.detail}")
+                send(
+                    copy.event ?: fail("a built copy carries its event"),
+                    buyer,
+                    party(copy.recipientPubkey ?: fail("a built copy names its recipient")),
+                )
+            }
+        }
+
+        /**
+         * The fee recipient's side (T87): it acts only on the copy it opened. Its request takes the order
+         * id and the terms off that copy, its envelope names the copy's author, and it is sealed to the
+         * key the door names. With no copy in its inbox there is nothing to build from, and no request.
+         */
+        val feeRequest: Delivered? = inbox(feeRecipient).singleOrNull()?.let { copy ->
+            val answer = buildFeeRequestFromProposal(
+                JsRumorEnvelope(feeRecipient.key, NOW.toString(), arrayOf(arrayOf(copy.author))),
+                copy,
+                feeInvoice,
+            )
+            assertTrue(answer.ok, "the fee recipient's request must build: ${answer.reason} — ${answer.detail}")
+            send(
+                answer.event ?: fail("a built request carries its event"),
+                feeRecipient,
+                party(answer.buyerPubkey ?: fail("a built request names the buyer")),
+            )
+        }
+
+        // Then both payees' requests reach the buyer, which accepts each into its store, and the
         // provider its own into its store (provider step 4).
         val providerRequest: Delivered = send(
             buildPaymentRequest(providerEnvelope(), orderIdHex, Payee.PROVIDER.token, providerInvoice),
             provider,
             buyer,
         )
-        val feeRequest: Delivered = send(
-            buildPaymentRequest(
-                envelope(feeRecipient, buyer),
-                orderIdHex,
-                Payee.FEE.token,
-                feeInvoice,
-                feeRecipient = feeRecipient.key,
-                // The fee recipient holds no copy of the proposal here, so it is handed the terms the
-                // buyer proposed and the acceptance repeated.
-                terms = proposedTerms,
-            ),
-            feeRecipient,
-            buyer,
-        )
-        val awaitingPayment: JsOrder = run {
+
+        /** The records the buyer accepted, in arrival order: the provider's, then the fee's if one came. */
+        val buyerRecords: List<JsAcceptedRequest> = run {
             val signed = arrayOf(proposalSighting, acceptanceSighting)
-            val records = listOf(providerRequest, feeRequest).map { request ->
+            listOfNotNull(providerRequest, feeRequest).map { request ->
                 val answer = acceptPaymentRequest(
                     request.toRecipient,
                     proposal.toSelf,
@@ -494,6 +551,10 @@ class JsTradeWalkthroughTest {
                 )
                 answer.request ?: fail("the buyer must accept the request: ${answer.reason} — ${answer.detail}")
             }
+        }
+
+        /** `payment_requests_received` with [buyerRecords], offered to the committed order. */
+        val requestsReceived: JsOrderOutcome = run {
             val own = acceptPaymentRequest(
                 providerRequest.toSelf,
                 proposal.toRecipient,
@@ -503,10 +564,17 @@ class JsTradeWalkthroughTest {
                 environment,
             )
             assertTrue(own.ok, "the provider keeps its own request: ${own.reason} — ${own.detail}")
-            step(
+            stepOrder(
+                machine,
                 committed,
-                JsOrderEvent(type = "payment_requests_received", requests = records.toTypedArray()),
-            ).also { assertEquals("AWAITING_PAYMENT", it.state) }
+                JsOrderEvent(type = "payment_requests_received", requests = buyerRecords.toTypedArray()),
+            )
+        }
+
+        /** The order [requestsReceived] advanced, which must be `awaiting_payment`. */
+        val awaitingPayment: JsOrder by lazy {
+            stepped(requestsReceived, "payment_requests_received offered to a COMMITTED order")
+                .also { assertEquals("AWAITING_PAYMENT", it.state) }
         }
 
         /** Guide step 8's provider receipt, its proof [preimageHex] and its reference the stored invoice. */
@@ -565,7 +633,12 @@ class JsTradeWalkthroughTest {
         /** Guide step 8's fee-request point, read against the same proposal, acceptance and provider. */
         val feeRequestSighting: JsFeeTermSighting
             get() = sighting(
-                paymentRequestFeeSighting(feeRequest.toRecipient, proposal.toSelf, acceptance.toRecipient, provider.key),
+                paymentRequestFeeSighting(
+                    (feeRequest ?: fail("the fee recipient sent no request")).toRecipient,
+                    proposal.toSelf,
+                    acceptance.toRecipient,
+                    provider.key,
+                ),
                 "FEE_PAYMENT_REQUEST",
             )
 
@@ -587,14 +660,26 @@ class JsTradeWalkthroughTest {
         // -------------------------------------------------------------------------------------
 
         /** [built] sealed by [from] to [to], opened by [to] and — its `toSelf` copy — by [from]. */
-        fun send(built: JsBuildResult, from: Party, to: Party): Delivered {
-            val event = built.event ?: fail("the message must build: ${built.reason} — ${built.detail}")
+        fun send(built: JsBuildResult, from: Party, to: Party): Delivered =
+            send(built.event ?: fail("the message must build: ${built.reason} — ${built.detail}"), from, to)
+
+        /** [event] sealed by [from] to [to], opened by [to] and — its `toSelf` copy — by [from]. */
+        fun send(event: JsWireEvent, from: Party, to: Party): Delivered {
             val sealed = seal(event, to.key, from.signer, environment)
             assertTrue(sealed.ok, "the message must seal: ${sealed.reason}")
             val toRecipient = sealed.toRecipient ?: fail("a sealed message has a recipient copy")
             val toSelf = sealed.toSelf ?: fail("a sealed message has a self copy")
-            return Delivered(opened(toRecipient, to, from), opened(toSelf, from, from))
+            return Delivered(opened(toRecipient, to, from), opened(toSelf, from, from)).also {
+                received += Pair(to, it.toRecipient)
+            }
         }
+
+        /** Every rumor [reader] opened from a wrap another party sealed to it, in arrival order. */
+        fun inbox(reader: Party): List<JsRumor> = received.filter { it.first === reader }.map { it.second }
+
+        /** The one party of this trade whose key is [key]; a key that is none of theirs fails. */
+        fun party(key: String): Party =
+            listOf(buyer, provider, feeRecipient).singleOrNull { it.key == key } ?: fail("no party of this trade holds that key")
 
         private fun opened(wrap: JsOutgoingWrap, reader: Party, author: Party): JsRumor {
             val answer = open(wrap.json, reader.signer, environment)

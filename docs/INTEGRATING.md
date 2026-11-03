@@ -263,8 +263,16 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    its `url`, which step 10 fetches from.
 
    Calls: `buildCommitment`, `seal`, `open`, `stepOrderWithCommitment`, `decodeCommitment`.
-7. **Request payment** (§8.6). The provider — and the fee recipient, where the terms give a non-zero
-   fee — each build `buildPaymentRequest`, seal and send it. The buyer opens each and accepts it with
+7. **Request payment** (§8.6, §8.7). Where the terms give a non-zero fee, the buyer first tells the fee
+   recipient about the order: once the order is `committed`, call `proposalForFeeRecipient` with the
+   order, the proposal you kept in step 4 and the provider's key as in step 5. It answers the proposal,
+   unchanged, as an `event`, and the fee recipient's key, read from the fee term, as `recipientPubkey`.
+   Seal and send that `event` to `recipientPubkey`. It is refused, and gives nothing to send, for an
+   order that is not `committed` (`ORDER_NOT_COMMITTED`), for a proposal another key wrote or with other
+   terms, and for an order that owes no fee (`NO_FEE_TO_REQUEST`). Without this copy the fee recipient
+   knows of no order and sends no request, so the order cannot reach `awaiting_payment`. The provider
+   builds `buildPaymentRequest`, seals and sends it; the fee recipient builds its own from the copy, as
+   [The fee recipient's side](#the-fee-recipients-side) says. The buyer opens each and accepts it with
    `acceptPaymentRequest`, which writes the record to the store. For a fee request, give
    `acceptPaymentRequest` its `earlierPoints` parameter: a `JsFeeTermSighting` for each earlier point
    where the `fee` tag appeared, or was absent (§8.4). At least the proposal (`ORDER_PROPOSAL`) and
@@ -278,7 +286,7 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    which the comparison skips (§8.4). Then the buyer steps the order with `payment_requests_received`,
    passing the accepted records.
 
-   Calls: `buildPaymentRequest`, `seal`, `open`, `proposalFeeSighting`, `acceptanceFeeSighting`, `bidFeeSighting`, `privateBidFeeSighting`, `acceptPaymentRequest`, `stepOrder`.
+   Calls: `proposalForFeeRecipient`, `seal`, `buildPaymentRequest`, `open`, `proposalFeeSighting`, `acceptanceFeeSighting`, `bidFeeSighting`, `privateBidFeeSighting`, `acceptPaymentRequest`, `stepOrder`.
 8. **Pay and check the receipts** (§9). The buyer pays each invoice with its own wallet, builds
    `buildReceipt` for each payment, then seals and sends it. The buyer opens its own `toSelf` copy of
    each receipt and checks it against the stored request. For the provider's payment, use
@@ -393,6 +401,32 @@ own messages from their `toSelf` copies. Keep each one.
    release.
 
    Calls: `buildReleaseAfterPayment`, `buildRelease`, `seal`.
+
+---
+
+## The fee recipient's side
+
+The same trade, followed by **the fee recipient's client**, where the terms give a non-zero fee. The
+fee recipient learns of the order only from the copy of the proposal the buyer sends it (§8.7), and it
+acts only on that copy: it types no order id, no terms and no buyer key. Where the fee recipient is the
+provider (§8.1), the provider receives the proposal a second time, as this copy.
+
+1. **Open the copy** (§8.7). Open the gift wrap the buyer sealed to you. `open` answers the proposal,
+   and its `author` is the buyer's key. Read its terms with `decodeProposal` if you want to show them.
+   The copy is not evidence that the provider accepted, committed or was paid (§8.7): it only tells you
+   what the buyer says the order is and what fee it would owe you. Keep the copy as `open` answered it.
+
+   Calls: `open`, `decodeProposal`.
+2. **Request the fee and seal it to the buyer** (§8.6). Build the request with
+   `buildFeeRequestFromProposal`, giving it an envelope with your own key as the author and the copy's
+   `author` as the one `p` key, the copy, and your invoice for exactly the fee. It reads the order id,
+   the terms and your key as the fee recipient from the copy. It is refused, and builds nothing, when
+   your key is not the fee recipient the copy names (`NOT_THE_FEE_RECIPIENT`), when the copy owes no fee
+   (`PAYEE_NOT_REQUIRED`), and when the invoice is not for exactly the fee (`INVOICE_AMOUNT_MISMATCH`, or
+   `INVOICE_AMOUNT_MISSING` for an invoice with no amount). The answer's `buyerPubkey` is the copy's
+   author: seal and send the `event` to that key.
+
+   Calls: `buildFeeRequestFromProposal`, `seal`.
 
 ---
 
