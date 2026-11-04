@@ -80,18 +80,28 @@ class StateMachineCasesTest {
          * ending in ` |`, an empty case or a last case not opening `and ` each throws.
          */
         fun namedCases(spec: String): List<String> {
-            val rows = spec.lines().filter { it.startsWith(ROW) }
-            require(rows.size == 1) { "expected one \"$ROW\" row, found ${rows.size}" }
-            val row = rows.single()
-            val at = row.indexOf(MARKER)
-            require(at >= 0 && row.indexOf(MARKER, at + 1) < 0) { "expected \"$MARKER\" exactly once in the row" }
-            val body = row.substring(at + MARKER.length).trimEnd()
-            require(body.endsWith(" |")) { "the row must end in \" |\"" }
-            val cases = body.removeSuffix(" |").split("; ").toMutableList()
+            val cases = rowAfter(spec, ROW, MARKER).split("; ").toMutableList()
             require(cases.size >= 2 && cases.last().startsWith("and ")) { "the last case must open \"and \"" }
             cases[cases.lastIndex] = cases.last().removePrefix("and ")
             require(cases.none { it.isBlank() }) { "an empty case in the row" }
             return cases
+        }
+
+        /**
+         * The text of [spec]'s one line opening [row], after its one [marker], with the closing ` |` removed.
+         *
+         * Shared with `MoneyVectorCasesTest`. Refuses rather than guesses: no such row or two of them, a
+         * marker absent or repeated, or a row not ending in ` |` each throws.
+         */
+        fun rowAfter(spec: String, row: String, marker: String): String {
+            val rows = spec.lines().filter { it.startsWith(row) }
+            require(rows.size == 1) { "expected one \"$row\" row, found ${rows.size}" }
+            val line = rows.single()
+            val at = line.indexOf(marker)
+            require(at >= 0 && line.indexOf(marker, at + 1) < 0) { "expected \"$marker\" exactly once in the row" }
+            val body = line.substring(at + marker.length).trimEnd()
+            require(body.endsWith(" |")) { "the row must end in \" |\"" }
+            return body.removeSuffix(" |")
         }
 
         private val vendored: String by lazy { VendoredTestFiles.text("spec/NENYA-1.md") }

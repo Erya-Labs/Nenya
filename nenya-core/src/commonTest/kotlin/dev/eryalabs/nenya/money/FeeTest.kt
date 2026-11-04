@@ -157,7 +157,53 @@ abstract class PortableFeeTest {
         assertFalse(statedOneOnThreeThousand.feePayeeRequired)
     }
 
+    // ---------------------------------------------------------------- §18's two bps boundaries
+
+    @JsName("at_0_bps_the_fee_is_zero_at_every_price_up_to_the_supply_cap")
+    @Test
+    fun `at 0 bps the fee is zero at every price up to the supply cap`() {
+        // §18's `bps = 0` boundary. floor(price_msat × 0 / 10 000) = 0 whatever the price, the
+        // total is the price, and with nothing to invoice no fee payee is required.
+        for (price in listOf(Msat.ZERO, Msat.ofMsat(1L), Msat.ofMsat(3_000L), Msat.ofSat(1_001L), Msat.SUPPLY_CAP)) {
+            val split = FeeTerm.of(0).splitOn(price)
+            assertEquals(Msat.ZERO, split.fee, "0 bps levied a fee on $price")
+            assertEquals(price, split.total, "at 0 bps the total is the price")
+            assertFalse(split.feePayeeRequired, "0 bps requires no fee invoice")
+        }
+    }
+
+    @JsName("at_10000_bps_the_fee_is_exactly_the_price_and_the_total_twice_it")
+    @Test
+    fun `at 10000 bps the fee is exactly the price, and the total twice it`() {
+        // §18's `bps = 10000` boundary: 10 000 bps is 100%, so floor(price_msat × 10 000 / 10 000)
+        // is the price itself, with nothing to round. 1 msat is the smallest fee that is required.
+        for (price in listOf(Msat.ofMsat(1L), Msat.ofMsat(3_000L), Msat.ofMsat(13_713L), Msat.ofSat(1_001L), Msat.ofSat(50_000L))) {
+            val split = FeeTerm.of(FeeTerm.MAX_BASIS_POINTS).splitOn(price)
+            assertEquals(price, split.fee, "10 000 bps must levy exactly the price on $price")
+            assertEquals(price.millisatoshis * 2L, split.total.millisatoshis)
+            assertTrue(split.feePayeeRequired, "a fee equal to a non-zero price must be invoiced")
+        }
+    }
+
     // ---------------------------------------------------------------- the overflow control
+
+    @JsName("at_the_supply_cap_and_10000_bps_the_fee_is_the_whole_cap_where_the_naive_product_wraps")
+    @Test
+    fun `at the supply cap and 10000 bps the fee is the whole cap, where the naive product wraps`() {
+        // §18's overflow probe at the supply cap, and §8.3's boundary example, on every target: the
+        // JVM FeeTest repeats it against a BigInteger oracle, which common Kotlin does not have, so the
+        // oracle here is §8.3's own identity — at 100% the fee is the price.
+        val price = Msat.SUPPLY_CAP
+        val split = FeeTerm.of(FeeTerm.MAX_BASIS_POINTS).splitOn(price)
+
+        assertEquals(price, split.fee, "at 10 000 bps the fee is the price, here the whole supply cap")
+        assertEquals(price.millisatoshis + price.millisatoshis, split.total.millisatoshis)
+        assertTrue(split.total.millisatoshis > 0L, "§8.3's total is below 2^63 and must not wrap")
+
+        // The bug this is a control for: price × bps exceeds 2^63 and wraps, on JavaScript as on the JVM.
+        val naive = (price.millisatoshis * 10_000L) / 10_000L
+        assertNotEquals(split.fee.millisatoshis, naive, "the fee must not be the naive product's wrapped answer")
+    }
 
     // ---------------------------------------------------------------- the basis-point range
 
