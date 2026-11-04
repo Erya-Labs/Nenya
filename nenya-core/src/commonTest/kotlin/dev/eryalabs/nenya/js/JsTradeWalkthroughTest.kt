@@ -78,6 +78,10 @@ import kotlin.test.fail
  * called directly, since [Trade.paid] pays the fee; the buyer's order still waits for the fee receipt,
  * and refuses that release until it is `paid`. An order the provider opens wants the fee request too.
  *
+ * T99: the fee recipient cannot verify its receipt from its inbox alone (decision U), because it stored
+ * no request. Its acceptance and fee-request points are the one exception to T74's door-made sightings:
+ * no door gives a fee recipient those points, so its test types the copy's `fee` row in for them.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -553,6 +557,49 @@ class JsTradeWalkthroughTest {
         assertFalse(outcome.ok, "§11.2: every required payee's request, or the order does not move")
         assertEquals(TransitionRejection.PAYMENT_REQUESTS_INCOMPLETE.name, outcome.reason)
         assertEquals("COMMITTED", outcome.order?.state, "the order is handed back unchanged")
+    }
+
+    /**
+     * T99: the fee recipient holds only the §8.7 copy and the fee receipt, and no stored request. The
+     * order it opens from the copy, an empty store and the copy's own point refuse
+     * `FEE_TERM_POINT_MISSING`; the copy's `fee` row typed in for the acceptance's and the fee
+     * request's points gets past §8.4 and is refused `NO_STORED_REQUEST`, as `verifySettlement` over
+     * the copy's terms is. The buyer's check of the same receipt evidences, so each refusal is the
+     * empty store's.
+     */
+    @Test
+    @JsName("a_fee_recipient_s_receipt_from_its_inbox_alone_is_refused_NO_STORED_REQUEST")
+    fun `a fee recipient's receipt from its inbox alone is refused NO_STORED_REQUEST`() {
+        val trade = Trade()
+        val copy = trade.inbox(trade.feeRecipient).single()
+        val opened = openOrderFromProposal(trade.machine, copy)
+        val order = opened.order ?: fail("the fee recipient's order must open: ${opened.reason} — ${opened.detail}")
+        val store = JsFlowFixtures.CrossedStore()
+        val receipt = trade.feeReceipt()
+
+        val copyPoint = proposalFeeSighting(copy).sighting ?: fail("the copy's point must read")
+        val alone = verifyFeeReceipt(receipt.toRecipient, store.seam, order, arrayOf(copyPoint))
+        assertFalse(alone.ok, "§8.4: the acceptance and the fee request are REQUIRED points")
+        assertEquals(SettlementRejection.FEE_TERM_POINT_MISSING.name, alone.reason)
+        assertNull(alone.settlement, "a refusal carries no settlement")
+
+        val typed = arrayOf("ACCEPTANCE", "FEE_PAYMENT_REQUEST").map { JsFeeTermSighting(it, copyPoint.feeTag) }
+        val retyped = verifyFeeReceipt(receipt.toRecipient, store.seam, order, arrayOf(copyPoint) + typed)
+        assertFalse(retyped.ok, "§9.2 check 1: the fee recipient stored no request")
+        assertEquals(SettlementRejection.NO_STORED_REQUEST.name, retyped.reason)
+        assertNull(retyped.settlement, "a refusal carries no settlement")
+
+        val terms = (decodeProposal(copy).proposal ?: fail("the fee recipient reads the copy")).terms
+        val plain = verifySettlement(receipt.toRecipient, store.seam, terms)
+        assertFalse(plain.ok, "§9.2 check 1 again, without check 6")
+        assertEquals(SettlementRejection.NO_STORED_REQUEST.name, plain.reason)
+        assertNull(plain.settlement, "a refusal carries no settlement")
+
+        val buyer = trade.feeCheck(
+            receipt,
+            arrayOf(trade.proposalSighting, trade.acceptanceSighting, trade.feeRequestSighting),
+        )
+        assertTrue(buyer.settlement?.evidenced == true, "the buyer's store, order and points evidence it: ${buyer.reason}")
     }
 
     // -----------------------------------------------------------------------------------------
