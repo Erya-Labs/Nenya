@@ -73,6 +73,11 @@ import kotlin.test.fail
  * T95: one more, at step 4 — the buyer proposing with itself as the fee recipient (T93's
  * `FEE_RECIPIENT_IS_BUYER` from [buildProposalAgainst]), which seals nothing.
  *
+ * T98: a fee is not enforced against the buyer, and §11's table is the buyer's order (decision U). The
+ * provider releases on its own receipt alone, through [verifySettlement] and [buildReleaseAfterPayment]
+ * called directly, since [Trade.paid] pays the fee; the buyer's order still waits for the fee receipt,
+ * and refuses that release until it is `paid`. An order the provider opens wants the fee request too.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -430,6 +435,126 @@ class JsTradeWalkthroughTest {
         assertEquals(trade.feeRecipient.key, decodeProposal(trade.proposal.toRecipient).proposal?.feeRecipient)
     }
 
+    /**
+     * T98: with no §8.7 copy no fee invoice exists, and the provider's own receipt, checked against its
+     * own store, is evidenced — so its release builds, and the buyer reads it. The fee recipient was
+     * never asked to do anything, and the provider's release did not wait for it.
+     */
+    @Test
+    @JsName("with_no_fee_invoice_the_provider_s_own_receipt_is_evidenced_and_its_release_builds")
+    fun `with no fee invoice the provider's own receipt is evidenced and its release builds`() {
+        val silent = Trade(sendsCopy = false)
+        assertNull(silent.feeRequest, "no fee invoice exists")
+        val receipt = silent.providerReceipt(Trade.PROVIDER_PREIMAGE)
+
+        val own = silent.providerOwnSettlement(receipt)
+        assertEquals(Payee.PROVIDER.token, own.payee, "the provider's own payment")
+        val built = silent.releaseOn(own)
+        assertTrue(built.ok, "§10.3: the provider's release rests on its own evidence: ${built.reason} — ${built.detail}")
+        val release = silent.send(built, silent.provider, silent.buyer).toRecipient
+        assertTrue(decodeRelease(release).ok, "the buyer reads the release")
+        assertEquals(emptyList(), silent.inbox(silent.feeRecipient), "and the fee recipient was sent nothing")
+    }
+
+    /**
+     * T98: the buyer pays the provider and never the fee. Its own provider receipt, alone in
+     * `receipts_verified`, is refused `RECEIPTS_INCOMPLETE` and the order stays `awaiting_payment`; the
+     * provider's release, built on its own evidence, is refused at the door `RELEASE_ORDER_NOT_PAID`, with
+     * nothing offered. The release still decodes, and the served bytes still verify against the
+     * commitment: neither door reads the order.
+     */
+    @Test
+    @JsName("a_fee_bearing_trade_with_the_fee_unpaid_stays_awaiting_payment_and_refuses_the_release")
+    fun `a fee-bearing trade with the fee unpaid stays awaiting payment and refuses the release`() {
+        val trade = Trade()
+        val receipt = trade.providerReceipt(Trade.PROVIDER_PREIMAGE)
+
+        val buyerCheck = verifySettlement(receipt.toSelf, trade.buyerStore.seam, trade.buyerTerms)
+        val buyerOwn = buyerCheck.settlement ?: fail("the provider payment must verify: ${buyerCheck.reason}")
+        assertTrue(buyerOwn.evidenced, "§9.2's evidence exists for the provider payment")
+        val incomplete = stepOrder(
+            trade.machine,
+            trade.awaitingPayment,
+            JsOrderEvent(type = "receipts_verified", settlements = arrayOf(buyerOwn)),
+        )
+        assertFalse(incomplete.ok, "§11.2: every required payee's receipt, or the order does not move")
+        assertEquals(TransitionRejection.RECEIPTS_INCOMPLETE.name, incomplete.reason)
+        assertEquals("AWAITING_PAYMENT", incomplete.order?.state, "the order is handed back unchanged")
+
+        val release = trade.send(trade.releaseOn(trade.providerOwnSettlement(receipt)), trade.provider, trade.buyer)
+        val door = trade.receivedRelease(trade.awaitingPayment, release.toRecipient)
+        assertNotStepped(door, ChannelRejection.RELEASE_ORDER_NOT_PAID.name, "ChannelRejection")
+
+        assertTrue(decodeRelease(release.toRecipient).ok, "the release still decodes")
+        val commitment = trade.awaitingPayment.commitment ?: fail("an awaiting order holds its commitment")
+        val served = verifyServedBytes(commitment, encodeLowerHex(OrderFixtures.blob.served))
+        assertTrue(served.ok, "§10.4 step 1 still answers: ${served.reason}")
+        assertEquals(listOf(trade.proposal.toSelf.idHex), trade.inbox(trade.feeRecipient).map { it.idHex }, "no fee receipt was sent")
+    }
+
+    /**
+     * T98's honest buyer: the provider's early release, built before the fee is paid, is refused
+     * `RELEASE_ORDER_NOT_PAID` while the order awaits payment; once the fee receipt verifies and the
+     * order is `paid`, the same release rumor steps it to `released`.
+     */
+    @Test
+    @JsName("an_early_release_is_refused_until_the_fee_receipt_verifies_then_releases_the_paid_order")
+    fun `an early release is refused until the fee receipt verifies then releases the paid order`() {
+        val trade = Trade()
+        val receipt = trade.providerReceipt(Trade.PROVIDER_PREIMAGE)
+        val early = trade.send(trade.releaseOn(trade.providerOwnSettlement(receipt)), trade.provider, trade.buyer).toRecipient
+
+        val tooSoon = trade.receivedRelease(trade.awaitingPayment, early)
+        assertNotStepped(tooSoon, ChannelRejection.RELEASE_ORDER_NOT_PAID.name, "ChannelRejection")
+
+        val paid = trade.paid(receipt)
+        val released = trade.stepped(trade.receivedRelease(paid, early), "the early release offered to the PAID order")
+        assertEquals("RELEASED", released.state, "§11.2's `paid → released`, on the release sent early")
+    }
+
+    /**
+     * T98: an order the provider opens from the proposal it received, stepped over its own acceptance
+     * and commitment copies. Its own invoice record alone, offered as `payment_requests_received`, is
+     * refused `PAYMENT_REQUESTS_INCOMPLETE` and the order stays `committed`: §11's table is the buyer's,
+     * and the fee request is not sent to the provider.
+     */
+    @Test
+    @JsName("an_order_the_provider_opens_with_its_own_request_alone_is_refused_PAYMENT_REQUESTS_INCOMPLETE")
+    fun `an order the provider opens with its own request alone is refused PAYMENT_REQUESTS_INCOMPLETE`() {
+        val trade = Trade()
+        val opened = openOrderFromProposal(trade.machine, trade.proposal.toRecipient)
+        val proposed = opened.order ?: fail("the provider's order must open: ${opened.reason} — ${opened.detail}")
+        val accepted = trade.stepped(
+            stepOrderWithStatusUpdate(
+                trade.machine,
+                proposed,
+                trade.proposal.toRecipient,
+                trade.acceptance.toSelf,
+                trade.provider.key,
+            ),
+        ).also { assertEquals("ACCEPTED", it.state) }
+        val committed = trade.stepped(
+            stepOrderWithCommitment(
+                trade.machine,
+                accepted,
+                trade.proposal.toRecipient,
+                trade.commitment.toSelf,
+                trade.provider.key,
+            ),
+        ).also { assertEquals("COMMITTED", it.state) }
+
+        val own = trade.providerStore.find(trade.orderIdHex, Payee.PROVIDER.token)
+            ?: fail("the provider keeps its own request")
+        val outcome = stepOrder(
+            trade.machine,
+            committed,
+            JsOrderEvent(type = "payment_requests_received", requests = arrayOf(own)),
+        )
+        assertFalse(outcome.ok, "§11.2: every required payee's request, or the order does not move")
+        assertEquals(TransitionRejection.PAYMENT_REQUESTS_INCOMPLETE.name, outcome.reason)
+        assertEquals("COMMITTED", outcome.order?.state, "the order is handed back unchanged")
+    }
+
     // -----------------------------------------------------------------------------------------
 
     /** [outcome] is a door's refusal [reason] from [vocabulary], with no event offered and so no order. */
@@ -774,6 +899,19 @@ class JsTradeWalkthroughTest {
             provider,
             buyer,
         ).toRecipient
+
+        /** T98: the provider's own check of its copy of [receipt] against its own store, which must evidence. */
+        fun providerOwnSettlement(receipt: Delivered): JsSettlement =
+            evidenced(verifySettlement(receipt.toRecipient, providerStore.seam, providerTerms), "the provider's own")
+
+        /** T98: guide step 9's release built directly on [settlement], with no fee receipt asked for. */
+        fun releaseOn(settlement: JsSettlement): JsBuildResult = buildReleaseAfterPayment(
+            providerEnvelope(),
+            commitment.toSelf,
+            settlement,
+            ReleaseFixtures.KEY_HEX,
+            ReleaseFixtures.NONCE_HEX,
+        )
 
         // -------------------------------------------------------------------------------------
 
