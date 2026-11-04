@@ -129,7 +129,7 @@
   <text x="522" y="609" fill="#eef0f8" font-size="13"><tspan font-weight="600">payment 2</tspan>: buyer &#8594; fee recipient, exactly fee_msat</text>
   <text x="522" y="627" fill="#9aa0b8" font-size="12" font-family="ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace">["payee", "fee", "&lt;recipient-pubkey&gt;"]</text>
 
-  <text x="506" y="655" fill="#f5b942" font-size="13" font-weight="600">provider receives price &#183; buyer pays price + fee</text>
+  <text x="506" y="655" fill="#f5b942" font-size="13" font-weight="600">provider receives price &#183; buyer owes price + fee</text>
   <text x="506" y="673" fill="#9aa0b8" font-size="12">the fee is a line item on top, never deducted from the price</text>
 
   <line x1="508" y1="689" x2="516" y2="697" stroke="#e5484d" stroke-width="1.8"/>

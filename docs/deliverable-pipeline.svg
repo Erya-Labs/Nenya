@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 774" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="The deliverable pipeline: strip metadata, hash the plaintext into ox, encrypt with AES-256-GCM, hash the blob into x, commit without the key or nonce, release both after payment evidence verifies; the buyer checks x, decrypts, checks ox, and only then settles; a hash mismatch or a failed decryption moves the order to disputed">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 774" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-label="The deliverable pipeline: strip metadata, hash the plaintext into ox, encrypt with AES-256-GCM, hash the blob into x, commit without the key or nonce, release both after the provider&#8217;s payment evidence verifies; the buyer checks x, decrypts, checks ox, and only then settles; a hash mismatch or a failed decryption moves the order to disputed">
   <title>The deliverable pipeline</title>
   <rect width="960" height="774" rx="16" fill="#11131c"/>
 
@@ -57,7 +57,7 @@
 
   <!-- the key and nonce bypass the commitment -->
   <path d="M562 222 L562 264 L720 264 L720 268" fill="none" stroke="#f5b942" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#dpAmber)"/>
-  <text fill="#f5b942" font-size="12"><tspan x="574" y="241">key and nonce: sent only in the release,</tspan><tspan x="574" y="256">after payment evidence verifies</tspan></text>
+  <text fill="#f5b942" font-size="12"><tspan x="574" y="241">key and nonce: sent only in the release,</tspan><tspan x="574" y="256">after the provider&#8217;s payment evidence verifies</tspan></text>
 
   <!-- ===== commitment panel ===== -->
   <rect x="40" y="276" width="400" height="190" rx="10" fill="#1a1d2b" stroke="#2b2f44" stroke-width="2"/>

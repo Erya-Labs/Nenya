@@ -396,6 +396,18 @@ class IntegrationGuideTest {
             assertTrue(PROVIDER_DOES_NOT_WAIT in collapsed(text.lines()), "the companion says `$PROVIDER_DOES_NOT_WAIT`")
         }
 
+        /** T106: the phrase each figure must hold, by its path from `nenya-core` (decision U). */
+        val FIGURE_PHRASES: Map<String, String> = mapOf(
+            "../docs/trade-sequence.svg" to "the fee recipient holds no order",
+            "../docs/order-lifecycle.svg" to "A provider releases on its own receipt",
+        )
+
+        /** Fails unless each text in [texts], keyed by path, holds its phrase in [FIGURE_PHRASES], naming the ones that do not. */
+        fun assertFiguresSay(texts: Map<String, String>) {
+            val missing = texts.filter { (path, text) -> FIGURE_PHRASES.getValue(path) !in collapsed(text.lines()) }.keys
+            assertEquals(emptySet(), missing, "figures that do not hold their phrase")
+        }
+
         /** [text] with its line at [index] removed. */
         fun withoutLine(text: String, index: Int): String =
             text.lines().filterIndexed { i, _ -> i != index }.joinToString("\n")
@@ -676,6 +688,24 @@ class IntegrationGuideTest {
         val deleted = text.replace(PROVIDER_DOES_NOT_WAIT, "")
         assertNotEquals(text, deleted, "the companion holds the sentence")
         assertFailsWith<AssertionError> { assertProviderDoesNotWait(deleted) }
+    }
+
+    /** T106: the trade sequence says the fee recipient holds no order, and the lifecycle whose order it draws (decision U). */
+    @Test
+    fun `the figures say whose order it is and that the fee recipient holds none`() {
+        assertFiguresSay(FIGURE_PHRASES.keys.associateWith { read(File(it)) })
+    }
+
+    /** Negative control: deleting the phrase from either figure fails, naming that figure. */
+    @Test
+    fun `either figure without its phrase fails`() {
+        val texts = FIGURE_PHRASES.keys.associateWith { collapsed(read(File(it)).lines()) }
+        for ((path, phrase) in FIGURE_PHRASES) {
+            val deleted = texts + (path to texts.getValue(path).replace(phrase, ""))
+            assertNotEquals(texts, deleted, "`$path` holds `$phrase`")
+            val failure = assertFailsWith<AssertionError>("`$path` without its phrase must fail") { assertFiguresSay(deleted) }
+            assertTrue(path in failure.message.orEmpty(), "the failure names `$path`")
+        }
     }
 
     /**

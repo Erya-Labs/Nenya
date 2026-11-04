@@ -128,11 +128,13 @@
     <text x="240" y="1106" fill="#9aa0b8" font-size="12">preimage: 64 lowercase hex &#183; SHA-256(preimage) = payment_hash</text>
     <!-- fee receipt -->
     <text x="315" y="1138" fill="#eef0f8" font-size="13" font-weight="600">payment receipt &#8212; kind:17 &#183; payee = fee</text>
-    <text x="315" y="1164" fill="#9aa0b8" font-size="12">a fee receipt is accepted only in awaiting_payment (&#167;8.5)</text>
+    <text x="315" y="1164" fill="#9aa0b8" font-size="12">the buyer checks it only in its own awaiting_payment (&#167;8.5)</text>
+    <text x="315" y="1180" fill="#9aa0b8" font-size="12">the fee recipient holds no order</text>
     <!-- release -->
     <text x="240" y="1196" fill="#eef0f8" font-size="13" font-weight="600">release &#8212; kind:15 file message</text>
     <text x="240" y="1222" fill="#9aa0b8" font-size="12">decryption-key + nonce &#183; the order tag names this order</text>
     <text x="240" y="1238" fill="#9aa0b8" font-size="12">x, ox, size byte-identical to the commitment &#183; file-type = m</text>
+    <text x="240" y="1254" fill="#9aa0b8" font-size="12">sent on the provider&#8217;s own receipt, without the fee receipt</text>
     <!-- download -->
     <text x="442" y="1270" fill="#eef0f8" font-size="13" font-weight="600">download the blob at the committed url</text>
     <text x="442" y="1296" fill="#9aa0b8" font-size="12">length must equal size &#8212; a length refusal is not a hash mismatch</text>

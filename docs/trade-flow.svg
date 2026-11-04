@@ -81,13 +81,13 @@
   <g opacity="0">
     <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.5;0.51;0.655;0.667;1"/>
     <text x="40" y="274" fill="#eef0f8" font-size="18" font-weight="700">4. Payment and receipt</text>
-    <text x="40" y="300" fill="#c9cde0" font-size="14"><tspan x="40">Paying the invoice over Lightning reveals its preimage; the buyer sends it in a receipt.</tspan><tspan x="40" dy="20">Each party verifies the receipt itself, including SHA-256(preimage) = the invoice&#8217;s payment hash.</tspan></text>
+    <text x="40" y="300" fill="#c9cde0" font-size="14"><tspan x="40">Paying the invoice over Lightning reveals its preimage; the buyer sends it in a receipt.</tspan><tspan x="40" dy="20">Buyer and provider each verify that receipt, including SHA-256(preimage) = the invoice&#8217;s payment hash.</tspan></text>
     <text x="40" y="346" fill="#ff7a6e" font-size="13">Not evidence: a wallet&#8217;s success flag, a status message, or a receipt without a valid preimage (&#167;9.1).</text>
   </g>
   <g opacity="0">
     <animate attributeName="opacity" dur="27s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.667;0.677;0.822;0.834;1"/>
     <text x="40" y="274" fill="#eef0f8" font-size="18" font-weight="700">5. Release and verification</text>
-    <text x="40" y="300" fill="#c9cde0" font-size="14"><tspan x="40">After the payment verifies, the provider sends the decryption key. The buyer checks</tspan><tspan x="40" dy="20">the download against x before decrypting it, and the decrypted file against ox.</tspan></text>
+    <text x="40" y="300" fill="#c9cde0" font-size="14"><tspan x="40">After its own payment verifies, the provider sends the decryption key. The buyer checks</tspan><tspan x="40" dy="20">the download against x before decrypting it, and the decrypted file against ox.</tspan></text>
     <text x="40" y="346" fill="#ff7a6e" font-size="13">A download that fails x is not decrypted; a mismatch on x or ox moves the order to disputed.</text>
   </g>
   <g opacity="0">

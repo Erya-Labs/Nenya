@@ -83,4 +83,5 @@
   <text x="40" y="354" fill="#9aa0b8" font-size="12">Drawn from &#167;11.2: cancelled and expired are reachable from the four states before paid;</text>
   <text x="40" y="372" fill="#9aa0b8" font-size="12">disputed from committed, awaiting_payment, paid and released.</text>
   <text x="40" y="390" fill="#9aa0b8" font-size="12">Each party derives its own order state only from what it verified itself (&#167;11).</text>
+  <text x="40" y="408" fill="#9aa0b8" font-size="12">These states are the buyer&#8217;s order. A provider releases on its own receipt.</text>
 </svg>
