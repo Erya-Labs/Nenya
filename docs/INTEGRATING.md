@@ -485,6 +485,15 @@ reports what that party verified, not whether the file was delivered.
 Some results also report what was not done on that call. For example, `seal`'s answer carries
 `notPerformedHere`, naming any signature check your environment could not perform. Show those, too.
 
+The specification (§13) requires these residual risks to be surfaced. The library has no screen, so
+showing them to your user is your client's job. No check in the library removes any of them:
+
+- a paid provider can withhold the key (§11.4)
+- a buyer can receive the deliverable without paying the fee (§8)
+- a blob host can disappear between commitment and download
+- a partitioned relay set can hide an acceptance
+- a `kind:5` deletion is advisory
+
 ---
 
 ## Entry points

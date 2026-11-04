@@ -1,6 +1,7 @@
 package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.conformance.MainClasses
+import dev.eryalabs.nenya.conformance.ResidualRisksTest
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -422,6 +423,37 @@ class IntegrationGuideTest {
             assertEquals(emptyList(), missing, "sections that do not name `$FEE_RECIPIENT_IS_PROVIDER`")
         }
 
+        /** T112: the section whose bullets are §13's residual risks. */
+        const val NOT_CHECKED_HEADING: String = "## What Nenya does not check"
+
+        /**
+         * The bullets of [lines], in order, each whitespace collapsed: a bullet opens a line with `- ` and
+         * runs on over the indented, non-blank lines that follow it.
+         */
+        fun bullets(lines: List<String>): List<String> {
+            val bullets = mutableListOf<MutableList<String>>()
+            var open = false
+            for (line in lines) {
+                when {
+                    line.startsWith("- ") -> { bullets += mutableListOf(line.removePrefix("- ")); open = true }
+                    open && line.isNotBlank() && line.first().isWhitespace() -> bullets.last() += line
+                    else -> open = false
+                }
+            }
+            return bullets.map { collapsed(it).trim() }
+        }
+
+        /** Fails unless [NOT_CHECKED_HEADING]'s bullets in [text] are exactly [risks], once each, naming the difference. */
+        fun assertResidualRisksListed(text: String, risks: List<String>) {
+            val listed = bullets(section(text, NOT_CHECKED_HEADING))
+            assertEquals(listed.size, listed.toSet().size, "a bullet listed twice in `$NOT_CHECKED_HEADING`: $listed")
+            assertEquals(
+                emptySet<String>() to emptySet(),
+                (risks.toSet() - listed.toSet()) to (listed.toSet() - risks.toSet()),
+                "(§13 residual risks `$NOT_CHECKED_HEADING` does not list) to (bullets that are none of them)",
+            )
+        }
+
         /** [text] with every [span] inside the section under [heading] removed, and nothing else changed. */
         fun withoutInSection(text: String, heading: String, span: String): String {
             val lines = text.lines().toMutableList()
@@ -749,6 +781,33 @@ class IntegrationGuideTest {
             }
             assertTrue(heading in failure.message.orEmpty(), "the failure names `$heading`")
         }
+    }
+
+    /** T112: `## What Nenya does not check` lists §13's residual risks, read from the vendored specification, as its bullets. */
+    @Test
+    fun `the not-checked section lists section 13's residual risks`() {
+        val risks = ResidualRisksTest.residualRisks(ResidualRisksTest.vendored)
+        assertEquals(5, risks.size, "revision 1.15's §13 names five residual risks")
+        assertResidualRisksListed(guide, risks)
+        assertTrue(
+            "showing them to your user is your client's job" in collapsed(section(guide, NOT_CHECKED_HEADING)),
+            "the section says surfacing them is the client's",
+        )
+    }
+
+    /** Negative control: any one bullet deleted, or a risk added to §13 the guide does not list, fails; so does a bullet that wraps but differs. */
+    @Test
+    fun `the not-checked section missing a residual risk fails`() {
+        val risks = ResidualRisksTest.residualRisks(ResidualRisksTest.vendored)
+        for (risk in risks) {
+            val lines = guide.lines()
+            val text = withoutLine(guide, lines.indexOfFirst { it == "- $risk" }.also { assertTrue(it >= 0, "`- $risk` is a line") })
+            assertFailsWith<AssertionError>("the guide without `$risk` must fail") { assertResidualRisksListed(text, risks) }
+        }
+        assertFailsWith<AssertionError> { assertResidualRisksListed(guide, risks + "a mint can refuse to redeem") }
+        assertFailsWith<AssertionError> { assertResidualRisksListed(guide.replace("- ${risks[0]}", "- ${risks[0]}\n- ${risks[0]}"), risks) }
+        assertFailsWith<AssertionError> { assertResidualRisksListed(guide.replace(NOT_CHECKED_HEADING, "## Caveats"), risks) }
+        assertEquals(listOf("a wrapped bullet", "next"), bullets(listOf("- a wrapped", "  bullet", "", "  not part", "- next")))
     }
 
     /**
