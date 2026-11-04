@@ -1,5 +1,6 @@
 package dev.eryalabs.nenya.settlement
 
+import dev.eryalabs.nenya.conformance.Capabilities
 import dev.eryalabs.nenya.order.Section11
 import dev.eryalabs.nenya.settlement.FeeRecipientCopyRuleTest.CopyRule
 import kotlin.js.JsName
@@ -8,6 +9,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Revision `1.15`'s text (decision U): a fee is not enforced against the buyer, a provider's release
@@ -20,6 +22,10 @@ import kotlin.test.assertTrue
  *
  * [problem] takes the specification as lines, so every control runs on text built here from the live
  * specification.
+ *
+ * `capabilities()` says the same: item 5's note that the fee is not enforced, and item 6's that its
+ * `paid` is the buyer's, are held in their own items' notes as `SettlementCheckOneTest` holds item 6's
+ * `PaymentRequestStore.inMemory`.
  */
 class FeeNotEnforcedRuleTest {
 
@@ -117,6 +123,43 @@ class FeeNotEnforcedRuleTest {
             val without = flat.map { it.replace(sentence, "") }
             assertNotNull(problem(insertedAfter(without, "## 13. ", sentence)), "\"$sentence\" moved to §13")
             assertNotNull(problem(insertedAfter(flat, "## 13. ", sentence)), "\"$sentence\" repeated in §13")
+        }
+    }
+
+    /** The opening of each sentence decision U adds to a §17 item's `capabilities()` note, with the item's number. */
+    private val capabilityOpenings: List<Pair<Int, String>> = listOf(
+        5 to "The fee is not enforced against the buyer;",
+        6 to "This is the buyer's `paid`.",
+        6 to "A provider's release rests on the evidence `PaymentWriter.release` takes",
+    )
+
+    private val notes: Map<Int, String> = capabilityOpenings.map { it.first }.toSet().associateWith { number ->
+        Capabilities.item(number)?.note ?: fail("§17 item $number is not published")
+    }
+
+    /** Why [notes] does not hold every opening in its own item's note; `null` when it does. */
+    private fun capabilityProblem(notes: Map<Int, String>): String? {
+        for ((number, opening) in capabilityOpenings) {
+            if (!whitespace.replace(notes.getValue(number), " ").contains(opening)) {
+                return "item $number's note must say \"$opening\""
+            }
+        }
+        return null
+    }
+
+    @JsName("capabilities_items_5_and_6_say_the_fee_is_not_enforced_and_whose_paid_it_is")
+    @Test
+    fun `capabilities items 5 and 6 say the fee is not enforced and whose paid it is`() {
+        assertNull(capabilityProblem(notes))
+    }
+
+    @JsName("either_capabilities_sentence_removed_fails")
+    @Test
+    fun `either capabilities sentence removed fails`() {
+        for ((number, opening) in capabilityOpenings) {
+            val without = notes + (number to notes.getValue(number).replace(opening, ""))
+            assertTrue(without != notes, "the control must delete \"$opening\"")
+            assertNotNull(capabilityProblem(without), "\"$opening\" removed from item $number")
         }
     }
 }

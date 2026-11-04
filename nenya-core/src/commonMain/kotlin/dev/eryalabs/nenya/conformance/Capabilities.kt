@@ -397,7 +397,9 @@ public object Capabilities {
                 "checked against BigInteger over a sampled corpus, so it does not overflow; a " +
                 "fee payment is refused before `awaiting_payment` while the fee payment " +
                 "*request* is accepted as part of `committed → awaiting_payment` and never " +
-                "earlier (§8.5); a payee whose computed amount is 0 requires no invoice (§8.3), " +
+                "earlier (§8.5). The fee is not enforced against the buyer; the refusal of a fee " +
+                "payment before `awaiting_payment` reads the buyer's own order. A payee whose " +
+                "computed amount is 0 requires no invoice (§8.3), " +
                 "which is the clause that deadlocks an order when it is missed; §8.6's two " +
                 "invoices are two payees and there is no combined-invoice shape to refuse " +
                 "because there is none to build. §8.4 is done too, and that is what changed " +
@@ -430,7 +432,10 @@ public object Capabilities {
             ),
             notPerformed = emptySet(),
             note = "All six of §9.2's checks are now performed on the path OrderMachine consumes, " +
-                "which is why this item moved off PARTIAL. `awaiting_payment → paid` takes a " +
+                "which is why this item moved off PARTIAL. This is the buyer's `paid`. A " +
+                "provider's release rests on the evidence `PaymentWriter.release` takes, and an " +
+                "`Order` a provider opens on a fee-bearing order does not pass `committed` without " +
+                "the fee request. `awaiting_payment → paid` takes a " +
                 "Settlement.Evidenced per required payee — a bare VerifiedPayment is not " +
                 "expressible there — and Settlement.verify performs check 1 (the receipt's " +
                 "BOLT-11 string compared byte-identically against the stored one, with a receipt " +
