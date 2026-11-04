@@ -385,6 +385,17 @@ class IntegrationGuideTest {
             assertEquals(emptySet(), missing, "documents that do not say `$FEE_NOT_ENFORCED`")
         }
 
+        /** T105: the companion, by its path from `nenya-core`. */
+        const val COMPANION_PATH: String = "../spec/NENYA-1-companion.md"
+
+        /** T105: the sentence Appendix A's step 8 holds (decision U). */
+        const val PROVIDER_DOES_NOT_WAIT: String = "P does not see F's receipt and does not wait for it."
+
+        /** Fails unless [text] holds [PROVIDER_DOES_NOT_WAIT], whitespace collapsed. */
+        fun assertProviderDoesNotWait(text: String) {
+            assertTrue(PROVIDER_DOES_NOT_WAIT in collapsed(text.lines()), "the companion says `$PROVIDER_DOES_NOT_WAIT`")
+        }
+
         /** [text] with its line at [index] removed. */
         fun withoutLine(text: String, index: Int): String =
             text.lines().filterIndexed { i, _ -> i != index }.joinToString("\n")
@@ -650,6 +661,21 @@ class IntegrationGuideTest {
             }
             assertTrue(path in failure.message.orEmpty(), "the failure names `$path`")
         }
+    }
+
+    /** T105: the companion's worked order says the provider does not see or wait for the fee receipt (decision U). */
+    @Test
+    fun `the companion's worked order says the provider does not wait for the fee receipt`() {
+        assertProviderDoesNotWait(read(File(COMPANION_PATH)))
+    }
+
+    /** Negative control: the companion without that sentence fails. */
+    @Test
+    fun `the companion without the provider's sentence fails`() {
+        val text = collapsed(read(File(COMPANION_PATH)).lines())
+        val deleted = text.replace(PROVIDER_DOES_NOT_WAIT, "")
+        assertNotEquals(text, deleted, "the companion holds the sentence")
+        assertFailsWith<AssertionError> { assertProviderDoesNotWait(deleted) }
     }
 
     /**

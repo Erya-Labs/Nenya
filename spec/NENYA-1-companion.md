@@ -179,10 +179,11 @@ f, so no party can detect or audit it. A signed term puts f on the wire.
 
 The `OPEN-2` closure chose disclosure over a cap (§16.1). A local limit (§8.1) is reported as its
 own condition so that local policy is not presented as a peer's fault. Without §8.1's reachability
-check, an order naming an unreachable fee recipient is wire-valid but can only expire, because §8.7
-needs the fee invoice sealed by that recipient and §11.2 waits for it: the dead end §7.3 prevents,
-one party further out. A fee deducted from the price instead of added (§8.2) would make one listing
-show a different price in each client, defeating comparison and hiding the fee from the provider.
+check, the buyer's order for a term naming an unreachable fee recipient is wire-valid but cannot
+reach `awaiting_payment`, because §8.7 needs the fee invoice sealed by that recipient and §11.2
+waits for it: the dead end §7.3 prevents, one party further out. A fee deducted from the price
+instead of added (§8.2) would make one listing show a different price in each client, defeating
+comparison and hiding the fee from the provider.
 
 §8.5 governs payment, not the arrival of the fee invoice. §11.2 makes that invoice part of entering
 `awaiting_payment`, so rejecting it in `committed`, as revision `1.1`'s wording did, leaves every
@@ -268,7 +269,8 @@ risk. It is bound to `deliver_by` so that an abandoned order reaches a terminal,
 time both parties agreed in advance. `disputed` resolves nothing (§14 item 3); it marks the order as
 no longer live. The verification deadline does the same for `released`, where the key is already
 out and the cause is not the provider's: a wrong-length blob, an incomplete download, or a buyer who
-never checked.
+never checked. A fee recipient bears a separate risk: its fee can go unpaid while the provider is
+paid and the file is released.
 
 ## 13. Security considerations
 
@@ -278,6 +280,9 @@ that model:
 
 - a dishonest counterparty cannot advance state by assertion (§9), substitute the deliverable after
   commitment (§10) or impersonate another party in the private channel (§7.2);
+- a dishonest buyer can pay the provider, receive the file and leave the fee unpaid. A provider
+  that is not also the fee recipient does not see this, and a fee recipient has no order state in
+  that role that records it;
 - a dishonest client can refuse to transact, misrepresent in its UI or exfiltrate through its
   signer, but cannot produce a wire-valid order that underpays the provider against the signed
   terms, because the fee is signed and a disagreeing split can be refused (§8);
@@ -369,8 +374,9 @@ and §8.7.
 
 ## Appendix A. A complete worked order
 
-Buyer `B` posts a request, provider `P` bids, and client operator `F` takes 2.5%. The same trade is
-drawn in [`../docs/trade-sequence.svg`](../docs/trade-sequence.svg).
+Buyer `B` posts a request, provider `P` bids, and client operator `F` is owed 2.5%. In this order
+the buyer pays the fee. States in the right column are the buyer's unless a line names another
+party. The same trade is drawn in [`../docs/trade-sequence.svg`](../docs/trade-sequence.svg).
 
 ```
 1.  B  → relays      kind:30404  d=lighthouse-loop-2026-09
@@ -383,6 +389,7 @@ drawn in [`../docs/trade-sequence.svg`](../docs/trade-sequence.svg).
                      amount_msat=90000000  fee=250,F                   state: proposed
 4.  P  → B  (sealed) kind:16 type=3  status=accepted                   state: accepted
 5.  P  → B  (sealed) kind:16 type=5  url, x, ox, m, size               state: committed
+    B  → F  (sealed) kind:16 type=1, unchanged (§8.7); not evidence of anything else.
 6.  P  → B  (sealed) kind:16 type=2  payee=provider
                      bolt11 for exactly 90 000 000 msat
     F  → B  (sealed) kind:16 type=2  payee=fee,F
@@ -395,11 +402,13 @@ drawn in [`../docs/trade-sequence.svg`](../docs/trade-sequence.svg).
 7.  B pays both.
     B  → P  (sealed) kind:17  payee=provider  payment=lightning,<bolt11>,<preimage>
     B  → F  (sealed) kind:17  payee=fee,F     payment=lightning,<bolt11>,<preimage>
-    P and F each verify SHA-256(preimage) == payment_hash of the invoice
-    it issued, byte-identical.                                         state: paid
+    P verifies the preimage against the invoice it issued and may release.
+    F verifies the preimage against the invoice it issued; F holds no order.
+    B verifies both receipts.                                      B's state: paid
 8.  P  → B  (sealed) kind:15  order=9f2c…  url, decryption-key,
                      decryption-nonce, x, ox, size, file-type
                      (routed by the order tag, §7.4; file-type equals the commitment's m, §10.3)
+                     P does not see F's receipt and does not wait for it.
                                                                        state: released
 9.  B downloads, checks SHA-256(ciphertext) == x, decrypts,
     checks SHA-256(plaintext) == ox.                                   state: settled
