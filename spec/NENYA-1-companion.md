@@ -29,6 +29,7 @@ NENYA-1 §0 names the current revision. No revision has changed the `["nenya", "
 | `1.12` | 2026-10-31 | Prose condensed from 2 307 to 1 435 lines (45% fewer words). Each rule is stated once, in its home section; restatements removed; rationale and history moved here, including the `1.4`, `1.6` and `1.7` notes formerly in NENYA-1 §0; explanatory passages replaced by figures in `docs/`. No requirement changed: every keyword sentence of `1.11` was checked against `1.12`. Section numbers, `OPEN-n` identifiers, tables, worked examples, vectors and bounds unchanged. `spec/NENYA-1-overview.md` added (non-normative). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1767–1781 to 1079–1093), its `(from, to)` pairs unchanged. |
 | `1.13` | 2026-10-31 | Citation typo fixed: §5.3's `image` row and §5.4 cited "§12.10", but §12 is a numbered list with no subsections; both now cite §12 item 10. No requirement, keyword, identifier, wire value or section number changed; no line of NENYA-1 moved, so `nenya-1-11.2-transitions.psv` is unchanged. |
 | `1.14` | 2026-11-03 | §8.7: when an order whose `fee_msat` is not `0` enters `committed`, the buyer sends the fee recipient that order's `type=1`, unchanged, by §7.1's write procedure; the fee recipient does not treat the copy as evidence of an acceptance, a commitment or a payment. Before this revision nothing told a fee recipient that an order existed, so a fee-bearing order could not reach `awaiting_payment`. No tag, kind, state, transition or fee arithmetic changed, and the version tag is unchanged (Appendix B). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1079–1093 to 1083–1097), its `(from, to)` pairs unchanged. |
+| `1.15` | 2026-11-04 | A fee is not enforced against the buyer (§8). §9.2: a buyer's order becomes `paid` only with a verified receipt from each payee with a non-zero expected amount, as before; a provider's release needs only a verified receipt for its own `payee=provider` request; the six checks do not bind a fee recipient in that role. §10.3: the release is sent once the evidence §9.2 requires for a release has verified, and a buyer MAY hold a release received before its order is `paid` and apply it then. §11's lead: §11.1 and §11.2 state the buyer's order, a provider MAY keep an order by the same table, and a fee recipient holds no order state in that role. §2, §8.5, §8.6, §13, §16.3 and §18 worded to match. No tag, kind, state, transition, fee arithmetic or evidence rule changed, and the version tag is unchanged (Appendix B). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1083–1097 to 1095–1109), its `(from, to)` pairs unchanged. |
 
 ## 1. Motivation and scope
 
@@ -204,6 +205,14 @@ fee recipient its copy of the proposal because the buyer wrote the fee term and 
 invoice is addressed to, and sends it at `committed` because §8.5 and §11.2 refuse a fee invoice any
 earlier.
 
+A fee is not enforced against the buyer. The fee invoice and receipt pass only between the buyer
+and the fee recipient, so a provider that is not also the fee recipient cannot see a fee paid from
+evidence it verified itself (§11). The alternative, in which the buyer also sends the provider the
+fee invoice and receipt and the provider waits, was rejected. A buyer and a provider can settle
+privately outside the protocol, so such a check would bind only an honest provider, and the wait
+would add a further dependence on the fee recipient. A buyer's own order still needs the fee
+invoice to reach `awaiting_payment` (§11.2).
+
 ## 9. Payment evidence
 
 Zap receipts (§9.1) are also public events linking payer, payee and amount. The payee releases the
@@ -293,8 +302,8 @@ that model:
 `OPEN-n` numbers are cited across NENYA-1, so none is ever changed. `OPEN-4`–`OPEN-8` keep their
 `1.0` numbers; `1.2` added `OPEN-9` and widened `OPEN-8` in place. The client-local policies that
 closed decisions permit (§8.1, §6.1) each carry their own visibility rule. Of the decisions in
-§16.3, §4.4 gives the reason for `SAT`, §4.3 for rejecting duplicate tags, and §11.4 the cost of
-pay-on-delivery.
+§16.3, §4.4 gives the reason for `SAT`, §4.3 for rejecting duplicate tags, §8 for a fee not enforced
+against the buyer, and §11.4 the cost of pay-on-delivery.
 
 ### 16.1 Closed decisions
 

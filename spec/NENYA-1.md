@@ -14,7 +14,7 @@ library, not an application or a service; `nenya-core` is one reference implemen
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.14`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.15`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and its reserved identifiers are not registered.
 
 A short non-normative summary is [the overview](NENYA-1-overview.md). The revision history is in
@@ -62,7 +62,7 @@ RFC 2119.
   bid** carries the same terms as a §7 message.
 - **Buyer** — the paying party: the author of a request or the responder to an offer.
 - **Provider** — the delivering party: the author of an offer or the responder to a request.
-- **Fee recipient** — an optional third party named in the terms and paid a handling fee; not a
+- **Fee recipient** — an optional third party named in the terms to receive a handling fee; not a
   delivery party; for a non-zero fee, always in the order's sealed conversation (§7.3, §8.1, §8.7).
 - **Order** — a private negotiation and settlement thread between exactly one buyer and one
   provider, identified by an *order id*.
@@ -667,6 +667,10 @@ not that key, and MUST reject one sealed by the buyer even with byte-identical t
 A client embedding Nenya MAY take a percentage handling fee. A fee MUST be a signed term of the
 deal, and an invoice claiming an unsigned fee MUST be refused.
 
+A fee is not enforced against the buyer. A provider need not see the fee paid before it releases
+the deliverable, and a buyer that does not pay the fee can still receive the deliverable. §9.2
+states which receipts each needs.
+
 Rationale and history: §8 of [the companion](NENYA-1-companion.md).
 
 ### 8.1 Shape
@@ -792,15 +796,15 @@ happening on write.
 
 ### 8.5 Fees settle only at settlement
 
-No fee may be paid, and no fee receipt (`kind:17`, `payee=fee`) accepted, before the order reaches
-`awaiting_payment`. A fee payment request (`kind:16` `type=2`, `payee=fee`) is accepted only in the
-transition into `awaiting_payment` (§11.2). §11.3 invariant 2 tests this.
+No fee may be paid, and no fee receipt (`kind:17`, `payee=fee`) accepted, before the buyer's order
+reaches `awaiting_payment`. A fee payment request (`kind:16` `type=2`, `payee=fee`) is accepted
+only in the transition into `awaiting_payment` (§11.2). §11.3 invariant 2 tests this.
 
 ### 8.6 Two invoices, never one — the non-custodial rule
 
-The buyer MUST pay the provider and the fee recipient with two separate payments to two separate
-invoices. An implementation MUST NOT construct, accept, or honour a single invoice covering
-`total_msat` that some party then splits.
+A buyer paying both the provider and the fee recipient MUST do so with two separate payments to
+two separate invoices. An implementation MUST NOT construct, accept, or honour a single invoice
+covering `total_msat` that some party then splits.
 
 - A provider payment request MUST be for exactly `price_msat`; any other amount MUST be rejected.
 - The fee recipient's payment request MUST be for exactly `fee_msat` (or, where §8.3's rounding
@@ -898,8 +902,10 @@ An implementation MUST itself perform all six checks before treating a payment a
 6. **Fee-term check.** For a `payee=fee` receipt, the fee term MUST match (§8.4), the sealing key
    MUST be the fee recipient's (§8.7), and the state MUST already be `awaiting_payment` (§8.5).
 
-An order becomes `paid` only when each payee named in the terms with a non-zero expected amount
-(§8.3) has a verified receipt.
+A buyer's order becomes `paid` only when each payee named in the terms with a non-zero expected
+amount (§8.3) has a verified receipt. A provider's release needs only a verified receipt for its
+`payee=provider` payment request, when `price_msat` is not `0`. The six checks do not bind a fee
+recipient in that role (§11).
 
 Verification of the invoice's destination node is OPTIONAL in v1; an implementation that omits it
 MUST NOT claim to have verified the destination.
@@ -977,7 +983,8 @@ that decodes to the wrong length under both encodings.
 
 ### 10.3 The release — `kind:15` file message
 
-Sent by the provider, as a NIP-17 file message, after payment evidence verifies.
+Sent by the provider, as a NIP-17 file message, once the payment evidence §9.2 requires for a
+release has verified.
 
 ```json
 {
@@ -1002,7 +1009,9 @@ Sent by the provider, as a NIP-17 file message, after payment evidence verifies.
 
 A `kind:15` release is bound to its order by its `["order", "<order-id-hex>"]` tag (§7.4), not by
 hash equality. A release whose `order` tag names no open order held by this implementation, or an
-order not in state `paid`, MUST NOT advance any state.
+order not in state `paid`, MUST NOT advance any state. A buyer MAY hold a release received before
+its order is `paid` and apply it when the order becomes `paid`, before it evaluates the
+`paid → disputed` deadline; this is an exception to §4.6's receipt sequence.
 
 The release's `file-type` value MUST be byte-identical to the commitment's `m` value, and its `x`,
 `ox` and `size` values MUST each be byte-identical to the commitment's. An implementation MUST NOT
@@ -1044,7 +1053,10 @@ Providers MUST strip identifying metadata (EXIF, XMP, C2PA/JUMBF) before encrypt
 ## 11. Order lifecycle
 
 Each party derives its own order state only from evidence it verified itself. An implementation
-MUST NOT assume its counterparty is in the same state.
+MUST NOT assume its counterparty is in the same state. §11.1 and §11.2 state the buyer's order. A
+provider MAY keep an order by the same table; where `fee_msat` is not `0`, that order does not
+pass `committed` without the fee request, and the release does not depend on it (§9.2). A fee
+recipient holds no order state in that role.
 
 ### 11.1 States
 
@@ -1156,8 +1168,9 @@ and supplies the signer, wallet and transport; implementations MUST NOT claim ot
 documentation. Threat model: §13 of [the companion](NENYA-1-companion.md).
 
 Implementations MUST surface these residual risks: a paid provider can withhold the key (§11.4);
-a blob host can disappear between commitment and download; a partitioned relay set can hide an
-acceptance; a `kind:5` deletion is advisory.
+a buyer can receive the deliverable without paying the fee (§8); a blob host can disappear
+between commitment and download; a partitioned relay set can hide an acceptance; a `kind:5`
+deletion is advisory.
 
 ---
 
@@ -1246,7 +1259,8 @@ Open: whether to file a `registry-of-kinds` pull request for `30404`.
 
 These decisions are closed: `SAT`, not `btc`, as the price unit (§4.4); two kinds, not one kind
 with a buy/sell discriminator (§5); rejecting, not resolving, duplicate single-cardinality tags
-(§4.3); pay-on-delivery, not a hold-invoice pay-for-key exchange (§11.4).
+(§4.3); a fee not enforced against the buyer, not a release conditional on the fee (§8);
+pay-on-delivery, not a hold-invoice pay-for-key exchange (§11.4).
 
 ---
 
@@ -1301,7 +1315,7 @@ externally-authored vectors rather than to the implementer's own understanding.
 | BOLT-11 parsing | the BOLT-11 Examples appendix |
 | Preimage verification | invoices with known preimages, **plus** negative controls: wrong preimage, 31-byte preimage, 33-byte preimage, uppercase hex, preimage of the wrong invoice |
 | Fee arithmetic | boundary cases at `bps = 0`, `bps = 10000`, the msat rounding example in §8.3, an overflow probe at the supply cap, and the non-zero-`bps`-but-zero-`fee_msat` case (`bps = 1`, `price_msat = 3000`) |
-| State machine | every legal transition, **and** an enumeration proving every unlisted pair is refused. Include as named cases: a fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe); an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe); a `type=1` with no `fee` tag opening at zero fee; a `type=6` and a `kind:14` each advancing nothing from every state; an order in `released` whose served blob was refused for its length — which is no hash mismatch (§10.4) — reaching `disputed` at the verification deadline, probed one second before the deadline, at it exactly, and one second after; the same order under each fallback anchor in turn, with the candidate deadlines chosen so that anchoring on the wrong one would be visible; and an order with no clock reading at `paid`, none at release and no `deliver_by`, reporting that it has no deadline to check rather than that it is pending |
+| State machine | every legal transition, **and** an enumeration proving every unlisted pair is refused. Include as named cases: a buyer's fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe); a provider on the same terms releasing on its own receipt with no fee invoice or fee receipt; a buyer's order holding only the provider's receipt staying in `awaiting_payment`; an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe); a `type=1` with no `fee` tag opening at zero fee; a `type=6` and a `kind:14` each advancing nothing from every state; an order in `released` whose served blob was refused for its length — which is no hash mismatch (§10.4) — reaching `disputed` at the verification deadline, probed one second before the deadline, at it exactly, and one second after; the same order under each fallback anchor in turn, with the candidate deadlines chosen so that anchoring on the wrong one would be visible; and an order with no clock reading at `paid`, none at release and no `deliver_by`, reporting that it has no deadline to check rather than that it is pending |
 
 Vectors that only prove the happy path prove very little. Every check above whose failure
 would cost a user money SHOULD have a negative control demonstrating that the check rejects

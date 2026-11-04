@@ -40,24 +40,29 @@
 # Regenerated for revision `1.14`, which added four lines to §8.7. The row block moved from
 # lines 1079–1093 to 1083–1097, a uniform +4 shift; only the first column changed, and the
 # set of (from, to) pairs is identical. A transcription change under STOP RULE 1, as above.
+#
+# Regenerated for revision `1.15` (decision U), which added lines to §8, §9.2, §10.3 and §11's
+# lead. The row block moved from lines 1083–1097 to 1095–1109, a uniform shift; only the first
+# column changed, and the set of (from, to) pairs is identical. A transcription change under
+# STOP RULE 1, as above.
 
-1083 | — | proposed
-1084 | proposed | accepted
-1085 | proposed | cancelled
-1086 | proposed | expired
-1087 | accepted | committed
-1088 | accepted | cancelled
-1088 | accepted | expired
-1089 | committed | awaiting_payment
-1090 | committed | cancelled
-1090 | committed | expired
-1090 | committed | disputed
-1091 | awaiting_payment | paid
-1092 | awaiting_payment | cancelled
-1092 | awaiting_payment | expired
-1092 | awaiting_payment | disputed
-1093 | paid | released
-1094 | paid | disputed
-1095 | released | settled
-1096 | released | disputed
-1097 | released | disputed
+1095 | — | proposed
+1096 | proposed | accepted
+1097 | proposed | cancelled
+1098 | proposed | expired
+1099 | accepted | committed
+1100 | accepted | cancelled
+1100 | accepted | expired
+1101 | committed | awaiting_payment
+1102 | committed | cancelled
+1102 | committed | expired
+1102 | committed | disputed
+1103 | awaiting_payment | paid
+1104 | awaiting_payment | cancelled
+1104 | awaiting_payment | expired
+1104 | awaiting_payment | disputed
+1105 | paid | released
+1106 | paid | disputed
+1107 | released | settled
+1108 | released | disputed
+1109 | released | disputed
