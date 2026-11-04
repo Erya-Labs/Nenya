@@ -386,6 +386,25 @@ public class OrderProposal internal constructor(
      */
     public val feeRecipient: String? get() = rumor.tags.feeRecipient
 
+    /**
+     * §8.1's "MAY be the provider's pubkey only in a genuine agent relationship, and implementations
+     * SHOULD warn when it is": true exactly when this proposal names a [feeRecipient] and it is
+     * [providerPubkey]. T108.
+     *
+     * A warning, never evidence and never a refusal: whether the agent relationship is genuine is
+     * the user's to judge, so the page asks, and nothing here builds, refuses or moves an order on
+     * the answer. Both keys are compared in §4.3's lowercase, as `ListingOrderWriter.proposalForBid`
+     * compares its parties. A proposal with no recipient (no fee term, or zero basis points) answers
+     * false, and so does a [providerPubkey] that is not a key at all — it equals no recipient.
+     *
+     * @param providerPubkey the provider's pubkey **as the caller resolved it**, as [accepts] takes
+     *   it. Never read out of this proposal, and never printed.
+     */
+    public fun feeRecipientIsProvider(providerPubkey: String): Boolean {
+        val recipient = feeRecipient ?: return false
+        return recipient.lowercase() == providerPubkey.lowercase()
+    }
+
     /** §7.4's `["p", ...]` counterparties, as §5.3's Encoding column decoded them. */
     public val counterparties: List<PubkeyRef> get() = rumor.counterparties
 

@@ -505,6 +505,17 @@ class JsSurfaceTest {
             "a type of this library's own" to Regex("""\bdev\.eryalabs\.nenya\.(?!js\.)"""),
         )
 
+        /**
+         * The functions a read type publishes beside its getters, by type, each with the test proving
+         * it equal to its Kotlin answer. The field sweep reads only getters, so a function is pinned
+         * here by name, exactly, rather than allowed in general. T108:
+         * `JsOrderProposal.feeRecipientIsProvider` takes the caller-resolved provider key, so it cannot
+         * be a getter; `channel/FeeRecipientIsProviderTest` holds it equal to Kotlin's for every key.
+         */
+        val PUBLISHED_FUNCTIONS: Map<String, Set<String>> = mapOf(
+            "JsOrderProposal" to setOf("feeRecipientIsProvider"),
+        )
+
         /** `toString`, which every type here overrides and no page calls as part of the crossing. */
         val NOT_PART_OF_THE_CROSSING: Set<String> = setOf("toString")
 
@@ -1262,11 +1273,16 @@ class JsSurfaceTest {
         val methods = crossingMethods(type)
         val properties = methods.mapNotNull { propertyName(it) }.toSet()
         assertEquals(
+            PUBLISHED_FUNCTIONS[type.simpleName].orEmpty(),
+            methods.filter { propertyName(it) == null }.map { it.name }.toSet(),
+            "${type.simpleName} publishes a method that is not a no-argument getter and not pinned in " +
+                "PUBLISHED_FUNCTIONS. The field sweep reads properties, so a published function would go " +
+                "unchecked.",
+        )
+        assertEquals(
             methods.size,
-            properties.size,
-            "${type.simpleName} publishes a method that is not a no-argument getter: " +
-                methods.filter { propertyName(it) == null }.map { it.name } +
-                ". The field sweep reads properties, so a published function would go unchecked.",
+            properties.size + PUBLISHED_FUNCTIONS[type.simpleName].orEmpty().size,
+            "${type.simpleName} publishes a pinned function under more than one overload",
         )
         assertTrue(properties.size >= floor, "${type.simpleName} publishes only $properties")
         return properties

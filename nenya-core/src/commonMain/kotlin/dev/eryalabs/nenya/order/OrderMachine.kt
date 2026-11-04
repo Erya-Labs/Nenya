@@ -597,6 +597,21 @@ public sealed interface Order {
      */
     public val feeRecipient: String?
 
+    /**
+     * §8.1's "implementations SHOULD warn" when the fee recipient is the provider's pubkey: true
+     * exactly when both [feeRecipient] and [provider] are recorded and are the same key, compared in
+     * §4.3's lowercase as `ListingOrderWriter.proposalForBid` compares its parties. T108.
+     *
+     * A warning for the page to show, never evidence: nothing in [OrderMachine] reads it, and an
+     * order before its acceptance — [provider] still `null` — answers false.
+     */
+    public val feeRecipientIsProvider: Boolean
+        get() {
+            val recipient = feeRecipient ?: return false
+            val accepted = provider ?: return false
+            return recipient.lowercase() == accepted.lowercase()
+        }
+
     /** §10.1's commitment, once the provider has sent one; `null` before `committed`. */
     public val commitment: DeliverableCommitment?
 

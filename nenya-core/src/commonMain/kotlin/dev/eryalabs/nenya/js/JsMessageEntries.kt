@@ -206,6 +206,13 @@ public class JsOrderProposal internal constructor(private val proposal: OrderPro
     /** §8.1's fee recipient — the third `fee` element `FeeTerm` does not hold — or `null`. */
     public val feeRecipient: String? get() = proposal.feeRecipient
 
+    /**
+     * §8.1's SHOULD-warn: true exactly when [feeRecipient] is [providerPubkey], compared in lowercase.
+     * The page warns; nothing refuses. See `OrderProposal.feeRecipientIsProvider`. T108.
+     */
+    public fun feeRecipientIsProvider(providerPubkey: String): Boolean =
+        proposal.feeRecipientIsProvider(providerPubkey)
+
     /** §5.3's `expiration`, unix seconds as a decimal string, or `null`. */
     public val expirationSeconds: String? get() = JsDecimal.ofOrNull(proposal.terms.expiration)
 

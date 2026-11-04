@@ -940,6 +940,10 @@ class HostileInputSweepTest : PortableHostileInputSweepTest() {
                     )
                 }
             },
+            // T108: the same caller-resolved provider key, compared with the recipient the proposal names.
+            MoneyTarget("OrderProposal.feeRecipientIsProvider") { m ->
+                m.values.map { v -> { chain.proposal.feeRecipientIsProvider(v); Unit } }
+            },
             // At `proposed` no provider key is recorded and at `accepted` one is, so both of `check`'s
             // branches over the key are reached.
             MoneyTarget("OrderBinding.check") { m ->

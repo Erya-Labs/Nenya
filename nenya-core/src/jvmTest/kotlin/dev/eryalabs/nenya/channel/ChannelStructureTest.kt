@@ -183,6 +183,10 @@ class ChannelStructureTest {
             // already established. Both are 64 hex characters compared against the proposal's own
             // three keys; neither is a claim this codec believes, and the answer is a `Party?`.
             "OrderProposal.partyOf",
+            // T108: that same caller-resolved provider key, compared in lowercase with the recipient
+            // this proposal's own `fee` term names. The answer is a warning for the page (§8.1's
+            // SHOULD) and nothing reads it as evidence; a string that is no key equals no recipient.
+            "OrderProposal.feeRecipientIsProvider",
             // T82: the same two keys again — the caller-resolved provider key, read and refused by
             // `partyOf`'s own reading and compared with the one the order recorded, and §7.2's
             // attributed sender — moved here unchanged from the JavaScript layer's doors. `sender`'s

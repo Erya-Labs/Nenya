@@ -824,6 +824,9 @@ public class JsOrder internal constructor(internal val order: Order) {
     /** §7.6's provider key, once an acceptance established one. `null` before that. */
     public val provider: String? get() = order.provider
 
+    /** §8.1's SHOULD-warn: the fee recipient is [provider]. False before an acceptance. See `Order`. T108. */
+    public val feeRecipientIsProvider: Boolean get() = order.feeRecipientIsProvider
+
     /** §10.1's commitment, once the provider made one. `null` before that. */
     public val commitment: JsCommitment?
         get() = order.commitment?.let {

@@ -691,6 +691,11 @@ internal object JsFlowFixtures {
         ),
         JsBoundaryFixtures.Field("provider", crossed.provider, expected.provider),
         JsBoundaryFixtures.Field(
+            "feeRecipientIsProvider",
+            crossed.feeRecipientIsProvider,
+            expected.feeRecipientIsProvider,
+        ),
+        JsBoundaryFixtures.Field(
             "commitment",
             crossed.commitment?.let { listOf(it.xHex, it.oxHex, it.mimeType, it.sizeBytes) },
             expected.commitment?.let {
