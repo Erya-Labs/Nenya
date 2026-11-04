@@ -241,6 +241,13 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    value is an answer, not a refusal: nothing in this library checks that you asked. The listing and
    the bid carry `feeConfirmationRequired` too, so you can warn the user before building.
 
+   Ask the same decoded proposal `feeRecipientIsProvider`, with the provider's key as you know it
+   from the listing or the bid. When it is true, the provider is also the fee recipient. §8.1 allows
+   that only where the provider really acts as an agent, so tell the user before you publish the
+   proposal. This too is a warning, not a refusal: the proposal still builds, and nothing in this
+   library checks that you told them. Once the order is accepted, the order answers
+   `feeRecipientIsProvider` as well, for the provider key it accepted.
+
    The buyer keeps the `toSelf` copy of its proposal. It starts its order from that copy with
    `openOrderFromProposal`, which takes the order id and terms from the proposal itself, so do not type
    them again. That call *is* the proposal step: the order starts in `proposed`, and stepping it again
@@ -386,7 +393,10 @@ own messages from their `toSelf` copies. Keep each one.
    `decodeProposal`, and keep its `terms`: step 5 checks the buyer's receipt against them. When its
    `feeConfirmationRequired` is true, the fee is above §8.1's line: before building the acceptance,
    show the user `feeBasisPoints`, `feeMsat` and `totalMsat` and build nothing until they confirm.
-   Nothing in this library checks that you asked. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
+   Nothing in this library checks that you asked. Ask the decoded proposal `feeRecipientIsProvider`
+   with your own key, too. When it is true, the proposal names you as the fee recipient: tell the
+   user so before building the acceptance, because §8.1 allows that only where the provider really
+   acts as an agent. It is a warning, not a refusal, and nothing checks that you told them. To accept, build the acceptance with `buildAgreementAgainst`, giving it the
    listing the proposal is for. It is refused, and builds nothing, when the proposal is for another
    listing, when the listing has expired, or when the clock has reached the proposal's own
    `expiration`, which is the deadline for accepting it. Where either carries a deadline and your

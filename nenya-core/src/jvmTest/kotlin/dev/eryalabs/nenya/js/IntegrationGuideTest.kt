@@ -408,6 +408,29 @@ class IntegrationGuideTest {
             assertEquals(emptySet(), missing, "figures that do not hold their phrase")
         }
 
+        /** T109: §8.1's SHOULD-warn answer, which the buyer's and the provider's sections each name. */
+        const val FEE_RECIPIENT_IS_PROVIDER: String = "feeRecipientIsProvider"
+
+        /** T109: the sections that must name [FEE_RECIPIENT_IS_PROVIDER]. */
+        val FEE_RECIPIENT_IS_PROVIDER_HEADINGS: List<String> = listOf(BUYER_HEADING, PROVIDER_HEADING)
+
+        /** Fails unless each section in [FEE_RECIPIENT_IS_PROVIDER_HEADINGS] names it, naming the ones that do not. */
+        fun assertFeeRecipientIsProviderNamed(text: String) {
+            val missing = FEE_RECIPIENT_IS_PROVIDER_HEADINGS.filter {
+                "`$FEE_RECIPIENT_IS_PROVIDER`" !in collapsed(section(text, it))
+            }
+            assertEquals(emptyList(), missing, "sections that do not name `$FEE_RECIPIENT_IS_PROVIDER`")
+        }
+
+        /** [text] with every [span] inside the section under [heading] removed, and nothing else changed. */
+        fun withoutInSection(text: String, heading: String, span: String): String {
+            val lines = text.lines().toMutableList()
+            val start = lines.indexOfFirst { it.trimEnd() == heading }
+            val end = (start + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
+            for (i in start + 1 until end) lines[i] = lines[i].replace(span, "")
+            return lines.joinToString("\n")
+        }
+
         /** [text] with its line at [index] removed. */
         fun withoutLine(text: String, index: Int): String =
             text.lines().filterIndexed { i, _ -> i != index }.joinToString("\n")
@@ -705,6 +728,26 @@ class IntegrationGuideTest {
             assertNotEquals(texts, deleted, "`$path` holds `$phrase`")
             val failure = assertFailsWith<AssertionError>("`$path` without its phrase must fail") { assertFiguresSay(deleted) }
             assertTrue(path in failure.message.orEmpty(), "the failure names `$path`")
+        }
+    }
+
+    /** T109: the buyer's and the provider's sections each name §8.1's `feeRecipientIsProvider` warning. */
+    @Test
+    fun `the buyer's and provider's sections name feeRecipientIsProvider`() {
+        assertFeeRecipientIsProviderNamed(guide)
+        for (heading in FEE_RECIPIENT_IS_PROVIDER_HEADINGS) assertStepsHeld(heading, tradeSteps(guide, heading))
+    }
+
+    /** Negative control: the name deleted from either section fails, naming that section. */
+    @Test
+    fun `either section without feeRecipientIsProvider fails`() {
+        for (heading in FEE_RECIPIENT_IS_PROVIDER_HEADINGS) {
+            val text = withoutInSection(guide, heading, "`$FEE_RECIPIENT_IS_PROVIDER`")
+            assertNotEquals(guide, text, "`$heading` names `$FEE_RECIPIENT_IS_PROVIDER`")
+            val failure = assertFailsWith<AssertionError>("`$heading` without the name must fail") {
+                assertFeeRecipientIsProviderNamed(text)
+            }
+            assertTrue(heading in failure.message.orEmpty(), "the failure names `$heading`")
         }
     }
 

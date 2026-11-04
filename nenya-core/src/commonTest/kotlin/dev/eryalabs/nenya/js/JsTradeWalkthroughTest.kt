@@ -82,6 +82,9 @@ import kotlin.test.fail
  * no request. Its acceptance and fee-request points are the one exception to T74's door-made sightings:
  * no door gives a fee recipient those points, so its test types the copy's `fee` row in for them.
  *
+ * T109: §8.1's SHOULD-warn (T108). The trade's proposal and order answer `feeRecipientIsProvider` false;
+ * a proposal naming the provider answers true and still builds and is accepted, since it is a warning.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -437,6 +440,55 @@ class JsTradeWalkthroughTest {
             "the honest proposal, naming the order's fee recipient, is the first thing the provider opened",
         )
         assertEquals(trade.feeRecipient.key, decodeProposal(trade.proposal.toRecipient).proposal?.feeRecipient)
+    }
+
+    /**
+     * T109, §8.1's SHOULD-warn as the guide's buyer step 4 and provider step 2 ask it (T108). The trade's
+     * proposal, read by either side, and its order answer `feeRecipientIsProvider` false: the fee
+     * recipient is a third key. A second proposal naming the provider answers true, and is a warning, not
+     * a refusal: it still builds, the provider's acceptance of it builds, and the order accepted on it
+     * answers true too.
+     */
+    @Test
+    @JsName("the_trade_answers_feeRecipientIsProvider_false_and_a_proposal_naming_the_provider_answers_true_and_builds")
+    fun `the trade answers feeRecipientIsProvider false and a proposal naming the provider answers true and builds`() {
+        val trade = Trade()
+        for (copy in listOf(trade.proposal.toSelf, trade.proposal.toRecipient)) {
+            val read = decodeProposal(copy).proposal ?: fail("each side reads the trade's proposal")
+            assertFalse(read.feeRecipientIsProvider(trade.provider.key), "§8.1: the fee recipient is not the provider")
+        }
+        for (order in listOf(trade.accepted, trade.committed)) {
+            assertFalse(order.feeRecipientIsProvider, "the ${order.state} order answers the same")
+        }
+
+        val built = buildProposalAgainst(
+            trade.listing,
+            trade.environment,
+            trade.buyerEnvelope(),
+            SettlementFixtures.orderHex(OrderFixtures.ORDER_INDEX + 1),
+            trade.proposedTerms,
+            feeRecipient = trade.provider.key,
+        )
+        assertTrue(built.ok, "a warning, not a refusal: the proposal builds: ${built.reason} — ${built.detail}")
+        val agent = trade.send(built, trade.buyer, trade.provider)
+        for (copy in listOf(agent.toSelf, agent.toRecipient)) {
+            val read = decodeProposal(copy).proposal ?: fail("each side reads the proposal naming the provider")
+            assertTrue(read.feeRecipientIsProvider(trade.provider.key), "§8.1: warn, the fee recipient is the provider")
+            assertFalse(read.feeRecipientIsProvider(trade.buyer.key), "the buyer's key is not the fee recipient")
+        }
+
+        val proposed = openOrderFromProposal(trade.machine, agent.toSelf).order ?: fail("the order opens")
+        assertFalse(proposed.feeRecipientIsProvider, "before an acceptance the order holds no provider key")
+        val acceptance = trade.send(
+            buildAgreementAgainst(trade.listing, trade.environment, trade.providerEnvelope(), agent.toRecipient),
+            trade.provider,
+            trade.buyer,
+        )
+        val accepted = trade.stepped(
+            stepOrderWithStatusUpdate(trade.machine, proposed, agent.toSelf, acceptance.toRecipient, trade.provider.key),
+        )
+        assertEquals("ACCEPTED", accepted.state, "the acceptance builds and the order accepts on it")
+        assertTrue(accepted.feeRecipientIsProvider, "the accepted order answers true")
     }
 
     /**
