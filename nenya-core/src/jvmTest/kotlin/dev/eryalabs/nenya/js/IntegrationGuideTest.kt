@@ -373,6 +373,18 @@ class IntegrationGuideTest {
             assertEquals(emptyMap(), missing, "section to the phrase it does not hold")
         }
 
+        /** T104: the sentence the guide, the overview and the README each hold (decision U). */
+        const val FEE_NOT_ENFORCED: String = "A fee is not enforced against the buyer"
+
+        /** T104: each document that must say [FEE_NOT_ENFORCED], by its path from `nenya-core`. */
+        val FEE_NOT_ENFORCED_DOCUMENTS: List<String> = listOf(GUIDE_PATH, "../spec/NENYA-1-overview.md", "../README.md")
+
+        /** Fails unless each text in [texts], keyed by path, holds [FEE_NOT_ENFORCED], naming the ones that do not. */
+        fun assertFeeNotEnforcedEverywhere(texts: Map<String, String>) {
+            val missing = texts.filterValues { FEE_NOT_ENFORCED !in collapsed(it.lines()) }.keys
+            assertEquals(emptySet(), missing, "documents that do not say `$FEE_NOT_ENFORCED`")
+        }
+
         /** [text] with its line at [index] removed. */
         fun withoutLine(text: String, index: Int): String =
             text.lines().filterIndexed { i, _ -> i != index }.joinToString("\n")
@@ -618,6 +630,25 @@ class IntegrationGuideTest {
             assertEquals(1, guide.split(phrase).size - 1, "`$phrase` stands once in the guide, on one line")
             val text = guide.replace(phrase, "")
             assertFailsWith<AssertionError>("`$heading` without `$phrase` must fail") { assertFeeNotEnforcedSaid(text) }
+        }
+    }
+
+    /** T104: the guide, the overview and the README each say a fee is not enforced against the buyer (decision U). */
+    @Test
+    fun `the guide, the overview and the README say a fee is not enforced`() {
+        assertFeeNotEnforcedEverywhere(FEE_NOT_ENFORCED_DOCUMENTS.associateWith { read(File(it)) })
+    }
+
+    /** Negative control: deleting the sentence from any one of the three fails, naming that one. */
+    @Test
+    fun `any one document without the fee sentence fails`() {
+        val texts = FEE_NOT_ENFORCED_DOCUMENTS.associateWith { collapsed(read(File(it)).lines()) }
+        for (path in FEE_NOT_ENFORCED_DOCUMENTS) {
+            val deleted = texts + (path to texts.getValue(path).replace(FEE_NOT_ENFORCED, ""))
+            val failure = assertFailsWith<AssertionError>("`$path` without the sentence must fail") {
+                assertFeeNotEnforcedEverywhere(deleted)
+            }
+            assertTrue(path in failure.message.orEmpty(), "the failure names `$path`")
         }
     }
 

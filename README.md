@@ -8,7 +8,8 @@ states what a provider will make. Bids propose terms on either. The parties to a
 directly in bitcoin over Lightning.
 
 The library holds no funds and runs no server. NENYA-1 has no protocol-level fee. A client may
-add an optional handling fee, stated as a signed term of the order.
+add an optional handling fee, stated as a signed term of the order. A fee is not enforced against
+the buyer: the provider releases the file on its own payment and need not see the fee paid.
 
 `nenya-core` is a reference implementation in Kotlin Multiplatform, built for the JVM and for
 JavaScript. Other implementations can be written against the specification alone.
@@ -61,6 +62,7 @@ The embedding client supplies the signer, the one-time signer for gift wraps, th
 transport, the wallet, and the clock and randomness. The library treats each as untrusted and
 advances an order only on evidence it verifies itself. It protects a user against
 counterparties and relays, not against the embedding client (§3 and §13 of the specification).
+It does not collect a fee: a buyer can leave the fee unpaid.
 
 ## Modules
 

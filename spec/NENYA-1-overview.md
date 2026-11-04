@@ -6,8 +6,8 @@ Non-normative. The contract is [spec/NENYA-1.md](NENYA-1.md).
 
 Nenya is a wire format for a non-custodial marketplace in digital media on nostr. A buyer posts a
 request or a provider posts an offer, and the two settle directly in bitcoin. An optional fee
-recipient named in the signed terms receives a handling fee. Nenya is a library, not an
-application or a service; `nenya-core` is one reference implementation. The embedding client
+recipient named in the signed terms is owed a handling fee, which is not enforced against the
+buyer. Nenya is a library, not an application or a service; `nenya-core` is one reference implementation. The embedding client
 supplies the signer, a one-time signer, the relay transport, the wallet, and the clock and
 randomness source, each untrusted with respect to order state.
 
@@ -69,18 +69,20 @@ Details: §7, §8.1.
 2. `accepted`: the provider sends `type=3` `status=accepted` with byte-identical terms, sealed by
    its own key. Altered terms are a counter-proposal, answered by a new `type=1` and order id.
 3. `committed`: the provider commits to the encrypted file's URL and hashes.
-4. `awaiting_payment`: every required payment request has arrived and matches the terms.
-5. `paid`: every required payment has a verified receipt.
+4. `awaiting_payment`: in the buyer's order, every required payment request has arrived and
+   matches the terms.
+5. `paid`: in the buyer's order, every required payment has a verified receipt. A provider
+   releases on the verified receipt for its own invoice.
 6. `released`: the provider sends the decryption key.
 7. `settled`: the buyer has verified both hashes.
 
-`cancelled` (by either party, before `paid`), `expired` (a deadline passed) and `disputed` (a
+`cancelled` (by either party, before the reader's own order is `paid`), `expired` (a deadline passed) and `disputed` (a
 failure after `paid`, or a broken commitment) are also terminal. v1 has no dispute resolution and
 no escrow: the buyer pays before receiving the key, so a paid provider can withhold it. Each party
 derives its own order state from evidence it verified itself and does not assume the counterparty
 is in the same state. A status update claiming `paid` or `settled` changes no state; only
-`cancelled` is accepted on a counterparty's assertion alone, and only before `paid`. Every
-unlisted transition is refused.
+`cancelled` is accepted on a counterparty's assertion alone, and only before the reader's own order
+is `paid`. Every unlisted transition is refused.
 
 ![The order lifecycle: every state and every legal transition](../docs/order-lifecycle.svg)
 
@@ -101,7 +103,7 @@ Listings and bids state prices in whole satoshis, as `["price", "50000", "SAT"]`
 use millisatoshis (1 SAT = 1000 msat). Amounts are integers, never floating point, and a read that
 would lose precision fails instead of rounding. The price is what the provider receives. The fee,
 `floor(price_msat × bps / 10000)`, is added on top: at 50 000 SAT and 250 bps (2.5%), the buyer
-pays 51 250 SAT.
+owes 51 250 SAT.
 
 ![Where the signed fee term is checked along an order](../docs/fee-term-points.svg)
 
@@ -117,6 +119,10 @@ accepted only in the transition into `awaiting_payment`. A payee is required onl
 name it and its expected amount is non-zero, so a fee that computes to zero has no invoice. When
 an order with a non-zero fee is committed, the buyer sends the fee recipient a copy of the
 proposal, which tells it the order exists and is not evidence of anything else.
+
+A fee is not enforced against the buyer. The fee invoice and the fee receipt pass only between the
+buyer and the fee recipient. A provider that is not also the fee recipient cannot see whether the
+fee was paid, and it releases the file on the receipt for its own invoice.
 
 Details: §4.4, §8.
 
@@ -134,6 +140,9 @@ payment hash of a BOLT-11 invoice. The receipt (`kind:17`) carries
    payment request was accepted;
 4. for a fee, the fee term matches, the fee invoice was sealed by the fee recipient's key, and the
    order was already in `awaiting_payment`.
+
+A fee recipient that is not also the provider holds no order and no stored request, so it cannot
+make check 4; the buyer makes it.
 
 ![A BOLT-11 invoice, field by field, and the fields Nenya reads](../docs/bolt11-anatomy.svg)
 
@@ -155,7 +164,7 @@ delivery of the committed bytes, not the file's quality.
    key generated for that deliverable, and uploads it.
 2. Commit. Before any payment request, a `kind:16` `type=5` states the URL, size, MIME type, `x`
    (SHA-256 of the encrypted file as served) and `ox` (SHA-256 of the plaintext), never the key.
-3. Release. After payment verifies, a `kind:15` carries the key and nonce, with `x`, `ox`, size and
+3. Release. After the provider's own payment verifies, a `kind:15` carries the key and nonce, with `x`, `ox`, size and
    MIME type byte-identical to the commitment. A mismatch makes the order `disputed`.
 4. Verify. The buyer checks the download against `x`, decrypts it, and checks the plaintext against
    `ox`. Only then is the order `settled`; a hash mismatch or failed decryption makes it `disputed`.
