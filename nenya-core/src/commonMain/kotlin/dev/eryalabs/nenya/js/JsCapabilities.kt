@@ -2,6 +2,7 @@ package dev.eryalabs.nenya.js
 
 import dev.eryalabs.nenya.conformance.Capabilities
 import dev.eryalabs.nenya.conformance.ConformanceItem
+import dev.eryalabs.nenya.conformance.OpenItem
 import kotlin.js.ExperimentalJsExport
 import kotlin.js.JsExport
 
@@ -10,11 +11,12 @@ import kotlin.js.JsExport
 // verifies" §17 requires of an implementation that omits a check, and §16.2's "explicit unsupported
 // state"; until this entry point a page could read none of it. Translated and nothing more: no status
 // and no note is written here, every value is read off `Capabilities` at the moment a getter runs.
+// T114 crosses §16.2's open items, `Capabilities.OPEN_ITEMS`, the same way.
 // =================================================================================================
 
 /**
  * §17's capability surface, as [Capabilities] publishes it: every item, the derived not-performed
- * set, and the report text. Takes nothing and never refuses — the surface is a statement about this
+ * set, §16.2's open items, and the report text. Takes nothing and never refuses — the surface is a statement about this
  * library, not about any event.
  */
 @OptIn(ExperimentalJsExport::class)
@@ -46,6 +48,14 @@ public class JsCapabilities internal constructor() {
      */
     public val notPerformedHere: Array<String>
         get() = Capabilities.NOT_PERFORMED_HERE.map(Capabilities::qualify).toTypedArray()
+
+    /**
+     * [Capabilities.OPEN_ITEMS], every one of them, in §16.2's order: the open questions of NENYA-1
+     * this library leaves unsupported. §16.2 requires them surfaced, never a silent default; a page
+     * shows them rather than choosing a value.
+     */
+    public val openItems: Array<JsOpenItem>
+        get() = Array(Capabilities.OPEN_ITEMS.size) { i -> JsOpenItem(Capabilities.OPEN_ITEMS[i]) }
 
     /** [Capabilities.report], verbatim. */
     public val report: String get() = Capabilities.report()
@@ -80,4 +90,27 @@ public class JsConformanceItem internal constructor(private val item: Conformanc
     public val note: String get() = item.note
 
     override fun toString(): String = "JsConformanceItem(#$number, $status)"
+}
+
+/**
+ * One of §16.2's open items, as [OpenItem] publishes it. Its section set crosses as an array in the
+ * set's own order.
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public class JsOpenItem internal constructor(private val item: OpenItem) {
+
+    /** The item's name as §16.2 prints it, `"OPEN-4"` to `"OPEN-7"`. */
+    public val id: String get() = item.id
+
+    /** `OpenItemStatus.name`: `"UNSUPPORTED"`, the enum's one constant. */
+    public val status: String get() = item.status.name
+
+    /** The sections where the specification states the item, as bare `x.y` strings without the `§`. */
+    public val specSections: Array<String> get() = item.specSections.toTypedArray()
+
+    /** The value used, in this library's own words, verbatim. */
+    public val note: String get() = item.note
+
+    override fun toString(): String = "JsOpenItem($id, $status)"
 }

@@ -151,6 +151,8 @@ class JsSurfaceTest {
             // passed back.
             "JsCapabilities",
             "JsConformanceItem",
+            // T114's one: one of §16.2's open items, read off `JsCapabilities` and never passed back.
+            "JsOpenItem",
             // T59's two: §6.1's decoded private bid and its result, read by a page and never passed back.
             "JsPrivateBid",
             "JsPrivateBidResult",
@@ -1091,8 +1093,9 @@ class JsSurfaceTest {
 
     /**
      * The same for T50's two: `JsCapabilitiesEqualityTest.differences` compares these six item fields
-     * against `ConformanceItem`, and its other tests these four surface fields against `Capabilities`.
-     * A getter added to either class and not to that comparison turns this red.
+     * against `ConformanceItem`, and its other tests these five surface fields against `Capabilities`;
+     * T114's `JsOpenItem` has its own `differences` over its four fields against `OpenItem`. A getter
+     * added to any of the three classes and not to that comparison turns this red.
      */
     @Test
     fun `the capability comparisons cover every value T50's two types publish`() {
@@ -1102,9 +1105,14 @@ class JsSurfaceTest {
             "JsCapabilitiesEqualityTest.differences compares exactly these; a new getter must join it",
         )
         assertEquals(
-            publishedPropertyNames(typeNamed("JsCapabilities"), floor = 4),
-            setOf("specification", "items", "notPerformedHere", "report"),
+            publishedPropertyNames(typeNamed("JsCapabilities"), floor = 5),
+            setOf("specification", "items", "notPerformedHere", "openItems", "report"),
             "JsCapabilitiesEqualityTest compares exactly these; a new getter must join it",
+        )
+        assertEquals(
+            publishedPropertyNames(typeNamed("JsOpenItem"), floor = 4),
+            setOf("id", "status", "specSections", "note"),
+            "JsCapabilitiesEqualityTest.differences compares exactly these; a new getter must join it",
         )
     }
 

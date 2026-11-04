@@ -454,6 +454,24 @@ class IntegrationGuideTest {
             )
         }
 
+        /** T114: the getter [NOT_CHECKED_HEADING] names in prose, as `JsCapabilities` publishes it. */
+        const val OPEN_ITEMS: String = "openItems"
+
+        /**
+         * Fails unless [NOT_CHECKED_HEADING] in [text] names [OPEN_ITEMS] in its prose, says the client
+         * shows them rather than choosing a value, and names it in no bullet (those are §13's alone).
+         */
+        fun assertOpenItemsNamed(text: String) {
+            val lines = section(text, NOT_CHECKED_HEADING)
+            val prose = collapsed(lines)
+            assertTrue("`$OPEN_ITEMS`" in prose, "`$NOT_CHECKED_HEADING` does not name `$OPEN_ITEMS`")
+            assertTrue(
+                "rather than choosing a value" in prose,
+                "`$NOT_CHECKED_HEADING` does not say the client shows the open items rather than choosing a value",
+            )
+            assertEquals(emptyList(), bullets(lines).filter { OPEN_ITEMS in it }, "bullets naming `$OPEN_ITEMS`")
+        }
+
         /** [text] with every [span] inside the section under [heading] removed, and nothing else changed. */
         fun withoutInSection(text: String, heading: String, span: String): String {
             val lines = text.lines().toMutableList()
@@ -808,6 +826,26 @@ class IntegrationGuideTest {
         assertFailsWith<AssertionError> { assertResidualRisksListed(guide.replace("- ${risks[0]}", "- ${risks[0]}\n- ${risks[0]}"), risks) }
         assertFailsWith<AssertionError> { assertResidualRisksListed(guide.replace(NOT_CHECKED_HEADING, "## Caveats"), risks) }
         assertEquals(listOf("a wrapped bullet", "next"), bullets(listOf("- a wrapped", "  bullet", "", "  not part", "- next")))
+    }
+
+    /** T114: `## What Nenya does not check` names `openItems` in prose, and its bullets stay §13's alone. */
+    @Test
+    fun `the not-checked section names openItems in prose`() {
+        assertOpenItemsNamed(guide)
+        // The name the guide gives is the getter's: this line compiles only while `openItems` exists.
+        assertTrue(capabilities().openItems.isNotEmpty(), "`$OPEN_ITEMS` answers §16.2's open items")
+        assertResidualRisksListed(guide, ResidualRisksTest.residualRisks(ResidualRisksTest.vendored))
+    }
+
+    /** Negative control: `openItems` deleted from the section fails; so does a bullet naming it. */
+    @Test
+    fun `the not-checked section without openItems fails`() {
+        val without = withoutInSection(guide, NOT_CHECKED_HEADING, "`$OPEN_ITEMS`")
+        assertNotEquals(guide, without, "`$NOT_CHECKED_HEADING` names `$OPEN_ITEMS`")
+        assertFailsWith<AssertionError>("the section without `$OPEN_ITEMS` must fail") { assertOpenItemsNamed(without) }
+        val bulleted = guide.replace("- a `kind:5` deletion is advisory", "- a `kind:5` deletion is advisory\n- `$OPEN_ITEMS`")
+        assertNotEquals(guide, bulleted)
+        assertFailsWith<AssertionError>("a bullet naming `$OPEN_ITEMS` must fail") { assertOpenItemsNamed(bulleted) }
     }
 
     /**

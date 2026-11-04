@@ -485,6 +485,10 @@ reports what that party verified, not whether the file was delivered.
 Some results also report what was not done on that call. For example, `seal`'s answer carries
 `notPerformedHere`, naming any signature check your environment could not perform. Show those, too.
 
+`capabilities()` also answers `openItems`. Each is an open question of NENYA-1 (§16.2, `OPEN-4` to
+`OPEN-7`) that the library leaves unsupported: its `status` is `UNSUPPORTED`, and its `note` says
+what the library does instead. Show them to your user rather than choosing a value for any of them.
+
 The specification (§13) requires these residual risks to be surfaced. The library has no screen, so
 showing them to your user is your client's job. No check in the library removes any of them:
 

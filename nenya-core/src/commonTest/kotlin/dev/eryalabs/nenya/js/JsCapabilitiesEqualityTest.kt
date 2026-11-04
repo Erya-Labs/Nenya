@@ -3,6 +3,8 @@ package dev.eryalabs.nenya.js
 import dev.eryalabs.nenya.conformance.Capabilities
 import dev.eryalabs.nenya.conformance.ConformanceItem
 import dev.eryalabs.nenya.conformance.ConformanceStatus
+import dev.eryalabs.nenya.conformance.OpenItem
+import dev.eryalabs.nenya.conformance.OpenItemStatus
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -10,7 +12,7 @@ import kotlin.test.assertTrue
 
 /**
  * T50's crossing — [capabilities] — held equal to [Capabilities] field for field: every item, the
- * derived not-performed set by exact set equality, and the report text.
+ * derived not-performed set by exact set equality, the report text, and (T114) every §16.2 open item.
  *
  * The comparison is [differences], one function both the equality and its two negative controls run,
  * so a probe that slipped past it would be slipping past the comparison the suite actually makes.
@@ -61,6 +63,33 @@ class JsCapabilitiesEqualityTest {
             crossed.size == expected.size && crossed.toSet() == expected
 
         fun crossedItems(): List<JsConformanceItem> = capabilities().items.toList()
+
+        /** T114: one open item's crossed values as plain Kotlin, as [Snapshot] is for a §17 item. */
+        data class OpenSnapshot(
+            val id: String,
+            val status: String,
+            val specSections: List<String>,
+            val note: String,
+        )
+
+        fun crossed(item: JsOpenItem): OpenSnapshot = OpenSnapshot(
+            id = item.id,
+            status = item.status,
+            specSections = item.specSections.toList(),
+            note = item.note,
+        )
+
+        /** Every field on which [crossed] departs from [item], by name; empty when they agree. */
+        fun differences(crossed: OpenSnapshot, item: OpenItem): List<String> {
+            val found = mutableListOf<String>()
+            if (crossed.id != item.id) found += "id"
+            if (crossed.status != item.status.name) found += "status"
+            if (!sameSet(crossed.specSections, item.specSections)) found += "specSections"
+            if (crossed.note != item.note) found += "note"
+            return found
+        }
+
+        fun crossedOpenItems(): List<JsOpenItem> = capabilities().openItems.toList()
     }
 
     @JsName("every_crossed_item_equals_its_conformance_item_field_for_field")
@@ -163,5 +192,37 @@ class JsCapabilitiesEqualityTest {
             }
         }
         assertTrue(probed > 0, "no item names a not-performed constant, so this control probed nothing")
+    }
+
+    @JsName("every_crossed_open_item_equals_its_open_item_field_for_field")
+    @Test
+    fun `every crossed open item equals its OpenItem field for field`() {
+        val items = crossedOpenItems()
+
+        assertEquals(Capabilities.OPEN_ITEMS.size, items.size, "every open item crosses, none is dropped")
+        for ((index, item) in Capabilities.OPEN_ITEMS.withIndex()) {
+            assertEquals(emptyList(), differences(crossed(items[index]), item), "${item.id} crossed differently")
+        }
+        assertEquals(Capabilities.OPEN_ITEMS.map { it.id }, items.map { it.id }, "§16.2's order")
+        assertEquals(listOf("OPEN-4", "OPEN-5", "OPEN-6", "OPEN-7"), items.map { it.id })
+        // Non-vacuity: every status crossed is the enum's one constant, and every set and note is non-empty.
+        assertEquals(setOf(OpenItemStatus.UNSUPPORTED.name), items.map { it.status }.toSet())
+        assertTrue(items.all { it.specSections.isNotEmpty() && it.note.isNotEmpty() }, "every open item cites a section and has a note")
+        assertEquals("JsOpenItem(OPEN-4, UNSUPPORTED)", items[0].toString())
+    }
+
+    /** Negative control: a crossing that altered one character of any open item's note is caught. */
+    @JsName("a_probe_altering_one_character_of_a_crossed_open_item_note_is_a_difference")
+    @Test
+    fun `a probe altering one character of a crossed open item's note is a difference`() {
+        val items = crossedOpenItems()
+        for ((index, item) in Capabilities.OPEN_ITEMS.withIndex()) {
+            val snapshot = crossed(items[index])
+            val last = snapshot.note.last()
+            val altered = snapshot.copy(note = snapshot.note.dropLast(1) + (if (last == 'x') 'y' else 'x'))
+            assertEquals(snapshot.note.length, altered.note.length, "one character changed, none added")
+            assertEquals(listOf("note"), differences(altered, item), "${item.id}'s note altered")
+        }
+        assertTrue(items.isNotEmpty(), "no open item crossed, so this control probed nothing")
     }
 }
