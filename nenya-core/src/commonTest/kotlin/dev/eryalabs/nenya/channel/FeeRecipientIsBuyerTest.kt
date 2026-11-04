@@ -1,14 +1,30 @@
 package dev.eryalabs.nenya.channel
 
+import dev.eryalabs.nenya.bid.AuthoredBid
+import dev.eryalabs.nenya.bid.Bid
+import dev.eryalabs.nenya.bid.BidWriter
+import dev.eryalabs.nenya.bid.BidWriterFixtures
+import dev.eryalabs.nenya.js.JsBid
+import dev.eryalabs.nenya.js.JsBoundaryFixtures
+import dev.eryalabs.nenya.js.JsEnvironment
+import dev.eryalabs.nenya.js.JsListing
 import dev.eryalabs.nenya.js.JsOrderTerms
 import dev.eryalabs.nenya.js.JsRumor
 import dev.eryalabs.nenya.js.JsRumorEnvelope
 import dev.eryalabs.nenya.js.buildProposal
+import dev.eryalabs.nenya.js.buildProposalForBid
 import dev.eryalabs.nenya.js.decodeProposal
+import dev.eryalabs.nenya.listing.Listing
 import dev.eryalabs.nenya.listing.ListingFixtures
+import dev.eryalabs.nenya.money.FeeTerm
+import dev.eryalabs.nenya.money.Msat
 import dev.eryalabs.nenya.order.OrderFixtures
 import dev.eryalabs.nenya.seam.NenyaClock
+import dev.eryalabs.nenya.seam.OrderId
 import dev.eryalabs.nenya.settlement.SettlementFixtures
+import dev.eryalabs.nenya.tag.NenyaKind
+import dev.eryalabs.nenya.tag.PubkeyRef
+import dev.eryalabs.nenya.tag.TagFixtures
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -25,6 +41,10 @@ import kotlin.test.fail
  * whose `fee` names its own author, and `RumorWriter.proposal` (and through it `ListingOrderWriter`
  * and the crossed `buildProposal`) builds nothing whose envelope author is the recipient it was
  * handed. The provider as fee recipient is §8.1's MAY, and still builds and decodes.
+ *
+ * T107 — the bid path. `ListingOrderWriter.proposalForBid` copies the recipient off the bid, so a bid
+ * naming the buyer — the request's author on a request, the bidder itself on an offer — reaches the
+ * same `RumorWriter` check, and the crossed `buildProposalForBid` answers it as a value.
  */
 class FeeRecipientIsBuyerTest {
 
@@ -50,6 +70,59 @@ class FeeRecipientIsBuyerTest {
             case.terms ?: fail("$case must carry terms"),
             recipient,
             case.amountSat,
+        )
+
+        const val LISTING_AUTHOR_INDEX: Int = 1
+        const val BIDDER_INDEX: Int = 2
+
+        val LISTING_AUTHOR: String = TagFixtures.pubkeyFor(LISTING_AUTHOR_INDEX)
+        val BIDDER: String = TagFixtures.pubkeyFor(BIDDER_INDEX)
+        val THIRD_KEY: String = TagFixtures.pubkeyFor(7)
+
+        val BID_ORDER: OrderId = RumorWriterFixtures.orderFor(0)
+
+        /** A request and an offer, the two sides §6 lets a bid be made against. */
+        val SIDES: List<Int> = listOf(NenyaKind.REQUEST, NenyaKind.OFFER)
+
+        /** A listing of [kind] by [LISTING_AUTHOR], open-ended, so no deadline reads the clock. */
+        fun bidListing(kind: Int): Listing =
+            ListingFixtures.decode(ListingFixtures.minimal(kind), kind, index = LISTING_AUTHOR_INDEX)
+
+        /** A bid by [BIDDER] on [on] whose `fee` names [recipient], built by [BidWriter] and decoded. */
+        fun bidNaming(on: Listing, recipient: String): Bid = BidWriterFixtures.decode(
+            BidWriterFixtures.built(
+                BidWriter.bid(
+                    AuthoredBid(
+                        bidderPubkey = BIDDER,
+                        createdAt = BidWriterFixtures.CREATED_AT,
+                        listing = on.coordinate,
+                        price = Msat.ofSat(90_000L),
+                        fee = FeeTerm.of(OrderFixtures.FEE_BASIS_POINTS),
+                        feeRecipient = recipient,
+                    ),
+                ),
+                "a bid on kind ${on.kind} naming a fee recipient",
+            ),
+        )
+
+        /** Decision H: the buyer on a request is its author, on an offer the bidder. */
+        fun buyerOn(listing: Listing): String = if (listing.kind == NenyaKind.REQUEST) LISTING_AUTHOR else BIDDER
+
+        fun providerOn(listing: Listing): String = if (listing.kind == NenyaKind.REQUEST) BIDDER else LISTING_AUTHOR
+
+        /** Decision H's envelope on [listing]: the buyer, to the provider. */
+        fun buyerEnvelope(listing: Listing): RumorEnvelope =
+            RumorEnvelope(buyerOn(listing), ListingFixtures.CREATED_AT, listOf(PubkeyRef(providerOn(listing))))
+
+        fun proposalFor(listing: Listing, bid: Bid): ListingOrderBuild =
+            ListingOrderWriter.proposalForBid(listing, bid, NenyaClock.FAIL_CLOSED, buyerEnvelope(listing), BID_ORDER)
+
+        fun crossedFor(listing: Listing, bid: Bid) = buildProposalForBid(
+            JsListing(listing),
+            JsBid(bid),
+            JsEnvironment(),
+            JsBoundaryFixtures.crossed(buyerEnvelope(listing)),
+            BID_ORDER.toHex(),
         )
     }
 
@@ -167,5 +240,48 @@ class FeeRecipientIsBuyerTest {
         }
         assertTrue(build(provider).ok, "§8.1's MAY: the provider as fee recipient builds")
         assertTrue(build(SettlementFixtures.feeRecipient(INDEX)).ok, "a third key builds")
+    }
+
+    @Test
+    @JsName("proposalForBid_with_a_bid_naming_the_buyer_as_fee_recipient_is_refused_on_either_side")
+    fun `proposalForBid with a bid naming the buyer as fee recipient is refused, on either side`() {
+        for (kind in SIDES) {
+            val listing = bidListing(kind)
+            // On a request, the provider's bid names the request's author; on an offer, the
+            // counter-offer bid names its own bidder. Either way the recipient is the buyer.
+            val bid = bidNaming(listing, buyerOn(listing))
+            assertEquals(buyerOn(listing), bid.feeRecipient, "kind $kind: the bid names the buyer")
+            val refused = assertIs<ListingOrderBuild.Refused>(proposalFor(listing, bid), "kind $kind")
+            assertEquals(ChannelRejection.FEE_RECIPIENT_IS_BUYER, refused.refusal.reason, "kind $kind")
+            assertEquals(ChannelVocabulary.FEE, refused.refusal.tag, "kind $kind")
+        }
+    }
+
+    @Test
+    @JsName("buildProposalForBid_with_a_bid_naming_the_buyer_as_fee_recipient_is_refused_as_a_value")
+    fun `buildProposalForBid with a bid naming the buyer as fee recipient is refused as a value`() {
+        for (kind in SIDES) {
+            val listing = bidListing(kind)
+            val refused = crossedFor(listing, bidNaming(listing, buyerOn(listing)))
+            assertFalse(refused.ok, "kind $kind")
+            assertNull(refused.event, "kind $kind")
+            assertEquals(ChannelRejection.FEE_RECIPIENT_IS_BUYER.name, refused.reason, "kind $kind")
+            assertEquals("ChannelRejection", refused.reasonVocabulary, "kind $kind")
+            assertEquals(ChannelVocabulary.FEE, refused.tag, "kind $kind")
+        }
+    }
+
+    @Test
+    @JsName("the_same_bids_naming_a_third_key_build_and_decode_with_that_recipient")
+    fun `the same bids naming a third key build and decode with that recipient`() {
+        for (kind in SIDES) {
+            val listing = bidListing(kind)
+            val bid = bidNaming(listing, THIRD_KEY)
+            val built = assertIs<ListingOrderBuild.Built>(proposalFor(listing, bid), "kind $kind")
+            val decoded = OrderProposal.decode(RumorWriterFixtures.bound(built.event))
+            assertEquals(THIRD_KEY, decoded.feeRecipient, "kind $kind")
+            assertEquals(buyerOn(listing), decoded.buyer, "kind $kind: the buyer sent it")
+            assertTrue(crossedFor(listing, bid).ok, "kind $kind: the crossed build")
+        }
     }
 }
