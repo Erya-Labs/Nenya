@@ -201,7 +201,8 @@ The names in brackets are sections of `spec/NENYA-1.md`. "Seal and send" means `
 copy of a message you sent yourself, which is how your client gets a `JsRumor` for it.
 
 The order steps below follow **the buyer's client**. It receives every message the order machine
-needs, and it holds the stored payment requests the receipt checks compare against. The provider's
+needs, and it holds the stored payment requests the receipt checks compare against. Every order
+state named in this section is the state of the buyer's own order. The provider's
 client builds and sends its own messages at the matching steps; [The provider's side](#the-providers-side)
 walks them in its own order.
 
@@ -307,9 +308,9 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    request's (`FEE_PAYMENT_REQUEST`), from `paymentRequestFeeSighting`. Give it the fee request, the
    proposal, the acceptance and the provider's key. It reads the request against that acceptance, as step
    7's acceptance of the request did, and compares its `fee` tag with no other point. Read `settlement.evidenced` on each answer, not `ok`. Then the buyer
-   steps the order with `receipts_verified`, passing those settlements. §11.2 allows `paid` only
-   once **all** required receipts are verified, so read `stepOrder`'s answer rather than assuming
-   the order moved.
+   steps the order with `receipts_verified`, passing those settlements. The buyer's order enters `paid` only
+   once the provider's receipt and any fee receipt are verified (§11.2), so read `stepOrder`'s answer
+   rather than assuming the order moved.
 
    Calls: `buildReceipt`, `seal`, `open`, `verifySettlement`, `paymentRequestFeeSighting`, `verifyFeeReceipt`, `stepOrder`.
 9. **Release** (§10.3). The provider builds `buildReleaseAfterPayment` from its own commitment and
@@ -324,6 +325,9 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    against this order.
    A release whose values differ from the commitment moves the order to `disputed`, so read the
    answer's state rather than assuming `released`.
+   A release can arrive while the buyer's order is still `awaiting_payment`, because the provider
+   does not wait for the fee; `stepOrderWithRelease` then refuses it `RELEASE_ORDER_NOT_PAID`. Keep
+   the release, and step the order with it once the order is `paid`, before any deadline check (§10.3).
 
    Calls: `verifySettlement`, `buildReleaseAfterPayment`, `buildRelease`, `seal`, `open`, `stepOrderWithRelease`.
 10. **Check the delivery** (§10.4). The buyer fetches the file and checks it with `verifyServedBytes`.
@@ -500,7 +504,7 @@ Every function the JavaScript build exports, each listed once. The parameters an
 - `decodeRelease` — reads a deliverable release from an opened rumor (§10.3).
 - `acceptPaymentRequest` — accepts a payment request against the proposal and acceptance, and stores it (§8.6).
 - `verifySettlement` — checks a payment receipt against the stored payment request (§9.2).
-- `verifyFeeReceipt` — the same, for the fee recipient's payment (§8.5, §9.2).
+- `verifyFeeReceipt` — the same, for the buyer's check of its own fee payment; it reads the buyer's order (§8.5, §9.2).
 - `bidFeeSighting` — the `fee` tag of a decoded public bid, as a `BID` sighting for `earlierPoints` (§8.4).
 - `privateBidFeeSighting` — the same, for a private bid read from an opened rumor (§6.1, §8.4).
 - `proposalFeeSighting` — the `fee` tag of an order proposal read from an opened rumor, as an `ORDER_PROPOSAL` sighting (§7.5, §8.4).

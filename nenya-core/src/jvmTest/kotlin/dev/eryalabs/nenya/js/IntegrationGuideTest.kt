@@ -249,6 +249,22 @@ class IntegrationGuideTest {
             assertEquals(emptyMap(), missing, "`$BUYER_HEADING`: step to the receiving door its `$CALLS` line omits")
         }
 
+        /**
+         * T102: the refusal each buyer step's prose must name — step 9 the early release's, which a
+         * buyer's order still `awaiting_payment` answers because the provider does not wait for the fee.
+         */
+        val BUYER_STEP_REFUSALS: Map<Int, String> = mapOf(
+            9 to "RELEASE_ORDER_NOT_PAID",
+        )
+
+        /** Fails unless each buyer step in [BUYER_STEP_REFUSALS] names its refusal in backticks in its prose. */
+        fun assertBuyerStepsNameRefusals(steps: List<TradeStep>) {
+            val missing = BUYER_STEP_REFUSALS.filter { (number, refusal) ->
+                refusal !in codeSpans(steps.singleOrNull { it.number == number }?.prose ?: emptyList())
+            }
+            assertEquals(emptyMap(), missing, "`$BUYER_HEADING`: step to the refusal its prose does not name")
+        }
+
         /** [text] with [name] removed from the one buyer `Calls:` line that names it. */
         fun withoutBuyerCall(text: String, name: String): String {
             val lines = text.lines().toMutableList()
@@ -294,6 +310,7 @@ class IntegrationGuideTest {
             assertProviderReleasesAfterPayment(tradeSteps(text, PROVIDER_HEADING))
             assertBuyerTakesDoors(tradeSteps(text, BUYER_HEADING))
             assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
+            assertBuyerStepsNameRefusals(tradeSteps(text, BUYER_HEADING))
             assertFeeRecipientDoors(text)
         }
 
@@ -535,6 +552,34 @@ class IntegrationGuideTest {
                 assertBuyerStepsReceived(tradeSteps(text, BUYER_HEADING))
             }
         }
+    }
+
+    /**
+     * T102: the buyer's step 9 names `RELEASE_ORDER_NOT_PAID`, the refusal an early release meets while
+     * the buyer's order awaits the fee, and that name is a published constant.
+     */
+    @Test
+    fun `the buyer's release step names the early release's refusal`() {
+        assertBuyerStepsNameRefusals(tradeSteps(guide, BUYER_HEADING))
+        assertTrue(
+            BUYER_STEP_REFUSALS.values.all { it in PUBLISHED_ENUM_CONSTANTS },
+            "the refusals are published constants: ${BUYER_STEP_REFUSALS.values}",
+        )
+        assertTokensAreConstants(guide)
+    }
+
+    /** Negative control: `RELEASE_ORDER_NOT_PAID` misspelt fails, and so does step 9 without the name. */
+    @Test
+    fun `the buyer's release step with its refusal misspelt or dropped fails`() {
+        val misspelt = guide.replace("`RELEASE_ORDER_NOT_PAID`", "`RELEASE_ORDER_UNPAID`")
+        assertNotEquals(guide, misspelt, "the guide names `RELEASE_ORDER_NOT_PAID`")
+        assertFailsWith<AssertionError> { assertTokensAreConstants(misspelt) }
+        assertFailsWith<AssertionError> { assertBuyerStepsNameRefusals(tradeSteps(misspelt, BUYER_HEADING)) }
+
+        val dropped = guide.replace("refuses it `RELEASE_ORDER_NOT_PAID`", "refuses it")
+        assertNotEquals(guide, dropped, "step 9 names `RELEASE_ORDER_NOT_PAID`")
+        assertTokensAreConstants(dropped)
+        assertFailsWith<AssertionError> { assertBuyerStepsNameRefusals(tradeSteps(dropped, BUYER_HEADING)) }
     }
 
     /**
