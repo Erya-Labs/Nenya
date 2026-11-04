@@ -30,9 +30,10 @@ public enum class Payee(
     public companion object {
 
         /**
-         * The payees a receipt is actually **required** from before an order may become
+         * The payees a receipt is actually **required** from before the buyer's order may become
          * `paid`, per §9.2's "which payees are required" clause: a payee is required when the
-         * terms name it **and** its expected amount is non-zero.
+         * terms name it **and** its expected amount is non-zero. That is the buyer's rule; a
+         * provider's release needs only its own receipt (§9.2).
          *
          * Both halves bite, in different places.
          *

@@ -486,7 +486,12 @@ public object PaymentWriter {
      * §10.3's `kind:15` release, written from the provider's **own** commitment and only once the
      * provider's **own** payment has verified. T65.
      *
-     * §10.3 says the release is "sent by the provider after payment evidence verifies", and
+     * On a priced order this gate, not an `Order` reading `paid`, is what a provider's release
+     * rests on; `paid` is the buyer's order (§11), and the release does not wait for the fee
+     * receipt (§9.2).
+     *
+     * §10.3 says the release is "sent by the provider, as a NIP-17 file message, once the payment
+     * evidence §9.2 requires for a release has verified", and
      * `RumorWriter.release` takes neither the evidence nor the commitment: its four values are
      * typed in by the caller. This door takes both and refuses, in this order, before any tag is
      * written:
@@ -505,8 +510,8 @@ public object PaymentWriter {
      *
      * ### What it does not check
      *
-     * - **The fee receipt.** It is addressed to the fee recipient, who verifies it; the provider
-     *   is not sent it and this door does not ask for it.
+     * - **The fee receipt.** The buyer checks it, in its own order; the provider is not sent it,
+     *   and a release does not wait for it (§8, §9.2).
      * - **A free order.** No payment is owed, so there is no `Settlement` to hand in and this door
      *   refuses. Such an order is released through `RumorWriter.release`.
      * - **Whether [payment] came from this order's store.** A `Settlement.Evidenced` is minted only

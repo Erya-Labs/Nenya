@@ -87,6 +87,28 @@ class StaleNarrowingTest {
     }
 
     /**
+     * The passages T100 corrected, asserted absent as [CORRECTED]'s are.
+     *
+     * Three made the fee receipt the fee recipient's to verify or the provider's to wait for, which
+     * decision U and revision `1.15` contradict: the buyer checks it, in the buyer's order (§9.2,
+     * §11). Three said no priced order can reach `paid`, which `Capabilities` item 6 contradicts:
+     * all six §9.2 checks are performed on the `Settlement` path.
+     */
+    @Test
+    fun `the passages T100 corrected are gone from common production code`() {
+        val text = sources(File(COMMON_ROOT)).joinToString("\n") { it.readText() }
+
+        for ((phrase, why) in CORRECTED_BY_T100) {
+            assertTrue(phrase !in text, "`$phrase` is back in $COMMON_ROOT. $why")
+        }
+        assertTrue(
+            text.length > MIN_SOURCE_CHARS,
+            "the sweep read ${text.length} characters, which is not the tree — and 'the phrase is " +
+                "absent' is true of an empty string",
+        )
+    }
+
+    /**
      * The non-vacuity floor: the sweep read real files, and one of them is the file this task is
      * about.
      *
@@ -213,6 +235,32 @@ class StaleNarrowingTest {
                     "attempted. §17 requires a check that ran and failed be reported as such, and " +
                     "the `oracle` argument that justified folding them did not hold: both answers " +
                     "are produced by the reader's own signer, for the reader.",
+        )
+
+        /**
+         * The passages T100 corrected, and why each must stay gone. Fragments, as [CORRECTED]'s
+         * are, so a rewrapped reinstatement is still caught.
+         */
+        val CORRECTED_BY_T100: Map<String, String> = mapOf(
+            "who verifies it" to
+                "Decision U: the buyer checks the fee receipt, in its own order; the provider is not " +
+                    "sent it and a release does not wait for it (§9.2).",
+            "fee recipient's to verify" to
+                "Decision U: the six checks do not bind a fee recipient in that role (§9.2, §11); " +
+                    "the fee receipt is the buyer's to check.",
+            "order wrongly marked" to
+                "A priced order can reach `paid`: all six §9.2 checks are performed on the " +
+                    "`Settlement` path (`Capabilities` item 6), and a provider's release rests on " +
+                    "`PaymentWriter.release`, not on an order marked `paid`.",
+            "an order marked `paid` releases" to
+                "Decision U: on a priced order a provider's release rests on the evidence " +
+                    "`PaymentWriter.release` takes, not on an `Order` (§11).",
+            "Until a BOLT-11 parser closes" to
+                "T31 built the BOLT-11 reader and checks 4, 5 and check 3's provenance are performed " +
+                    "(`Capabilities` item 6).",
+            "no priced order can reach" to
+                "`Capabilities` item 6: a priced order now passes decision B's gate on receipts " +
+                    "put through the doors that perform all six checks.",
         )
 
         /**

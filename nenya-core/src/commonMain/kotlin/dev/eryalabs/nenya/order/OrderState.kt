@@ -189,13 +189,15 @@ public enum class OrderState(
     /**
      * Every **required** payment request (`type=2`) has been received and validated against
      * the terms — required meaning named by the terms **and** carrying a non-zero expected
-     * amount (§8.3, §9.2, and `FeeSplit.feePayeeRequired`).
+     * amount (§8.3, §9.2, and `FeeSplit.feePayeeRequired`). This is the buyer's order's rule
+     * (§11), which a provider keeping an order by the same table shares.
      */
     AWAITING_PAYMENT(token = "awaiting_payment", isTerminal = false),
 
     /**
      * Every **required** receipt has been **verified** per §9.2, with "required" as in
-     * [AWAITING_PAYMENT].
+     * [AWAITING_PAYMENT]. This is the buyer's `paid` (§9.2, §11): it waits for the fee receipt,
+     * and a provider's release does not.
      *
      * Verified means this library hashed a preimage itself (§9.1, STOP RULE 12) — never a
      * wallet's `Boolean` and never a counterparty's status update.

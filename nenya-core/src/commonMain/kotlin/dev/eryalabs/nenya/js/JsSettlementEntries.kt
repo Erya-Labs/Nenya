@@ -77,6 +77,9 @@ public fun verifySettlement(
 /**
  * §9.2 check 6, whole, on top of everything [verifySettlement] does — the `payee=fee` path.
  *
+ * This is the buyer's check, for the buyer's own order: the buyer's `paid` waits for it, and a
+ * provider's release does not (§9.2, §11).
+ *
  * Check 6 is the one §9.2 obligation with three sub-checks — §8.4's fee term byte-identical across
  * every point, §8.7's sealing key, and §8.5's `awaiting_payment` precondition read from the order
  * rather than from a `status` token a counterparty chose — and all three are performed by

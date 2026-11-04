@@ -234,9 +234,9 @@ public enum class TransitionRejection {
     RECEIPT_PAYEE_DUPLICATED,
 
     /**
-     * Two receipts in one set proving the **same** payment. §8.6's non-custodial rule: "The buyer
-     * MUST pay the provider and the fee recipient with two separate payments to two separate
-     * invoices", and an implementation MUST NOT honour a single invoice covering `total_msat`
+     * Two receipts in one set proving the **same** payment. §8.6's non-custodial rule: "A buyer
+     * paying both the provider and the fee recipient MUST do so with two separate payments to two
+     * separate invoices", and an implementation MUST NOT honour a single invoice covering `total_msat`
      * that some party then splits.
      *
      * Two distinct invoices cannot share a payment hash — a preimage is drawn per invoice — so a
@@ -258,9 +258,9 @@ public enum class TransitionRejection {
      * made; §11.1 and §11.2's row define `paid` as receipts "verified per §9.2"; §17 item 6 says
      * the same. Partial evidence is therefore not weak evidence for `paid` — it is not the thing
      * §11.2 names — and this library fails closed on it rather than advancing with a record of what
-     * it skipped. No honest priced trade can reach `paid` until the missing checks are implemented,
-     * which is the intended cost: an order wrongly marked `paid` releases a deliverable against a
-     * payment nobody checked the amount of.
+     * it skipped. All six checks are now performed on the path this machine consumes (§17 item 6),
+     * so this refusal answers a receipt put through a door that skipped one — a fee receipt put
+     * through plain `Settlement.verify` is refused here, missing check 6.
      *
      * Raised **after** every other refusal in `awaiting_payment → paid`, so a caller whose receipt
      * set is incomplete, misrouted or duplicated is still told that first. The refusal carries
@@ -691,6 +691,11 @@ public sealed interface Order {
  * verified for itself.
  *
  * ### What may move an order, and what may not
+ *
+ * The order this machine keeps is the buyer's (§11): §11.1 and §11.2 state the buyer's order, and
+ * its `paid` waits for the fee receipt as well as the provider's. A provider may keep one by the
+ * same table, but its release rests on `PaymentWriter.release`, not on this order reading `paid`
+ * (§9.2), and a fee recipient holds no order in that role.
  *
  * `awaiting_payment → paid` consumes a `Settlement.Evidenced` for every payee
  * `Payee.requiredPayees` names, and **nothing else**; `released → settled` consumes a
@@ -1285,8 +1290,10 @@ public class OrderMachine(
     /**
      * §11.2's `committed → awaiting_payment`: one valid `type=2` per **required** payee.
      *
-     * "Required" is §9.2's — named by the terms **and** carrying a non-zero expected amount — and
-     * it is read from `Payee.requiredPayees`, never re-derived. §8.3 is explicit about what
+     * "Required" is §9.2's rule for the buyer's order — named by the terms **and** carrying a
+     * non-zero expected amount — and it is read from `Payee.requiredPayees`, never re-derived. A
+     * provider keeping an order by the same table waits here for the fee request too, though its
+     * release does not depend on it (§11). §8.3 is explicit about what
      * happens to an implementation that requires an invoice per *named* payee instead: at
      * `bps = 1` and `price_msat = 3000` the fee is `floor(3000 × 1 / 10000) = 0`, no fee invoice
      * may legally exist, and every such order deadlocks into `expired`.
@@ -1391,11 +1398,10 @@ public class OrderMachine(
      *
      * §9.2 requires **all** of its checks before a payment may be treated as made, so a receipt set
      * that is complete, correctly routed and undisputed is still not `paid` while some check that
-     * applies to it was performed by nobody. That is refused here, and the order does not move. In
-     * practice no priced order can reach `paid` until checks 4, 5 and check 3's provenance exist;
-     * a free order — price `0`, no fee — owes no receipt, leaves the set empty and still advances.
-     * That cost is the decision, not a side effect of it: an order marked `paid` releases a
-     * deliverable against a payment whose amount nobody checked.
+     * applies to it was performed by nobody. That is refused here, and the order does not move. All
+     * six checks are performed on the `Settlement` path (§17 item 6), so a priced order reaches
+     * `paid` on receipts put through the doors that perform them; a free order — price `0`, no
+     * fee — owes no receipt, leaves the set empty and still advances.
      *
      * Two details of the placement are load-bearing.
      *

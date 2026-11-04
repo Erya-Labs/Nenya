@@ -467,6 +467,10 @@ public sealed interface Settlement {
         /**
          * §9.2 check 6, whole, on top of everything [verify] does — the `payee=fee` path.
          *
+         * This is the buyer's check, made in the buyer's own order: the buyer's `paid` waits for
+         * it, a provider's release does not, and the six checks do not bind a fee recipient in
+         * that role (§9.2, §11).
+         *
          * Check 6 is the one §9.2 obligation with three separate sub-checks, and each is performed
          * here against something this library holds rather than against something a counterparty
          * said:

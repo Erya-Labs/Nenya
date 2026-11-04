@@ -195,7 +195,8 @@ public enum class ChannelRejection {
      * §10.3: such a release "MUST NOT advance any state". Separate from [RELEASE_FOR_ANOTHER_ORDER]
      * because the two have different causes and different responses — one is a message about
      * somebody else's order, the other is a provider releasing before the buyer's payment verified,
-     * which is a thing to look at rather than a thing to route elsewhere. The state compared is this
+     * or a provider that released on its own receipt while this order waits for the fee receipt
+     * (§10.3), which is a thing to look at rather than a thing to route elsewhere. The state compared is this
      * implementation's own view (§11), never a `status` token a counterparty asserted.
      */
     RELEASE_ORDER_NOT_PAID,

@@ -673,10 +673,10 @@ public sealed interface OrderEvent {
      * and `OrderMachine.receipts` refuses with
      * [TransitionRejection.PAYMENT_CHECKS_NOT_PERFORMED] when any check that applies to these
      * receipts was performed by nobody — naming which, on
-     * [OrderOutcome.Refused.ChecksNotPerformed.missing]. Until a BOLT-11 parser closes checks 4 and
-     * 5 and check 3's provenance, the only order this event can move is one that owes no receipt at
-     * all: price `0`, no fee, an empty set. A caller holding a fully verified priced receipt and
-     * seeing that refusal is being told the truth about this library, not about its receipt.
+     * [OrderOutcome.Refused.ChecksNotPerformed.missing]. All six checks are performed on the
+     * `Settlement` path (§17 item 6), so that refusal answers a receipt put through a door that
+     * skipped one — a fee receipt put through plain `Settlement.verify`, for instance — and never
+     * a receipt every applicable check was performed on.
      */
     public class ReceiptsVerified(
 

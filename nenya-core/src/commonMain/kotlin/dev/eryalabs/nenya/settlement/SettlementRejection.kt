@@ -542,7 +542,8 @@ public enum class SettlementRejection {
      * invariant 2 is the direct test of the pairing.
      *
      * **The condition is equality, not "before", and the constant is named for the equality.**
-     * §8.5 says no fee receipt may be accepted "before the order reaches `awaiting_payment`";
+     * §8.5 says no fee receipt may be accepted "before the buyer's order reaches
+     * `awaiting_payment`";
      * §9.2 check 6 says "the state MUST already be `awaiting_payment`". The two differ only past
      * that state, and this implements check 6's equality — so a fee receipt arriving once the
      * order is already `paid` is refused too. That is a duplicate or a replay rather than an early
@@ -595,8 +596,8 @@ public enum class SettlementRejection {
     // ---------------------------------------------------------------------------------------
 
     /**
-     * §10.3: the release is sent "after payment evidence verifies", and the payment handed in is
-     * not [Settlement.Evidenced].
+     * §10.3: the release is sent "once the payment evidence §9.2 requires for a release has
+     * verified", and the payment handed in is not [Settlement.Evidenced].
      *
      * §9.4's `Unverified` is the one other answer a `Settlement` can be: a `bitcoin` or `ecash`
      * receipt, which §9.4 says MUST be treated as unverified and MUST NOT advance state. Releasing

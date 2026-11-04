@@ -358,8 +358,8 @@ public fun buildRelease(
  * commitment was not sealed by [envelope]'s author (`RELEASE_OF_ANOTHER_COMMITMENT`); the commitment is
  * decoded by `DeliveryCommitmentMessage.decode`, so one it refuses comes back under `ChannelRejection`.
  *
- * The fee receipt is the fee recipient's to verify, and this call does not ask for it. A free order has
- * no payment to verify and is refused here; it is released through [buildRelease].
+ * This gate is what a provider's release rests on. The buyer checks the fee receipt; the provider is not
+ * sent it, and a release does not wait for it (§9.2). A free order has no payment to verify and is refused here; it is released through [buildRelease].
  *
  * @param commitmentRumor the provider's own `kind:16` `type=5`, as [open] handed back its copy.
  * @param settlement the provider's payment, as [verifySettlement] answered it.

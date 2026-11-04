@@ -360,8 +360,8 @@ public sealed interface AcceptedPaymentRequest {
  *
  * ### The key is the pair, and §8.6's non-custodial rule rides on that
  *
- * §8.6: "The buyer MUST pay the provider and the fee recipient with two separate payments to two
- * separate invoices. An implementation MUST NOT construct, accept, or honour a single invoice
+ * §8.6: "A buyer paying both the provider and the fee recipient MUST do so with two separate
+ * payments to two separate invoices. An implementation MUST NOT construct, accept, or honour a single invoice
  * covering `total_msat` that some party then splits." Keying by `(order, payee)` makes the two
  * invoices two records with no shape that could join them, and no method here takes or returns a
  * collection of payees — `SettlementStructureTest` asserts that over the **generic** signatures,

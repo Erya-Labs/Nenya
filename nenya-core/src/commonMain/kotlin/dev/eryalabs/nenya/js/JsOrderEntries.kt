@@ -809,7 +809,10 @@ public class JsOrder internal constructor(internal val order: Order) {
     /** §8.1's confirmation line for the accepted fee. See [JsListing.feeConfirmationRequired]. */
     public val feeConfirmationRequired: Boolean get() = order.terms.split.term.confirmationRequired
 
-    /** True exactly when §8.3's split requires a `payee=fee` invoice and receipt at all. */
+    /**
+     * True exactly when §8.3's split requires a `payee=fee` invoice and receipt at all — in the
+     * buyer's order, whose `paid` waits for that receipt; a provider's release does not (§9.2).
+     */
     public val feePayeeRequired: Boolean get() = order.terms.split.feePayeeRequired
 
     /** §5.3's `expiration` of the accepted terms, unix seconds as a decimal string, or `null`. */
