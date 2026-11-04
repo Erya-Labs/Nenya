@@ -358,6 +358,21 @@ class IntegrationGuideTest {
             )
         }
 
+        /** T103: the phrase each side's section must hold, saying a fee is not enforced (decision U). */
+        val FEE_NOT_ENFORCED_PHRASES: Map<String, String> = mapOf(
+            PROVIDER_HEADING to "open no order machine",
+            FEE_RECIPIENT_HEADING to "holds no acceptance",
+        )
+
+        /** [lines] joined with every run of whitespace collapsed to one space, so a phrase may wrap. */
+        fun collapsed(lines: List<String>): String = lines.joinToString(" ").split(Regex("\\s+")).joinToString(" ")
+
+        /** Fails unless each section in [FEE_NOT_ENFORCED_PHRASES] holds its phrase, naming the ones missing. */
+        fun assertFeeNotEnforcedSaid(text: String) {
+            val missing = FEE_NOT_ENFORCED_PHRASES.filter { (heading, phrase) -> phrase !in collapsed(section(text, heading)) }
+            assertEquals(emptyMap(), missing, "section to the phrase it does not hold")
+        }
+
         /** [text] with its line at [index] removed. */
         fun withoutLine(text: String, index: Int): String =
             text.lines().filterIndexed { i, _ -> i != index }.joinToString("\n")
@@ -580,6 +595,30 @@ class IntegrationGuideTest {
         assertNotEquals(guide, dropped, "step 9 names `RELEASE_ORDER_NOT_PAID`")
         assertTokensAreConstants(dropped)
         assertFailsWith<AssertionError> { assertBuyerStepsNameRefusals(tradeSteps(dropped, BUYER_HEADING)) }
+    }
+
+    /**
+     * T103: the provider's section says its steps open no order machine, and the fee recipient's that it
+     * holds no acceptance, each outside the numbered steps, which still hold (decision U).
+     */
+    @Test
+    fun `the provider's and fee recipient's sections say a fee is not enforced`() {
+        assertFeeNotEnforcedSaid(guide)
+        for ((heading, phrase) in FEE_NOT_ENFORCED_PHRASES) {
+            assertStepsHeld(heading, tradeSteps(guide, heading))
+            val inSteps = tradeSteps(guide, heading).any { phrase in collapsed(it.prose) }
+            assertTrue(!inSteps, "`$phrase` stands outside the numbered steps of `$heading`")
+        }
+    }
+
+    /** Negative control: deleting either sentence's phrase fails. */
+    @Test
+    fun `the provider's or fee recipient's section without its phrase fails`() {
+        for ((heading, phrase) in FEE_NOT_ENFORCED_PHRASES) {
+            assertEquals(1, guide.split(phrase).size - 1, "`$phrase` stands once in the guide, on one line")
+            val text = guide.replace(phrase, "")
+            assertFailsWith<AssertionError>("`$heading` without `$phrase` must fail") { assertFeeNotEnforcedSaid(text) }
+        }
     }
 
     /**

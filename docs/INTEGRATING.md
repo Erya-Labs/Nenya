@@ -367,6 +367,11 @@ The same trade, followed by **the provider's client**. The provider never pays, 
 receipt. What it has to get right is that it releases the deliverable only once the library has
 checked the buyer's payment of its own invoice (§10.3).
 
+These steps open no order machine. The release rests on the evidenced settlement that step 5 answers
+for the provider's own invoice (§9.2). The release does not wait for the fee, and a provider that is
+not also the fee recipient does not see the fee paid. An order machine the provider opens on a
+fee-bearing order does not pass `committed` without the fee request (§11).
+
 Several later calls take a `JsRumor` for a message the provider handled earlier: the buyer's
 proposal, and its own acceptance, commitment and payment request. `open` answers each of them, its
 own messages from their `toSelf` copies. Keep each one.
@@ -414,9 +419,9 @@ own messages from their `toSelf` copies. Keep each one.
    from step 3, the settlement step 5 answered, and the key and nonce you encrypted the file with. It
    copies the order and the commitment's values, so do not type them again. It is refused, and builds
    nothing, unless the settlement is evidenced, is the provider's payment, and is for the commitment's
-   order, and unless the commitment was sealed by the author you are building as. The fee receipt is
-   addressed to the fee recipient, who checks it; this call does not ask for it, and this side does not
-   check it. A free order, with a price of `0`, has no payment to check, and `buildReleaseAfterPayment`
+   order, and unless the commitment was sealed by the author you are building as. The fee invoice and
+   the fee receipt pass only between the buyer and the fee recipient. This call does not ask for them,
+   and the release does not wait for the fee. A free order, with a price of `0`, has no payment to check, and `buildReleaseAfterPayment`
    refuses it: build its release with `buildRelease` instead, skipping steps 4 and 5. Seal and send the
    release.
 
@@ -449,6 +454,12 @@ provider (§8.1), the provider receives the proposal a second time, as this copy
 
    Calls: `buildFeeRequestFromProposal`, `seal`.
 
+A fee recipient that is not also the provider holds no acceptance, so `acceptPaymentRequest` cannot
+store its invoice, and `verifySettlement` and `verifyFeeReceipt` have no stored request to check its
+receipt against. It holds no order in this role. A fee is not enforced against the buyer, so the
+provider can release the file and the fee may never be paid. The fee recipient cannot tell an unpaid
+fee from an order that never went ahead.
+
 ---
 
 ## What Nenya does not check
@@ -457,7 +468,9 @@ provider (§8.1), the provider receives the proposal a second time, as this copy
 `PERFORMED_HERE`, `PARTIAL` or `NOT_PERFORMED_HERE`, which sections it covers, and what is left to
 your client. `notPerformedHere` lists everything the library leaves undone, and `report` is the same
 statement as text. Read it before you ship, and do not tell your users the library checks something
-it reports as not performed.
+it reports as not performed. The library does not enforce a fee. A provider can build a release with
+no fee paid, and a buyer can read a release while its own order is not `paid`; the order state
+reports what that party verified, not whether the file was delivered.
 
 Some results also report what was not done on that call. For example, `seal`'s answer carries
 `notPerformedHere`, naming any signature check your environment could not perform. Show those, too.
