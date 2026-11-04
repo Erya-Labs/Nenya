@@ -352,9 +352,9 @@ public class DeliverableCommitment(
 /**
  * §10.3's `kind:15` file-message release, reduced to the four values §10.3 compares.
  *
- * Sent by the provider after payment evidence verifies. It is an ordinary NIP-17 file message
- * so a generic NIP-17 client can render it, which is why its MIME type travels as `file-type`
- * rather than as the commitment's `m`.
+ * Sent by the provider once the payment evidence §9.2 requires for a release has verified. It is
+ * an ordinary NIP-17 file message so a generic NIP-17 client can render it, which is why its MIME
+ * type travels as `file-type` rather than as the commitment's `m`.
  *
  * ### These are typed parameters, not a parse — and the parse now exists elsewhere
  *

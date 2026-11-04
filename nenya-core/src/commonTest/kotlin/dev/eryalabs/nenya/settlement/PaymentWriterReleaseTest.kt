@@ -13,7 +13,9 @@ import dev.eryalabs.nenya.payment.Payee
 import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
@@ -95,6 +97,40 @@ class PaymentWriterReleaseTest {
             SettlementRejection.RELEASE_WITHOUT_EVIDENCE,
             payment = ReleaseFixtures.bitcoinSettlement(),
         )
+    }
+
+    /**
+     * T110: the refusal's detail carries revision `1.15`'s §10.3 wording — the release waits for the
+     * evidence §9.2 requires for a release, not for "payment evidence" — and names no key.
+     */
+    @Test
+    @JsName("an_unverified_payment_s_refusal_cites_1_15_s_wording_and_names_no_key")
+    fun `an unverified payment's refusal cites 1_15's wording and names no key`() {
+        val refused = refusal(
+            PaymentWriter.release(
+                ReleaseFixtures.providerEnvelope(),
+                ReleaseFixtures.commitment(),
+                ReleaseFixtures.bitcoinSettlement(),
+                ReleaseFixtures.KEY_HEX,
+                ReleaseFixtures.NONCE_HEX,
+            ),
+        )
+        assertEquals(SettlementRejection.RELEASE_WITHOUT_EVIDENCE, refused.reason, "the refusal is named")
+        assertTrue(
+            "once the payment evidence §9.2 requires for a release has verified" in refused.detail,
+            "the detail states §10.3 as revision 1.15 words it: ${refused.detail}",
+        )
+        assertFalse("after payment evidence verifies" in refused.detail, "revision 1.14's wording is gone")
+        val keys = listOf(
+            SettlementFixtures.provider(OrderFixtures.ORDER_INDEX),
+            SettlementFixtures.buyer(OrderFixtures.ORDER_INDEX),
+            OrderFixtures.ORDER_ID.toHex(),
+            ReleaseFixtures.KEY_HEX,
+            ReleaseFixtures.NONCE_HEX,
+        )
+        for (key in keys) {
+            assertFalse(key.lowercase() in refused.detail.lowercase(), "the detail names no key, id or secret")
+        }
     }
 
     /** The fee recipient's verified payment is not the provider's. */

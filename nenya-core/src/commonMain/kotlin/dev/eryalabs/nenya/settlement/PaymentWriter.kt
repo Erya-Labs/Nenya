@@ -538,9 +538,9 @@ public object PaymentWriter {
             return refused(
                 SettlementRejection.RELEASE_WITHOUT_EVIDENCE,
                 SettlementVocabulary.PAYMENT,
-                "§10.3: the release is sent after payment evidence verifies, and this payment is not " +
-                    "evidenced. §9.4 says a receipt on a rail v1 defines no rule for MUST be treated as " +
-                    "unverified, so it releases nothing",
+                "§10.3: the release is sent once the payment evidence §9.2 requires for a release has " +
+                    "verified, and this payment is not evidenced. §9.4 says a receipt on a rail v1 defines " +
+                    "no rule for MUST be treated as unverified, so it releases nothing",
             )
         }
         if (payment.payee != Payee.PROVIDER) {

@@ -561,7 +561,8 @@ public object RumorWriter {
     )
 
     /**
-     * §10.3's `kind:15` file-message release, sent by the provider after payment evidence verifies.
+     * §10.3's `kind:15` file-message release, sent by the provider once the payment evidence §9.2
+     * requires for a release has verified.
      *
      * @param release §10.3's `x`, `ox`, `file-type` and `size`. `file-type` is nullable on
      *   [DeliverableRelease] and stays nullable here, because §10.3 requires the identity check

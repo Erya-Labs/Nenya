@@ -109,6 +109,27 @@ class StaleNarrowingTest {
     }
 
     /**
+     * The passage T110 corrected, asserted absent as [CORRECTED_BY_T100]'s are.
+     *
+     * Revision `1.14`'s §10.3 sent the release "after payment evidence verifies", which on a
+     * fee-bearing order reads as both receipts; revision `1.15` sends it once the evidence §9.2
+     * requires for a release has verified, which is the provider's own (decision U).
+     */
+    @Test
+    fun `the passage T110 corrected is gone from common production code`() {
+        val text = sources(File(COMMON_ROOT)).joinToString("\n") { it.readText() }
+
+        for ((phrase, why) in CORRECTED_BY_T110) {
+            assertTrue(phrase !in text, "`$phrase` is back in $COMMON_ROOT. $why")
+        }
+        assertTrue(
+            text.length > MIN_SOURCE_CHARS,
+            "the sweep read ${text.length} characters, which is not the tree — and 'the phrase is " +
+                "absent' is true of an empty string",
+        )
+    }
+
+    /**
      * The non-vacuity floor: the sweep read real files, and one of them is the file this task is
      * about.
      *
@@ -261,6 +282,13 @@ class StaleNarrowingTest {
             "no priced order can reach" to
                 "`Capabilities` item 6: a priced order now passes decision B's gate on receipts " +
                     "put through the doors that perform all six checks.",
+        )
+
+        /** The passage T110 corrected, and why it must stay gone. A fragment, as [CORRECTED]'s are. */
+        val CORRECTED_BY_T110: Map<String, String> = mapOf(
+            "after payment evidence verifies" to
+                "Revision `1.15`'s §10.3: the release is sent once the payment evidence §9.2 requires " +
+                    "for a release has verified; decision U, a provider does not wait for the fee receipt.",
         )
 
         /**
