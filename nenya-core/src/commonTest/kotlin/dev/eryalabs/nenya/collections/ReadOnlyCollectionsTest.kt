@@ -77,6 +77,8 @@ abstract class PortableReadOnlyCollectionsTest {
                 put("ConformanceItem#${item.number}.evidenceClasses", item.evidenceClasses)
                 put("ConformanceItem#${item.number}.notPerformed", item.notPerformed)
             }
+            put("Capabilities.OPEN_ITEMS", Capabilities.OPEN_ITEMS)
+            for (open in Capabilities.OPEN_ITEMS) put("OpenItem#${open.id}.specSections", open.specSections)
             put("DeliveryEvidence.CHECKS_PERFORMED_HERE", DeliveryEvidence.CHECKS_PERFORMED_HERE)
             put("DeliveryEvidence.CHECKS_NOT_PERFORMED_HERE", DeliveryEvidence.CHECKS_NOT_PERFORMED_HERE)
             put("VerifiedPayment.CHECKS_PERFORMED_HERE", VerifiedPayment.CHECKS_PERFORMED_HERE)

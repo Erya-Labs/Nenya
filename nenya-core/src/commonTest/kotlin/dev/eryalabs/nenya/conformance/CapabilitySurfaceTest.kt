@@ -171,10 +171,16 @@ abstract class PortableCapabilitySurfaceTest {
         val lines = report.trim().lines()
 
         assertEquals(
-            Capabilities.ITEMS.size + Capabilities.NOT_PERFORMED_HERE.size,
+            Capabilities.ITEMS.size + Capabilities.NOT_PERFORMED_HERE.size + Capabilities.OPEN_ITEMS.size,
             lines.size,
-            "one line per §17 item and one per not-performed constant: $report",
+            "one line per §17 item, one per not-performed constant and one per §16.2 open item: $report",
         )
+        for (open in Capabilities.OPEN_ITEMS) {
+            assertTrue(
+                lines.any { it.startsWith("NENYA-1 §16.2 ${open.id} ${open.status.name} sections=") },
+                "${open.id} is not in the report: $report",
+            )
+        }
         for (item in Capabilities.ITEMS) {
             assertTrue(
                 lines.any { it.startsWith("NENYA-1 §17.${item.number} ${item.status.name} ") },

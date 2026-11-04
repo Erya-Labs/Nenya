@@ -152,6 +152,51 @@ public class ConformanceItem internal constructor(
 }
 
 /**
+ * What this library did with one of §16.2's still-open items.
+ *
+ * §16.2: "Implementations MUST surface `OPEN-4` through `OPEN-7` as configuration or as an explicit
+ * "unsupported" state, never as a silent default, and MUST document the value used." This library
+ * takes the second branch for all four, and has no configuration for any of them, so the enum has
+ * one constant. Picking a value for an open item is a human maintainer's (§16.2's first sentence),
+ * and a constant meaning "supported" would be this library picking one.
+ */
+public enum class OpenItemStatus {
+
+    /** Not implemented here, and no value is chosen for it. [OpenItem.note] says what happens instead. */
+    UNSUPPORTED,
+}
+
+/**
+ * One of §16.2's items an implementation MUST surface, with what this library does about it.
+ *
+ * Like [ConformanceItem], a statement about this library and not evidence of anything; the
+ * constructor is `internal` for tidiness, not safety.
+ */
+public class OpenItem internal constructor(
+
+    /** The item's name as §16.2 prints it, `OPEN-4` to `OPEN-7`. Held equal to the range §16.2's sentence names. */
+    public val id: String,
+
+    /** What this library does with it. */
+    public val status: OpenItemStatus,
+
+    specSections: Set<String>,
+
+    /** The value used, in this library's own words: §16.2's "MUST document the value used". Never parsed. */
+    public val note: String,
+) {
+
+    /**
+     * The sections where the specification states the item, as bare `x.y` strings without the `§`.
+     * Each one names [id] in its text, which the suite checks against the specification.
+     */
+    public val specSections: Set<String> = readOnlySetOf(specSections)
+
+    /** Names the id, the status and the sections. Carries no identifier of any order. */
+    override fun toString(): String = "OpenItem($id, $status, sections=${specSections.sorted()})"
+}
+
+/**
  * §17's capability surface: a machine-readable statement of what this library verifies, and —
  * the half that matters — what it does not.
  *
@@ -641,12 +686,61 @@ public object Capabilities {
     public fun item(number: Int): ConformanceItem? = ITEMS.firstOrNull { it.number == number }
 
     /**
+     * §16.2's `OPEN-4` to `OPEN-7`, in §16.2's order, each [OpenItemStatus.UNSUPPORTED].
+     *
+     * §16.2 requires them surfaced "as configuration or as an explicit "unsupported" state, never as a
+     * silent default", and the value used documented. No value is picked for any of them here. The
+     * test that shows each note's behaviour, where there is behaviour to show:
+     *
+     * - `OPEN-4`: `SettlementCheckOneTest#a_bitcoin_or_ecash_receipt_is_parsed_and_yields_no_evidence`;
+     * - `OPEN-5`: `ListingCodecTest#a_decoded_listing_reports_s5_3_s_values_its_coordinate_and_its_unknown_tags`,
+     *   where the `license` token comes back as the text it was;
+     * - `OPEN-6`: none, because the note states an absence;
+     * - `OPEN-7`: `FeeTermCheckTest#a_fee_receipt_whose_signed_term_names_another_recipient_than_the_stored_invoices_seal`.
+     */
+    public val OPEN_ITEMS: List<OpenItem> = readOnlyListOf(listOf(
+        OpenItem(
+            id = "OPEN-4",
+            status = OpenItemStatus.UNSUPPORTED,
+            specSections = setOf("9.4"),
+            note = "Ecash settlement evidence is not verified. A `payment` tag naming `ecash` (or " +
+                "`bitcoin`) is parsed, and Settlement.verify answers Settlement.Unverified with no " +
+                "check performed, so it never advances an order. §9.4 requires exactly that.",
+        ),
+        OpenItem(
+            id = "OPEN-5",
+            status = OpenItemStatus.UNSUPPORTED,
+            specSections = setOf("5.3"),
+            note = "No `license` vocabulary. The token is carried as free text, read and written as " +
+                "the event has it, and nothing here acts on its value.",
+        ),
+        OpenItem(
+            id = "OPEN-6",
+            status = OpenItemStatus.UNSUPPORTED,
+            specSections = setOf("16.2"),
+            note = "No reputation primitive. Nothing here scores or ranks a counterparty.",
+        ),
+        OpenItem(
+            id = "OPEN-7",
+            status = OpenItemStatus.UNSUPPORTED,
+            specSections = setOf("8.7"),
+            note = "Only §8.7's transport binding: the key that sealed the stored fee `type=2` is " +
+                "compared with the fee recipient the signed fee term names, and a fee receipt is " +
+                "refused when they differ. Neither stronger binding is performed: no fee-recipient " +
+                "signature over the invoice's `payment_hash` is checked and no BOLT-11 node key is " +
+                "recovered. The seal binding is only as strong as the decryption the caller " +
+                "performed, because no signature is verified here.",
+        ),
+    ))
+
+    /**
      * The whole surface as lines a machine can read and a human can paste into an issue.
      *
      * One line per §17 item — `NENYA-1 §17.<n> <status> sections=<…> classes=<…>
      * notPerformed=<…>` — then one line per constant in [NOT_PERFORMED_HERE], qualified by its
      * enum so `INVOICE_AMOUNT` and a future constant of the same name in another enum stay
-     * distinguishable.
+     * distinguishable, then one line per [OPEN_ITEMS] entry — `NENYA-1 §16.2 <id> <status>
+     * sections=<…>`.
      *
      * Carries no identifier, no amount and no key: it is a statement about this library, not
      * about any order (§12 item 11).
@@ -663,6 +757,12 @@ public object Capabilities {
         }
         for (constant in NOT_PERFORMED_HERE) {
             out.append(SPECIFICATION).append(" not-performed ").append(qualify(constant)).append('\n')
+        }
+        for (open in OPEN_ITEMS) {
+            out.append(SPECIFICATION).append(" §16.2 ").append(open.id)
+                .append(' ').append(open.status.name)
+                .append(" sections=").append(open.specSections.sorted().joinToString(",") { "§$it" })
+                .append('\n')
         }
         return out.toString()
     }
