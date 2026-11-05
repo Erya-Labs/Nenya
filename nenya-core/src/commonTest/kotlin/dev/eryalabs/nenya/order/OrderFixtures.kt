@@ -827,8 +827,11 @@ internal object OrderFixtures {
      * [PREIMAGES] is drawn once and sized for the two order indices and [STREAMS] streams this file
      * declares; a fixture that ran off it would report a stack trace about an array where the fix
      * is one constant.
+     *
+     * Not private since T118: `FeeRequestWaitDeadlineTest` composes invoices at timestamps of its
+     * own from these same preimages, and [Preimage] has no hex form to read them back from.
      */
-    private fun preimageHex(index: Int, stream: Int): String {
+    fun preimageHex(index: Int, stream: Int): String {
         val position = index * STREAMS + stream
         if (position !in PREIMAGES.indices) {
             fail(
