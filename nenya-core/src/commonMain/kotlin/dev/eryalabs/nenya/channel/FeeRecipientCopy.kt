@@ -53,8 +53,8 @@ public class FeeRecipientCopy internal constructor(
          *    (`FeeSplit.feePayeeRequired`, the clause `Payee.requiredPayees` reads) is
          *    [ChannelRejection.NO_FEE_TO_REQUEST]: §8.7 sends no copy and §8.6 allows no fee invoice.
          *
-         * Reads no clock: the proposal's `expiration` is a deadline for acceptance (§7.5), and an
-         * order in `committed` was accepted before it.
+         * Reads no clock: the proposal's `expiration` is the acceptance deadline (§7.5) and also
+         * ends an order before `paid` (§11.2), and `clock_checked` is what applies it.
          *
          * @param order the buyer's order as it stands.
          * @param proposal the `type=1` [order] was opened from — the buyer's own `toSelf` copy.

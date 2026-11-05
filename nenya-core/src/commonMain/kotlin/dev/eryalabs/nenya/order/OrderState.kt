@@ -214,7 +214,7 @@ public enum class OrderState(
     SETTLED(token = "settled", isTerminal = true),
 
     /**
-     * Either party cancelled before `paid`. Terminal.
+     * Either party cancelled before the reader's own `paid`. Terminal.
      *
      * The one token this vocabulary shares with the public listing vocabulary, with a
      * different meaning. See this enum's note on the conflation trap.

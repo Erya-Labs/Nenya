@@ -31,8 +31,8 @@ public enum class Party {
      * (§8.6) and seals it with their own key (§8.7).
      *
      * Not a party to the order for the purposes of §11.2: a cancellation from this key is
-     * refused, because §11.2 says "either party" and §8.5 explains what the fee recipient is —
-     * somebody with no refund obligation and no part in the delivery.
+     * refused, because §11.2 says "either party" and §2 says what the fee recipient is — not a
+     * delivery party.
      */
     FEE_RECIPIENT,
 }

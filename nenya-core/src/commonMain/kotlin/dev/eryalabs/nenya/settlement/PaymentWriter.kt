@@ -319,8 +319,9 @@ public object PaymentWriter {
      *
      * then [paymentRequest]'s own refusals.
      *
-     * It reads no clock: the proposal's `expiration` is a deadline for acceptance (§7.5), and check 5
-     * is made when the buyer accepts the request. The copy is not evidence of an acceptance, a
+     * It reads no clock: the proposal's `expiration` is the acceptance deadline (§7.5) and also
+     * ends an order before `paid` (§11.2), which `clock_checked` applies, and check 5 is made when
+     * the buyer accepts the request. The copy is not evidence of an acceptance, a
      * commitment or a payment (§8.7), and this does not treat it as one: whether the order was accepted
      * and committed is the buyer's to check when the request arrives.
      *

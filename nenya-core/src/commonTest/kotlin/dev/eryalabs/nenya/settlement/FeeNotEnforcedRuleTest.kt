@@ -25,7 +25,8 @@ import kotlin.test.fail
  *
  * `capabilities()` says the same: item 5's note that the fee is not enforced, and item 6's that its
  * `paid` is the buyer's, are held in their own items' notes as `SettlementCheckOneTest` holds item 6's
- * `PaymentRequestStore.inMemory`.
+ * `PaymentRequestStore.inMemory`. Item 8's note that §8.8's surfacing and cancellation offer are
+ * the client's (decision V, T120) is held the same way.
  */
 class FeeNotEnforcedRuleTest {
 
@@ -131,6 +132,7 @@ class FeeNotEnforcedRuleTest {
         5 to "The fee is not enforced against the buyer;",
         6 to "This is the buyer's `paid`.",
         6 to "A provider's release rests on the evidence `PaymentWriter.release` takes",
+        8 to "§8.8's surfacing",
     )
 
     private val notes: Map<Int, String> = capabilityOpenings.map { it.first }.toSet().associateWith { number ->

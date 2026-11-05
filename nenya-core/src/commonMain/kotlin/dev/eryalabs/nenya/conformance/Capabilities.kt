@@ -616,7 +616,13 @@ public object Capabilities {
                 "line by line with spec line numbers and itself parsed back out of the " +
                 "document at test time, so neither a truncated transcription nor an invented " +
                 "edge passes. §11.1's eleventh case — an unrecognised status reads as `unknown` " +
-                "and transitions nowhere — is implemented as §11.1 requires.",
+                "and transitions nowhere — is implemented as §11.1 requires. " +
+                "§8.8's surfacing of a buyer's wait for the fee request, and its offer of a " +
+                "cancellation while the wait lasts, are the client's: this library has no " +
+                "screen. It answers the wait without a clock, through the order's state " +
+                "`committed`, the terms' `feePayeeRequired` and the store's `find` for the fee " +
+                "payee, and it accepts the buyer's `cancelled` there; that cancel does not " +
+                "recover a payment (§8.8).",
         ),
         ConformanceItem(
             number = 9,

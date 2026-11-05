@@ -137,9 +137,12 @@ public enum class TransitionRejection {
 
     /**
      * A `cancelled` status update arrived at or after `paid`. §11.3 invariant 5: cancellation is
-     * accepted from a counterparty's assertion alone, and **only before `paid`** — after money
-     * has moved, the terminal an abandoned order reaches is `disputed` (§11.2, §11.4), which
-     * carries the fact that a payment happened.
+     * accepted from a counterparty's assertion alone, and **only before `paid`** — once this order
+     * is `paid`, the terminal an abandoned order reaches is `disputed` (§11.2, §11.4).
+     *
+     * `paid` here is the reader's own state, not a fact about money: a provider's invoice can be
+     * paid while the buyer's order is still `committed`, and a cancel there is accepted and does
+     * not recover the payment (§8.8).
      */
     CANCELLATION_TOO_LATE,
 
@@ -151,8 +154,8 @@ public enum class TransitionRejection {
 
     /**
      * The key it came from may not send this. §7.4 fixes the commitment and the release to the
-     * provider, and §11.2 accepts cancellation from "either party" — which §8.5 makes clear the
-     * fee recipient is not.
+     * provider, and §11.2 accepts cancellation from "either party" — which §2 makes clear the
+     * fee recipient is not: it is not a delivery party.
      *
      * §7.6's own sender rule for an acceptance is **not** here: it is made over a real seal, one
      * layer down, by `OrderProposal.accepts`, and the events that reach this file carry a [Party]
@@ -1086,9 +1089,8 @@ public class OrderMachine(
 
                 event.from == Party.FEE_RECIPIENT -> wrongSender(
                     order,
-                    "§11.2 accepts a cancellation from either **party**; §8.5 is explicit that " +
-                        "the fee recipient is not a party to the delivery and has no refund " +
-                        "obligation",
+                    "§11.2 accepts a cancellation from either **party**; §2 says the fee " +
+                        "recipient is not a delivery party",
                 )
 
                 else -> advance(order.with(state = OrderState.CANCELLED))

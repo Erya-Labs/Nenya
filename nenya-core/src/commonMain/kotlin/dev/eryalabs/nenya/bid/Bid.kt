@@ -169,7 +169,7 @@ public class Bid internal constructor(
      *
      * §6: "A bid's `deliver_by`, when present, is a deadline in the same sense as every other
      * deadline in this document (§4.6), and MUST be evaluated against the injected clock."
-     * This codec does not evaluate it, because a bid binds nothing: [activity] reads only
+     * This codec does not evaluate it, because a bid moves no order (§6): [activity] reads only
      * [expiration], and a bid whose `deliver_by` has passed is still a bid on the board. The clock is
      * read where the deadline is carried into an order: `ListingOrderWriter.proposalForBid` refuses
      * to propose once the injected clock has reached it (`ProposalDeadlineRefusal.DELIVERY_PASSED`),
@@ -236,7 +236,8 @@ public class Bid internal constructor(
      *
      * This answers the bid's deadline and nothing else. [ListingActivity.ACTIVE] is not "this bid may
      * be acted on": the listing it names has a deadline of its own, which [DeadlineGate.check]
-     * evaluates beside this one, and a bid binds nobody whatever this answers (§6).
+     * evaluates beside this one. Whatever this answers, a bid creates no obligation and moves no
+     * order, but a `fee` tag on it binds the bidder (§6, §8.4).
      *
      * @param clock §3's clock seam. The default reports no time at all, so the default answer for
      *   a bid with an `expiration` is [ListingActivity.CANNOT_SAY].

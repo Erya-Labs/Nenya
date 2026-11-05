@@ -133,7 +133,8 @@ public fun decodeStatusUpdate(rumor: JsRumor): JsStatusUpdateResult =
  * attribution; §6.1's `price` requirement and §5.3's satoshi-denominated `price` row run in this one,
  * and neither is restated here.
  *
- * **A decoded bid binds nobody and moves nothing** (§6.1). It is not an order event, and no order id
+ * **A decoded bid creates no obligation and moves no order, but a `fee` tag on it binds the
+ * bidder** (§6.1, §8.4). It is not an order event, and no order id
  * crosses with it, because a `type=6` carries none (§7.4).
  *
  * @param rumor the `kind:16` `type=6` as [open] handed it back. A rumor of another bound kind

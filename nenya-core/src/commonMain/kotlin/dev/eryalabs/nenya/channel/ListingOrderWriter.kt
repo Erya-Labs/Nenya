@@ -295,7 +295,8 @@ public object ListingOrderWriter {
      * reading taken; whether it is still live when the provider answers is `agreement`'s question,
      * and §11.2's. It does not check the bid's `p`/`P`
      * against anything beyond what `Bid.decode` already checked, nor that the listing is still
-     * `active` (§5.1's `status`). And it advances nothing: a bid binds nobody (§6), and nothing in
+     * `active` (§5.1's `status`). And it advances nothing: a bid creates no obligation and moves no
+     * order, but a `fee` tag on it binds the bidder (§6, §8.4), and nothing in
      * `dev.eryalabs.nenya.order` calls this writer.
      *
      * @param listing the listing [bid] was made on; its §4.2 coordinate becomes §7.5's `item`.

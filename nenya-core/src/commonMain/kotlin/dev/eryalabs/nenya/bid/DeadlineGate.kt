@@ -59,8 +59,9 @@ public enum class DeadlineRefusal(public val side: DeadlineSide) {
  * It means **neither deadline refuses**, and nothing more. It is not "this listing is open for
  * business" — a `kind:30402` carrying `["status", "sold"]` and no `expiration` is permitted here and
  * withdrawn by §5.1, which is `Listing.status`'s question (see [ListingActivity]). It is not "this
- * bid is acceptable", and it advances nothing: a bid binds nobody (§6), and nothing in
- * `dev.eryalabs.nenya.order` calls this gate, so the order machine is not claimed to enforce it.
+ * bid is acceptable", and it advances nothing: a bid creates no obligation and moves no order,
+ * but a `fee` tag on it binds the bidder (§6, §8.4), and nothing in `dev.eryalabs.nenya.order`
+ * calls this gate, so the order machine is not claimed to enforce it.
  *
  * ### Fail-closed, and one reading
  *

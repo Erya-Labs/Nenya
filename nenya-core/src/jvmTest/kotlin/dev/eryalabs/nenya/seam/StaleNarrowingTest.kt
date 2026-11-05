@@ -130,6 +130,29 @@ class StaleNarrowingTest {
     }
 
     /**
+     * The passage T120 corrected, asserted absent as [CORRECTED_BY_T110]'s is.
+     *
+     * `CANCELLATION_TOO_LATE`'s KDoc said a cancel is refused "after money has moved". `paid` is
+     * the reader's own state, not a fact about money: a provider can be paid while the buyer's
+     * order is `committed`, and a cancel there does not recover the payment (§8.8, decision V).
+     * The original wraps between `after money` and `has moved`, and the sweep compares raw text,
+     * so the fragment is `after money`.
+     */
+    @Test
+    fun `the passage T120 corrected is gone from common production code`() {
+        val text = sources(File(COMMON_ROOT)).joinToString("\n") { it.readText() }
+
+        for ((phrase, why) in CORRECTED_BY_T120) {
+            assertTrue(phrase !in text, "`$phrase` is back in $COMMON_ROOT. $why")
+        }
+        assertTrue(
+            text.length > MIN_SOURCE_CHARS,
+            "the sweep read ${text.length} characters, which is not the tree — and 'the phrase is " +
+                "absent' is true of an empty string",
+        )
+    }
+
+    /**
      * The non-vacuity floor: the sweep read real files, and one of them is the file this task is
      * about.
      *
@@ -289,6 +312,13 @@ class StaleNarrowingTest {
             "after payment evidence verifies" to
                 "Revision `1.15`'s §10.3: the release is sent once the payment evidence §9.2 requires " +
                     "for a release has verified; decision U, a provider does not wait for the fee receipt.",
+        )
+
+        /** The passage T120 corrected, and why it must stay gone. A fragment. */
+        val CORRECTED_BY_T120: Map<String, String> = mapOf(
+            "after money" to
+                "§8.8, decision V: `paid` is the reader's own state, not a fact about money, " +
+                    "and a cancel does not recover a payment.",
         )
 
         /**
