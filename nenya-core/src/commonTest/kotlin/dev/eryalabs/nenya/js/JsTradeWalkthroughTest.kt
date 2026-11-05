@@ -25,6 +25,7 @@ import kotlin.js.JsName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -84,6 +85,12 @@ import kotlin.test.fail
  *
  * T109: §8.1's SHOULD-warn (T108). The trade's proposal and order answer `feeRecipientIsProvider` false;
  * a proposal naming the provider answers true and still builds and is accepted, since it is a warning.
+ *
+ * T116: a fee recipient that holds §8.7's copy and never answers (decision V). With no fee request
+ * the buyer's fee-bearing order does not pass `committed`, and the buyer leaves it by §11.2's
+ * cancellation, sealed to the provider: its own order and the one the provider opened read
+ * `cancelled`, where the fee recipient's own `cancelled` is §11.2's wrong sender. Before `paid` the
+ * same cancellation also ends an order at `awaiting_payment`.
  *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
@@ -578,26 +585,7 @@ class JsTradeWalkthroughTest {
     @JsName("an_order_the_provider_opens_with_its_own_request_alone_is_refused_PAYMENT_REQUESTS_INCOMPLETE")
     fun `an order the provider opens with its own request alone is refused PAYMENT_REQUESTS_INCOMPLETE`() {
         val trade = Trade()
-        val opened = openOrderFromProposal(trade.machine, trade.proposal.toRecipient)
-        val proposed = opened.order ?: fail("the provider's order must open: ${opened.reason} — ${opened.detail}")
-        val accepted = trade.stepped(
-            stepOrderWithStatusUpdate(
-                trade.machine,
-                proposed,
-                trade.proposal.toRecipient,
-                trade.acceptance.toSelf,
-                trade.provider.key,
-            ),
-        ).also { assertEquals("ACCEPTED", it.state) }
-        val committed = trade.stepped(
-            stepOrderWithCommitment(
-                trade.machine,
-                accepted,
-                trade.proposal.toRecipient,
-                trade.commitment.toSelf,
-                trade.provider.key,
-            ),
-        ).also { assertEquals("COMMITTED", it.state) }
+        val committed = trade.providerCommitted()
 
         val own = trade.providerStore.find(trade.orderIdHex, Payee.PROVIDER.token)
             ?: fail("the provider keeps its own request")
@@ -654,6 +642,108 @@ class JsTradeWalkthroughTest {
         assertTrue(buyer.settlement?.evidenced == true, "the buyer's store, order and points evidence it: ${buyer.reason}")
     }
 
+    /**
+     * T116: the fee recipient opened §8.7's copy and sends no request. The buyer's store holds the
+     * provider's request and no fee request, so `payment_requests_received` is refused
+     * `PAYMENT_REQUESTS_INCOMPLETE` and the order stays `committed` — §11.2's row wants every required
+     * payee's request, and `feePayeeRequired` says the fee's is. The fee recipient's own `cancelled`
+     * moves nothing: §11.2 takes a cancellation from a party, and the door names it `FEE_RECIPIENT`. The
+     * buyer's `cancelled`, sealed to the provider, ends its own order, stepped from its `toSelf` copy,
+     * and the order the provider opened, stepped from the copy the provider received.
+     */
+    @Test
+    @JsName("a_fee_request_that_does_not_arrive_leaves_the_buyer_s_order_committed_until_it_cancels")
+    fun `a fee request that does not arrive leaves the buyer's order committed until it cancels`() {
+        val waiting = Trade(answers = false)
+        assertEquals(
+            listOf(waiting.proposal.toSelf.idHex),
+            waiting.inbox(waiting.feeRecipient).map { it.idHex },
+            "§8.7: the fee recipient holds the order's own proposal",
+        )
+        assertNull(waiting.feeRequest, "and sent no request")
+        val outcome = waiting.requestsReceived
+        assertFalse(outcome.ok, "§11.2: every required payee's request, or the order does not move")
+        assertEquals(TransitionRejection.PAYMENT_REQUESTS_INCOMPLETE.name, outcome.reason)
+        val committed = outcome.order ?: fail("a refused step hands the order back")
+        assertEquals("COMMITTED", committed.state, "the order is handed back unchanged")
+
+        // The wait, read as a page reads it: the fee is required, and the store holds no fee request.
+        assertTrue(committed.feePayeeRequired, "§8.3: the fee is not `0`, so its payee's request is required")
+        assertNull(waiting.buyerStore.find(waiting.orderIdHex, Payee.FEE.token), "no fee request was stored")
+        assertNotNull(waiting.buyerStore.find(waiting.orderIdHex, Payee.PROVIDER.token), "the provider's was")
+
+        val theirs = waiting.send(
+            buildStatusUpdate(waiting.envelope(waiting.feeRecipient, waiting.buyer), waiting.orderIdHex, "cancelled"),
+            waiting.feeRecipient,
+            waiting.buyer,
+        )
+        val refused = stepOrderWithStatusUpdate(
+            waiting.machine,
+            committed,
+            waiting.proposal.toSelf,
+            theirs.toRecipient,
+            waiting.provider.key,
+        )
+        assertFalse(refused.ok, "§11.2: a cancellation is a party's, and the fee recipient is not one")
+        assertEquals(TransitionRejection.WRONG_SENDER.name, refused.reason)
+        assertEquals("TransitionRejection", refused.reasonVocabulary, "the machine's own refusal")
+        assertEquals("COMMITTED", refused.order?.state, "the order is handed back unchanged")
+
+        val providerOrder = waiting.providerCommitted()
+        val cancel = waiting.buyerCancellation()
+        val own = waiting.stepped(
+            stepOrderWithStatusUpdate(waiting.machine, committed, waiting.proposal.toSelf, cancel.toSelf, waiting.provider.key),
+            "the buyer's own cancellation offered to its COMMITTED order",
+        )
+        assertEquals("CANCELLED", own.state, "§11.2's `committed → cancelled`, on the buyer's own `type=3`")
+        assertTrue(own.terminal, "`cancelled` is terminal")
+        val provider = waiting.stepped(
+            stepOrderWithStatusUpdate(
+                waiting.machine,
+                providerOrder,
+                waiting.proposal.toRecipient,
+                cancel.toRecipient,
+                waiting.provider.key,
+            ),
+            "the buyer's cancellation offered to the provider's COMMITTED order",
+        )
+        assertEquals("CANCELLED", provider.state, "the provider's order reads the same cancellation")
+        assertTrue(provider.terminal, "`cancelled` is terminal")
+    }
+
+    /**
+     * T116: with the fee request received, the buyer's order is at `awaiting_payment`, and the order the
+     * provider opened is still `committed`, since the fee request is sent to the buyer alone. Before
+     * `paid`, §11.2 takes the buyer's `cancelled` from either state: both orders read `cancelled`.
+     */
+    @Test
+    @JsName("a_buyer_s_cancel_at_awaiting_payment_ends_its_order_and_the_committed_order_the_provider_opened")
+    fun `a buyer's cancel at awaiting payment ends its order and the committed order the provider opened`() {
+        val trade = Trade()
+        val awaiting = trade.awaitingPayment
+        val providerOrder = trade.providerCommitted()
+        assertEquals("COMMITTED", providerOrder.state, "the provider never holds the fee request")
+
+        val cancel = trade.buyerCancellation()
+        val own = trade.stepped(
+            stepOrderWithStatusUpdate(trade.machine, awaiting, trade.proposal.toSelf, cancel.toSelf, trade.provider.key),
+            "the buyer's own cancellation offered to its AWAITING_PAYMENT order",
+        )
+        assertEquals("CANCELLED", own.state, "§11.2's `awaiting_payment → cancelled`")
+        assertTrue(own.terminal, "`cancelled` is terminal")
+        val provider = trade.stepped(
+            stepOrderWithStatusUpdate(
+                trade.machine,
+                providerOrder,
+                trade.proposal.toRecipient,
+                cancel.toRecipient,
+                trade.provider.key,
+            ),
+            "the buyer's cancellation offered to the provider's COMMITTED order",
+        )
+        assertEquals("CANCELLED", provider.state, "§11.2's `committed → cancelled`, on the provider's side")
+    }
+
     // -----------------------------------------------------------------------------------------
 
     /** [outcome] is a door's refusal [reason] from [vocabulary], with no event offered and so no order. */
@@ -673,8 +763,10 @@ class JsTradeWalkthroughTest {
      * One trade, walked through guide steps 1, 2 and 4 to 7 on construction — to `awaiting_payment` the
      * first time [awaitingPayment] is read — with the rest left to each test. [sendsCopy] false skips
      * §8.7's copy at step 7, for the control that the fee recipient then has nothing to act on.
+     * [answers] false sends the copy but has the fee recipient build no request (T116), so the
+     * buyer's order waits at `committed`.
      */
-    private class Trade(val sendsCopy: Boolean = true) {
+    private class Trade(val sendsCopy: Boolean = true, val answers: Boolean = true) {
 
         companion object {
             /** Small streams are free for named parties (`FakeKeyRanges`). */
@@ -854,9 +946,10 @@ class JsTradeWalkthroughTest {
         /**
          * The fee recipient's side (T87): it acts only on the copy it opened. Its request takes the order
          * id and the terms off that copy, its envelope names the copy's author, and it is sealed to the
-         * key the door names. With no copy in its inbox there is nothing to build from, and no request.
+         * key the door names. With no copy in its inbox there is nothing to build from, and no request;
+         * when it does not [answers], it holds the copy and sends nothing.
          */
-        val feeRequest: Delivered? = inbox(feeRecipient).singleOrNull()?.let { copy ->
+        val feeRequest: Delivered? = inbox(feeRecipient).singleOrNull()?.takeIf { answers }?.let { copy ->
             val answer = buildFeeRequestFromProposal(
                 JsRumorEnvelope(feeRecipient.key, NOW.toString(), arrayOf(arrayOf(copy.author))),
                 copy,
@@ -1011,6 +1104,25 @@ class JsTradeWalkthroughTest {
             ReleaseFixtures.KEY_HEX,
             ReleaseFixtures.NONCE_HEX,
         )
+
+        /**
+         * T98: the order the provider opens from the proposal it received, stepped over its own
+         * acceptance and commitment copies to `committed`.
+         */
+        fun providerCommitted(): JsOrder {
+            val opened = openOrderFromProposal(machine, proposal.toRecipient)
+            val proposed = opened.order ?: fail("the provider's order must open: ${opened.reason} — ${opened.detail}")
+            val accepted = stepped(
+                stepOrderWithStatusUpdate(machine, proposed, proposal.toRecipient, acceptance.toSelf, provider.key),
+            ).also { assertEquals("ACCEPTED", it.state) }
+            return stepped(
+                stepOrderWithCommitment(machine, accepted, proposal.toRecipient, commitment.toSelf, provider.key),
+            ).also { assertEquals("COMMITTED", it.state) }
+        }
+
+        /** T116: §11.2's buyer cancellation, a `type=3` `cancelled` sealed by the buyer to the provider. */
+        fun buyerCancellation(): Delivered =
+            send(buildStatusUpdate(buyerEnvelope(), orderIdHex, "cancelled"), buyer, provider)
 
         // -------------------------------------------------------------------------------------
 
