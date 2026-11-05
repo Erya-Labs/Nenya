@@ -92,6 +92,12 @@ import kotlin.test.fail
  * `cancelled`, where the fee recipient's own `cancelled` is §11.2's wrong sender. Before `paid` the
  * same cancellation also ends an order at `awaiting_payment`.
  *
+ * T117: what that cancellation does not do (decision V). A fee request arriving after it is still built
+ * and stored, but the `cancelled` order takes no step on it (§11.3 invariant 3) and refuses its fee
+ * receipt. A provider paid while the order waited holds evidence the cancel does not touch, and its
+ * release still builds, while the cancelled order refuses it. With no cancel, the late request and the
+ * same evidence take the order through §11.2's rows to `paid`.
+ *
  * The clock is [OrderFixtures.BEFORE_DEADLINES] throughout: before the proposal's `expiration`, so the
  * acceptance builds, and before `deliver_by`, so no deadline row fires. Each invoice is stamped
  * [SettlementFixtures.INVOICE_AGE_SECONDS] before that reading, so §9.2 check 5 is live at acceptance.
@@ -744,6 +750,149 @@ class JsTradeWalkthroughTest {
         assertEquals("CANCELLED", provider.state, "§11.2's `committed → cancelled`, on the provider's side")
     }
 
+    /**
+     * T117: a fee request that arrives after the buyer cancelled. The fee recipient's door still builds
+     * it from the copy, and the buyer's store still accepts it, since neither reads the order. The order
+     * does not move on it: `payment_requests_received` with both records is §11.3 invariant 3's
+     * `STATE_IS_TERMINAL`, the fee receipt with the three points is §9.2 check 6's state refusal, and
+     * the cancelled order has no §8.7 copy to send.
+     */
+    @Test
+    @JsName("a_fee_request_that_arrives_after_the_buyer_cancels_is_stored_and_moves_nothing")
+    fun `a fee request that arrives after the buyer cancels is stored and moves nothing`() {
+        val waiting = Trade(answers = false)
+        val committed = waiting.requestsReceived.order ?: fail("a refused step hands the order back")
+        val cancel = waiting.buyerCancellation()
+        val cancelled = waiting.stepped(
+            stepOrderWithStatusUpdate(waiting.machine, committed, waiting.proposal.toSelf, cancel.toSelf, waiting.provider.key),
+            "the buyer's own cancellation offered to its COMMITTED order",
+        )
+        assertEquals("CANCELLED", cancelled.state)
+
+        val late = waiting.lateFeeRequest()
+        val stored = waiting.buyerAccepts(late)
+        assertEquals(Payee.FEE.token, stored.payee, "the store takes no order, so it keeps the late request")
+        assertNotNull(waiting.buyerStore.find(waiting.orderIdHex, Payee.FEE.token), "and the buyer's store holds it")
+        val both = waiting.buyerRecords + stored
+        assertEquals(listOf("provider", "fee"), both.map { it.payee })
+
+        val requests = stepOrder(
+            waiting.machine,
+            cancelled,
+            JsOrderEvent(type = "payment_requests_received", requests = both.toTypedArray()),
+        )
+        assertFalse(requests.ok, "§11.3 invariant 3: a terminal order does not move")
+        assertEquals(TransitionRejection.STATE_IS_TERMINAL.name, requests.reason)
+        assertEquals("CANCELLED", requests.order?.state, "the order is handed back unchanged")
+
+        val receipt = verifyFeeReceipt(
+            waiting.feeReceipt().toSelf,
+            waiting.buyerStore.seam,
+            cancelled,
+            arrayOf(waiting.proposalSighting, waiting.acceptanceSighting, waiting.feeRequestSightingOf(late)),
+        )
+        assertFalse(receipt.ok, "§9.2 check 6: a fee receipt needs the order at `awaiting_payment`")
+        assertEquals(SettlementRejection.FEE_RECEIPT_STATE_NOT_AWAITING_PAYMENT.name, receipt.reason)
+        assertNull(receipt.settlement, "a refusal carries no settlement")
+
+        val copy = proposalForFeeRecipient(cancelled, waiting.proposal.toSelf, waiting.provider.key)
+        assertFalse(copy.ok, "§8.7: the copy is sent at `committed`")
+        assertEquals(ChannelRejection.ORDER_NOT_COMMITTED.name, copy.reason)
+        assertNull(copy.event, "a refusal gives nothing to seal")
+    }
+
+    /**
+     * T117: the buyer pays the provider while its order waits at `committed`. The provider receipt
+     * verifies against the buyer's store, which reads no order, and `receipts_verified` there is §11.2's
+     * wrong state. The buyer then cancels: the provider's release on its own evidence still builds and
+     * decodes, and the cancelled order refuses it `RELEASE_ORDER_NOT_PAID`. The order the provider opened
+     * reads `cancelled` while the provider holds evidence of its payment, so a cancel recovers nothing.
+     */
+    @Test
+    @JsName("a_provider_paid_while_the_order_waits_is_evidenced_and_a_cancel_changes_nothing_the_release_reads")
+    fun `a provider paid while the order waits is evidenced and a cancel changes nothing the release reads`() {
+        val waiting = Trade(answers = false)
+        val committed = waiting.requestsReceived.order ?: fail("a refused step hands the order back")
+        val receipt = waiting.providerReceipt(Trade.PROVIDER_PREIMAGE)
+
+        val buyerCheck = verifySettlement(receipt.toSelf, waiting.buyerStore.seam, waiting.buyerTerms)
+        val early = buyerCheck.settlement ?: fail("the provider payment must verify: ${buyerCheck.reason}")
+        assertTrue(early.evidenced, "§9.2's evidence exists for the provider payment at `committed`")
+        val tooSoon = stepOrder(
+            waiting.machine,
+            committed,
+            JsOrderEvent(type = "receipts_verified", settlements = arrayOf(early)),
+        )
+        assertFalse(tooSoon.ok, "§11.2: `receipts_verified` is not a transition out of `committed`")
+        assertEquals(TransitionRejection.WRONG_STATE_FOR_EVENT.name, tooSoon.reason)
+        assertEquals("COMMITTED", tooSoon.order?.state, "the order is handed back unchanged")
+
+        val providerOrder = waiting.providerCommitted()
+        val cancel = waiting.buyerCancellation()
+        val cancelled = waiting.stepped(
+            stepOrderWithStatusUpdate(waiting.machine, committed, waiting.proposal.toSelf, cancel.toSelf, waiting.provider.key),
+            "the buyer's own cancellation offered to its COMMITTED order",
+        )
+        assertEquals("CANCELLED", cancelled.state)
+
+        val own = waiting.providerOwnSettlement(receipt)
+        val built = waiting.releaseOn(own)
+        assertTrue(built.ok, "§10.3: the release rests on the provider's evidence alone: ${built.reason} — ${built.detail}")
+        val release = waiting.send(built, waiting.provider, waiting.buyer).toRecipient
+        assertTrue(decodeRelease(release).ok, "the buyer still reads the release")
+        assertNotStepped(waiting.receivedRelease(cancelled, release), ChannelRejection.RELEASE_ORDER_NOT_PAID.name, "ChannelRejection")
+
+        val provider = waiting.stepped(
+            stepOrderWithStatusUpdate(
+                waiting.machine,
+                providerOrder,
+                waiting.proposal.toRecipient,
+                cancel.toRecipient,
+                waiting.provider.key,
+            ),
+            "the buyer's cancellation offered to the provider's COMMITTED order",
+        )
+        assertEquals("CANCELLED", provider.state, "the provider's order reads the cancellation")
+        assertTrue(own.evidenced, "while the provider holds evidence of its payment")
+    }
+
+    /**
+     * T117's control: the same wait with no cancel. A fee request that arrives later is accepted, and
+     * `payment_requests_received` with both records takes the order to `awaiting_payment`; the provider
+     * evidence checked at `committed` and the fee receipt then take it to `paid`.
+     */
+    @Test
+    @JsName("with_no_cancel_a_late_fee_request_and_the_early_provider_evidence_take_the_order_to_paid")
+    fun `with no cancel a late fee request and the early provider evidence take the order to paid`() {
+        val waiting = Trade(answers = false)
+        val committed = waiting.requestsReceived.order ?: fail("a refused step hands the order back")
+        val receipt = waiting.providerReceipt(Trade.PROVIDER_PREIMAGE)
+        val buyerCheck = verifySettlement(receipt.toSelf, waiting.buyerStore.seam, waiting.buyerTerms)
+        val early = buyerCheck.settlement ?: fail("the provider payment must verify: ${buyerCheck.reason}")
+
+        val late = waiting.lateFeeRequest()
+        val both = waiting.buyerRecords + waiting.buyerAccepts(late)
+        val awaiting = waiting.step(
+            committed,
+            JsOrderEvent(type = "payment_requests_received", requests = both.toTypedArray()),
+        )
+        assertEquals("AWAITING_PAYMENT", awaiting.state, "§11.2's `committed → awaiting_payment`")
+
+        val feeCheck = verifyFeeReceipt(
+            waiting.feeReceipt().toSelf,
+            waiting.buyerStore.seam,
+            awaiting,
+            arrayOf(waiting.proposalSighting, waiting.acceptanceSighting, waiting.feeRequestSightingOf(late)),
+        )
+        val fee = feeCheck.settlement ?: fail("the fee receipt must verify: ${feeCheck.reason} — ${feeCheck.detail}")
+        assertTrue(fee.evidenced, "§9.2's evidence exists for the fee payment")
+        val paid = waiting.step(
+            awaiting,
+            JsOrderEvent(type = "receipts_verified", settlements = arrayOf(early, fee)),
+        )
+        assertEquals("PAID", paid.state, "§11.2's `awaiting_payment → paid`")
+    }
+
     // -----------------------------------------------------------------------------------------
 
     /** [outcome] is a door's refusal [reason] from [vocabulary], with no event offered and so no order. */
@@ -949,19 +1098,25 @@ class JsTradeWalkthroughTest {
          * key the door names. With no copy in its inbox there is nothing to build from, and no request;
          * when it does not [answers], it holds the copy and sends nothing.
          */
-        val feeRequest: Delivered? = inbox(feeRecipient).singleOrNull()?.takeIf { answers }?.let { copy ->
+        val feeRequest: Delivered? = inbox(feeRecipient).singleOrNull()?.takeIf { answers }?.let { feeRequestFrom(it) }
+
+        /** The fee recipient's request built from [copy], sealed to the buyer the door names. */
+        private fun feeRequestFrom(copy: JsRumor): Delivered {
             val answer = buildFeeRequestFromProposal(
                 JsRumorEnvelope(feeRecipient.key, NOW.toString(), arrayOf(arrayOf(copy.author))),
                 copy,
                 feeInvoice,
             )
             assertTrue(answer.ok, "the fee recipient's request must build: ${answer.reason} — ${answer.detail}")
-            send(
+            return send(
                 answer.event ?: fail("a built request carries its event"),
                 feeRecipient,
                 party(answer.buyerPubkey ?: fail("a built request names the buyer")),
             )
         }
+
+        /** T117: when it did not [answers], the request the fee recipient builds later from the copy it holds. */
+        fun lateFeeRequest(): Delivered = feeRequestFrom(inbox(feeRecipient).single())
 
         // Then both payees' requests reach the buyer, which accepts each into its store, and the
         // provider its own into its store (provider step 4).
@@ -972,20 +1127,20 @@ class JsTradeWalkthroughTest {
         )
 
         /** The records the buyer accepted, in arrival order: the provider's, then the fee's if one came. */
-        val buyerRecords: List<JsAcceptedRequest> = run {
-            val signed = arrayOf(proposalSighting, acceptanceSighting)
-            listOfNotNull(providerRequest, feeRequest).map { request ->
-                val answer = acceptPaymentRequest(
-                    request.toRecipient,
-                    proposal.toSelf,
-                    acceptance.toRecipient,
-                    provider.key,
-                    buyerStore.seam,
-                    environment,
-                    signed,
-                )
-                answer.request ?: fail("the buyer must accept the request: ${answer.reason} — ${answer.detail}")
-            }
+        val buyerRecords: List<JsAcceptedRequest> = listOfNotNull(providerRequest, feeRequest).map { buyerAccepts(it) }
+
+        /** [request] accepted into the buyer's store against its proposal and the acceptance it received. */
+        fun buyerAccepts(request: Delivered): JsAcceptedRequest {
+            val answer = acceptPaymentRequest(
+                request.toRecipient,
+                proposal.toSelf,
+                acceptance.toRecipient,
+                provider.key,
+                buyerStore.seam,
+                environment,
+                arrayOf(proposalSighting, acceptanceSighting),
+            )
+            return answer.request ?: fail("the buyer must accept the request: ${answer.reason} — ${answer.detail}")
         }
 
         /** `payment_requests_received` with [buyerRecords], offered to the committed order. */
@@ -1067,15 +1222,13 @@ class JsTradeWalkthroughTest {
 
         /** Guide step 8's fee-request point, read against the same proposal, acceptance and provider. */
         val feeRequestSighting: JsFeeTermSighting
-            get() = sighting(
-                paymentRequestFeeSighting(
-                    (feeRequest ?: fail("the fee recipient sent no request")).toRecipient,
-                    proposal.toSelf,
-                    acceptance.toRecipient,
-                    provider.key,
-                ),
-                "FEE_PAYMENT_REQUEST",
-            )
+            get() = feeRequestSightingOf(feeRequest ?: fail("the fee recipient sent no request"))
+
+        /** The fee-request point of [request], read against the same proposal, acceptance and provider. */
+        fun feeRequestSightingOf(request: Delivered): JsFeeTermSighting = sighting(
+            paymentRequestFeeSighting(request.toRecipient, proposal.toSelf, acceptance.toRecipient, provider.key),
+            "FEE_PAYMENT_REQUEST",
+        )
 
         private var providerSettlement: JsSettlement? = null
 
