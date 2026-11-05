@@ -510,14 +510,14 @@ class IntegrationGuideTest {
         val RFC_2119_KEYWORD: Regex = Regex("\\b(MUST|SHALL|SHOULD|REQUIRED|RECOMMENDED|MAY|OPTIONAL)\\b")
 
         /**
-         * The line indices in [text] of each column-0 paragraph of [BUYER_HEADING] that cites
+         * The line indices in [text] of each column-0 paragraph of [heading] that cites
          * [FEE_REQUEST_WAIT]: a paragraph opens on a non-blank line that starts at column 0 and opens no
          * numbered step, and runs to the next blank line. A step's indented prose is never one.
          */
-        fun feeRequestWaitParagraphs(text: String): List<List<Int>> {
+        fun feeRequestWaitParagraphs(text: String, heading: String = BUYER_HEADING): List<List<Int>> {
             val lines = text.lines()
-            val start = lines.indexOfFirst { it.trimEnd() == BUYER_HEADING }
-            if (start < 0) fail("the guide has no `$BUYER_HEADING` section")
+            val start = lines.indexOfFirst { it.trimEnd() == heading }
+            if (start < 0) fail("the guide has no `$heading` section")
             val end = (start + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
             val paragraphs = mutableListOf<MutableList<Int>>()
             var open = false
@@ -562,6 +562,73 @@ class IntegrationGuideTest {
             val lines = text.lines().toMutableList()
             for (i in feeRequestWaitParagraphs(text).flatten()) lines[i] = lines[i].replace("`$span`", "")
             return lines.joinToString("\n")
+        }
+
+        /** T122: the overview, by its path from `nenya-core`. */
+        const val OVERVIEW_PATH: String = "../spec/NENYA-1-overview.md"
+
+        /** T122: the overview's sentences on `expiration` and on the wait for the fee request (decision V). */
+        val OVERVIEW_WAIT_SENTENCES: List<String> = listOf(
+            "An order not yet `paid` whose `expiration` passes is `expired`.",
+            "If no valid fee request arrives, the buyer's order does not pass `committed`.",
+            "The client shows this and offers a cancellation (§8.8).",
+            "The buyer can then propose a new order.",
+        )
+
+        /** T122: revision `1.15`'s overview sentence, which §7.5's `1.16` clause made too narrow. */
+        const val OVERVIEW_STALE_SENTENCE: String = "A proposed order whose `expiration` passes is `expired`."
+
+        /** T122: the sentences [PROVIDER_HEADING]'s column-0 paragraphs citing [FEE_REQUEST_WAIT] hold. */
+        val PROVIDER_CANCEL_SENTENCES: List<String> = listOf(
+            "A buyer can cancel before its own order is `paid` (§8.8).",
+            "read it with `decodeStatusUpdate`.",
+            "An order machine you keep can read `cancelled` even after you were paid, because each party's " +
+                "order is its own, so do not show that as unpaid.",
+            "A cancel changes nothing `buildReleaseAfterPayment` checks.",
+            "If the buyer proposes a new order, it needs a new file key (§10.2), a new commitment and a new invoice.",
+        )
+
+        /** T122: the sentence [FEE_RECIPIENT_HEADING] holds on a cancel it is not told of. */
+        const val FEE_RECIPIENT_NOT_TOLD: String =
+            "A buyer that cancels tells only the provider (§8.8), so a fee recipient that is not also the provider is not told."
+
+        /** Fails unless [lines], whitespace collapsed, hold every one of [sentences], naming [where] and the ones missing. */
+        fun assertSentencesHeld(where: String, lines: List<String>, sentences: List<String>) {
+            val prose = collapsed(lines)
+            assertEquals(emptyList(), sentences.filter { it !in prose }, "`$where`: sentences it does not hold")
+        }
+
+        /**
+         * Fails unless [overview] holds [OVERVIEW_WAIT_SENTENCES] and not [OVERVIEW_STALE_SENTENCE], and
+         * [guide]'s provider paragraphs citing [FEE_REQUEST_WAIT] hold [PROVIDER_CANCEL_SENTENCES] with no
+         * RFC 2119 keyword, and its fee recipient's section holds [FEE_RECIPIENT_NOT_TOLD].
+         */
+        fun assertCancelSaidBeyondTheBuyer(guide: String, overview: String) {
+            assertSentencesHeld(OVERVIEW_PATH, overview.lines(), OVERVIEW_WAIT_SENTENCES)
+            assertTrue(OVERVIEW_STALE_SENTENCE !in collapsed(overview.lines()), "the overview still says `$OVERVIEW_STALE_SENTENCE`")
+            val lines = guide.lines()
+            val provider = feeRequestWaitParagraphs(guide, PROVIDER_HEADING).flatten().map { lines[it] }
+            assertSentencesHeld(PROVIDER_HEADING, provider, PROVIDER_CANCEL_SENTENCES)
+            assertTrue(!RFC_2119_KEYWORD.containsMatchIn(collapsed(provider)), "`$PROVIDER_HEADING`: an RFC 2119 keyword")
+            assertSentencesHeld(FEE_RECIPIENT_HEADING, section(guide, FEE_RECIPIENT_HEADING), listOf(FEE_RECIPIENT_NOT_TOLD))
+        }
+
+        /**
+         * [text] with [heading]'s column-0 paragraphs citing [FEE_REQUEST_WAIT] joined onto one line,
+         * whitespace collapsed, and [transform] applied to it, so a wrapped sentence can be removed whole.
+         */
+        fun withFeeRequestWaitRewritten(text: String, heading: String, transform: (String) -> String): String {
+            val lines = text.lines()
+            val indices = feeRequestWaitParagraphs(text, heading).flatten()
+            if (indices.isEmpty()) fail("`$heading` has no column-0 paragraph citing `$FEE_REQUEST_WAIT`")
+            val joined = transform(collapsed(indices.map { lines[it] }))
+            return lines.flatMapIndexed { i, line ->
+                when (i) {
+                    indices.first() -> listOf(joined)
+                    in indices -> emptyList()
+                    else -> listOf(line)
+                }
+            }.joinToString("\n")
         }
     }
 
@@ -1068,6 +1135,56 @@ class IntegrationGuideTest {
             assertTrue(span in failure.message.orEmpty(), "`$span` is reported missing")
         }
         assertFeeRequestWaitSaid(text.replace("and wrapping.\n\nThe wait", "and wrapping.\n\nThe wait `feePayeeRequired`, `buildStatusUpdate`, `stepOrderWithStatusUpdate`"))
+    }
+
+    private val overview: String by lazy { read(File(OVERVIEW_PATH)) }
+
+    /**
+     * T122: the overview says an order not yet `paid` expires and that a buyer's order waits for the fee
+     * request and can be cancelled; the provider's section says what a buyer's cancel means to it, and
+     * the fee recipient's that it is not told (decision V).
+     */
+    @Test
+    fun `the overview, the provider's and the fee recipient's sections say what a cancel is`() {
+        assertCancelSaidBeyondTheBuyer(guide, overview)
+        assertTrue(
+            listOf("decodeStatusUpdate", "buildReleaseAfterPayment").all { it in JsSurfaceTest.ENTRY_POINTS },
+            "the doors the provider's paragraph names are exported",
+        )
+        assertTradeSections(guide)
+    }
+
+    /**
+     * Negative control: any one sentence removed from the overview or the provider's paragraph fails,
+     * naming it; so do the overview's old `expiration` sentence restored, the provider's paragraph moved
+     * into step 6's indented prose, and the fee recipient's sentence changed.
+     */
+    @Test
+    fun `the overview or the provider's paragraph without a sentence fails`() {
+        val flatOverview = collapsed(overview.lines())
+        for (sentence in OVERVIEW_WAIT_SENTENCES) {
+            val text = flatOverview.replace(sentence, "")
+            assertNotEquals(flatOverview, text, "the overview holds `$sentence`")
+            val failure = assertFailsWith<AssertionError> { assertCancelSaidBeyondTheBuyer(guide, text) }
+            assertTrue(sentence in failure.message.orEmpty(), "the failure names `$sentence`")
+        }
+        val stale = flatOverview.replace(OVERVIEW_WAIT_SENTENCES.first(), OVERVIEW_STALE_SENTENCE)
+        assertFailsWith<AssertionError> { assertCancelSaidBeyondTheBuyer(guide, stale) }
+        assertCancelSaidBeyondTheBuyer(withFeeRequestWaitRewritten(guide, PROVIDER_HEADING) { it }, overview)
+        for (sentence in PROVIDER_CANCEL_SENTENCES) {
+            val text = withFeeRequestWaitRewritten(guide, PROVIDER_HEADING) { it.replace(sentence, "") }
+            assertNotEquals(withFeeRequestWaitRewritten(guide, PROVIDER_HEADING) { it }, text, "the paragraph holds `$sentence`")
+            val failure = assertFailsWith<AssertionError> { assertCancelSaidBeyondTheBuyer(text, overview) }
+            assertTrue(sentence in failure.message.orEmpty(), "the failure names `$sentence`")
+        }
+        val indented = withFeeRequestWaitRewritten(guide, PROVIDER_HEADING) { "   $it" }
+        assertFailsWith<AssertionError> { assertCancelSaidBeyondTheBuyer(indented, overview) }
+        val keyword = withFeeRequestWaitRewritten(guide, PROVIDER_HEADING) { "$it The provider MUST read it." }
+        assertFailsWith<AssertionError> { assertCancelSaidBeyondTheBuyer(keyword, overview) }
+        val told = guide.replace("tells only the provider (§8.8)", "tells everyone (§8.8)")
+        assertNotEquals(guide, told)
+        val failure = assertFailsWith<AssertionError> { assertCancelSaidBeyondTheBuyer(told, overview) }
+        assertTrue(FEE_RECIPIENT_NOT_TOLD in failure.message.orEmpty(), "the failure names the fee recipient's sentence")
     }
 
     /** Negative control: a misplaced, doubled, stray or malformed `Calls:` line fails rather than being skipped. */

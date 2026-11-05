@@ -465,6 +465,12 @@ own messages from their `toSelf` copies. Keep each one.
 
    Calls: `buildReleaseAfterPayment`, `buildRelease`, `seal`.
 
+A buyer can cancel before its own order is `paid` (§8.8). Its `cancelled` status update reaches
+you sealed like any other message; read it with `decodeStatusUpdate`. An order machine you keep can
+read `cancelled` even after you were paid, because each party's order is its own, so do not show
+that as unpaid. A cancel changes nothing `buildReleaseAfterPayment` checks. If the buyer proposes a
+new order, it needs a new file key (§10.2), a new commitment and a new invoice.
+
 ---
 
 ## The fee recipient's side
@@ -496,7 +502,8 @@ A fee recipient that is not also the provider holds no acceptance, so `acceptPay
 store its invoice, and `verifySettlement` and `verifyFeeReceipt` have no stored request to check its
 receipt against. It holds no order in this role. A fee is not enforced against the buyer, so the
 provider can release the file and the fee may never be paid. The fee recipient cannot tell an unpaid
-fee from an order that never went ahead.
+fee from an order that never went ahead. A buyer that cancels tells only the provider (§8.8), so a
+fee recipient that is not also the provider is not told.
 
 ---
 

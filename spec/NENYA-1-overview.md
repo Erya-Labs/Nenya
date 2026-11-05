@@ -87,7 +87,7 @@ is `paid`. Every unlisted transition is refused.
 ![The order lifecycle: every state and every legal transition](../docs/order-lifecycle.svg)
 
 Deadlines are evaluated against the implementation's own clock, never a counterparty's
-`created_at`, and events in an order thread are ordered by receipt sequence. A proposed order
+`created_at`, and events in an order thread are ordered by receipt sequence. An order not yet `paid`
 whose `expiration` passes is `expired`. A `paid` order with no release when `deliver_by` passes is
 `disputed`; without `deliver_by`, the implementation applies and displays its own release timeout.
 A `released` order the buyer has neither verified nor failed to verify is `disputed` once a
@@ -119,6 +119,9 @@ accepted only in the transition into `awaiting_payment`. A payee is required onl
 name it and its expected amount is non-zero, so a fee that computes to zero has no invoice. When
 an order with a non-zero fee is committed, the buyer sends the fee recipient a copy of the
 proposal, which tells it the order exists and is not evidence of anything else.
+
+If no valid fee request arrives, the buyer's order does not pass `committed`. The client shows this
+and offers a cancellation (§8.8). The buyer can then propose a new order.
 
 A fee is not enforced against the buyer. The fee invoice and the fee receipt pass only between the
 buyer and the fee recipient. A provider that is not also the fee recipient cannot see whether the
