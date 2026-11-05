@@ -221,7 +221,8 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    Calls: `decodeListing`, `matchesBoard`, `listingActivity`, `checkDeadlines`.
 3. **Bid** (§6), where the listing invites it: `buildBid` for a public bid, or `buildPrivateBid`
    sealed to the listing's author. Read public bids with `decodeBid`, and open private bids and
-   read them with `decodePrivateBid`. A bid binds nobody and does not move an order.
+   read them with `decodePrivateBid`. A bid creates no obligation and moves no order, but a `fee` tag
+   on it binds the bidder (§8.4).
 
    Calls: `buildBid`, `buildPrivateBid`, `seal`, `decodeBid`, `open`, `decodePrivateBid`.
 4. **Propose** (§7.5). The buyer draws a new order id — 32 bytes from a secure random source, as
@@ -306,6 +307,9 @@ them. Where a step names two calls as alternatives, both are listed. `seal` and 
    which the comparison skips (§8.4). Then the buyer steps the order with `payment_requests_received`,
    passing the accepted records.
 
+   An order whose `fee_msat` is not `0` does not pass `committed` without the fee request (§8.8).
+   Pay nothing before then. The text after step 10 says what to show while the order waits.
+
    Calls: `proposalForFeeRecipient`, `seal`, `buildPaymentRequest`, `open`, `proposalFeeSighting`, `acceptanceFeeSighting`, `bidFeeSighting`, `privateBidFeeSighting`, `acceptPaymentRequest`, `stepOrder`.
 8. **Pay and check the receipts** (§9). The buyer pays each invoice with its own wallet, builds
    `buildReceipt` for each payment, then seals and sends it. The buyer opens its own `toSelf` copy of
@@ -365,6 +369,30 @@ three. A private bid comes before any proposal, so `partyOf` cannot label one: i
 `open` gave. Step the order with `clock_checked` whenever your client wants deadlines applied. An
 order only moves when `stepOrder` or one of the `stepOrderWith…` calls says it did, so always read
 its answer.
+
+A fee-bearing order can wait at `committed` for the fee request (§8.8). Read the wait from the order
+and the store: its `state` is `COMMITTED`, `feePayeeRequired` is true, and the store's `find` for the
+order id and `fee` answers no record. Show it as waiting for the fee request, not as any party's
+fault, and offer the user a cancellation while it lasts. A fee request refused `FEE_TERM_MISMATCH`
+is §8.4's terms mismatch, not this wait, so show that instead.
+
+The wait ends on a deadline only when you step the order with `clock_checked` (§8.8, §7.5): once the
+terms' `expiration` has passed, the order reads `EXPIRED`. When that step is refused
+`NO_DEADLINE_TO_CHECK`, the terms carry no `expiration`, so show that the wait has no deadline.
+
+To cancel (§8.8), build a `cancelled` status update with `buildStatusUpdate`, seal it and send it to
+the provider. Open the `toSelf` copy `seal` answered and step the order with it through
+`stepOrderWithStatusUpdate`, as in step 5; the order reads `CANCELLED`. A fee request that arrives
+later can still be accepted into the store, because `acceptPaymentRequest` takes no order, but it
+does not move the order: `payment_requests_received` is refused `STATE_IS_TERMINAL`. Do not pay it.
+A cancel does not recover a payment the user already made, and it does not stop a provider's
+release, which reads the provider's own check of the receipt rather than your order.
+
+If the provider's invoice expires while the order waits, the order still enters `awaiting_payment`
+once the fee request arrives, and the store does not replace that invoice: a second request from the
+provider is refused `REQUEST_ALREADY_STORED` (§8.8). Cancel instead. To start again, go back to step
+4 with a new order id; the provider need not accept. `buildProposalForBid` keeps the bid's `fee`, so
+changing the fee needs another bid or, on an offer, a proposal built with `buildProposalAgainst`.
 
 ---
 

@@ -493,6 +493,76 @@ class IntegrationGuideTest {
             lines[index] = transform(lines[index])
             return lines.joinToString("\n")
         }
+
+        /** T121: the citation that marks the buyer's paragraphs on waiting for the fee request (decision V). */
+        const val FEE_REQUEST_WAIT: String = "§8.8"
+
+        /** T121: the spans those paragraphs must name, together, in backticks. */
+        val FEE_REQUEST_WAIT_SPANS: List<String> = listOf(
+            "feePayeeRequired",
+            "buildStatusUpdate",
+            "stepOrderWithStatusUpdate",
+            "clock_checked",
+            "FEE_TERM_MISMATCH",
+        )
+
+        /** RFC 2119's keywords, which the guide does not use (decision Q). */
+        val RFC_2119_KEYWORD: Regex = Regex("\\b(MUST|SHALL|SHOULD|REQUIRED|RECOMMENDED|MAY|OPTIONAL)\\b")
+
+        /**
+         * The line indices in [text] of each column-0 paragraph of [BUYER_HEADING] that cites
+         * [FEE_REQUEST_WAIT]: a paragraph opens on a non-blank line that starts at column 0 and opens no
+         * numbered step, and runs to the next blank line. A step's indented prose is never one.
+         */
+        fun feeRequestWaitParagraphs(text: String): List<List<Int>> {
+            val lines = text.lines()
+            val start = lines.indexOfFirst { it.trimEnd() == BUYER_HEADING }
+            if (start < 0) fail("the guide has no `$BUYER_HEADING` section")
+            val end = (start + 1 until lines.size).firstOrNull { lines[it].startsWith("## ") } ?: lines.size
+            val paragraphs = mutableListOf<MutableList<Int>>()
+            var open = false
+            for (i in start + 1 until end) {
+                val line = lines[i]
+                when {
+                    line.isBlank() -> open = false
+                    open -> paragraphs.last() += i
+                    !line.first().isWhitespace() && stepNumber(line) == null -> {
+                        paragraphs += mutableListOf(i)
+                        open = true
+                    }
+                }
+            }
+            return paragraphs.filter { indices -> indices.any { FEE_REQUEST_WAIT in lines[it] } }
+        }
+
+        /**
+         * Fails unless [text]'s buyer section has a column-0 paragraph citing [FEE_REQUEST_WAIT], those
+         * paragraphs name every span in [FEE_REQUEST_WAIT_SPANS] in backticks and none uses an RFC 2119
+         * keyword, naming what is missing.
+         */
+        fun assertFeeRequestWaitSaid(text: String) {
+            val lines = text.lines()
+            val paragraphs = feeRequestWaitParagraphs(text).map { indices -> indices.map { lines[it] } }
+            assertTrue(paragraphs.isNotEmpty(), "`$BUYER_HEADING` has no column-0 paragraph citing `$FEE_REQUEST_WAIT`")
+            val spans = codeSpans(paragraphs.flatten())
+            assertEquals(
+                emptyList(),
+                FEE_REQUEST_WAIT_SPANS.filter { it !in spans },
+                "`$BUYER_HEADING`: spans its `$FEE_REQUEST_WAIT` paragraphs do not name",
+            )
+            assertEquals(
+                emptyList(),
+                paragraphs.map { collapsed(it) }.filter { RFC_2119_KEYWORD.containsMatchIn(it) },
+                "`$BUYER_HEADING`: `$FEE_REQUEST_WAIT` paragraphs using an RFC 2119 keyword",
+            )
+        }
+
+        /** [text] with every backticked [span] removed from the lines of its [FEE_REQUEST_WAIT] paragraphs only. */
+        fun withoutInFeeRequestWait(text: String, span: String): String {
+            val lines = text.lines().toMutableList()
+            for (i in feeRequestWaitParagraphs(text).flatten()) lines[i] = lines[i].replace("`$span`", "")
+            return lines.joinToString("\n")
+        }
     }
 
     private val guide: String by lazy { read(File(GUIDE_PATH)) }
@@ -924,6 +994,80 @@ class IntegrationGuideTest {
         assertEquals(setOf("WRONG_SENDER"), constantTokens("Refused with\n`WRONG_SENDER`, `BID`."))
         assertFailsWith<AssertionError> { constantTokens("An unpaired ` backtick.") }
         assertFailsWith<AssertionError> { constantTokens("```js\nno closing fence\n") }
+    }
+
+    /**
+     * T121: the buyer's section says, in column-0 paragraphs citing §8.8, how to read and show the wait
+     * for the fee request, its deadline, a terms mismatch that is not the wait, and the cancel.
+     */
+    @Test
+    fun `the buyer's section says how to read, show and cancel the wait for the fee request`() {
+        assertFeeRequestWaitSaid(guide)
+        assertTrue(
+            listOf("buildStatusUpdate", "stepOrderWithStatusUpdate").all { it in JsSurfaceTest.ENTRY_POINTS },
+            "the doors the paragraphs name are exported",
+        )
+        // The getter the paragraphs name is `JsOrder`'s: this line compiles only while it exists.
+        assertEquals("feePayeeRequired", JsOrder::feePayeeRequired.name)
+        assertTrue(listOf("FEE_TERM_MISMATCH", "NO_DEADLINE_TO_CHECK", "STATE_IS_TERMINAL").all { it in PUBLISHED_ENUM_CONSTANTS })
+        assertTradeSections(guide)
+    }
+
+    /**
+     * Negative control: any one span removed from the §8.8 paragraphs fails, though lines outside them
+     * still name three of the spans; so does an RFC 2119 keyword in one, or no such paragraph at all.
+     */
+    @Test
+    fun `the buyer's section without a span of the fee request wait fails`() {
+        for (span in FEE_REQUEST_WAIT_SPANS) {
+            val text = withoutInFeeRequestWait(guide, span)
+            assertNotEquals(guide, text, "the §8.8 paragraphs name `$span`")
+            val failure = assertFailsWith<AssertionError>("the paragraphs without `$span` must fail") {
+                assertFeeRequestWaitSaid(text)
+            }
+            assertTrue(span in failure.message.orEmpty(), "the failure names `$span`")
+        }
+        val inside = feeRequestWaitParagraphs(guide).flatten().toSet()
+        val lines = guide.lines()
+        val buyer = lines.indexOf(BUYER_HEADING)
+        val outside = (buyer + 1 until lines.indexOf(PROVIDER_HEADING)).filter { it !in inside }.map { lines[it] }
+        assertTrue(
+            listOf("buildStatusUpdate", "stepOrderWithStatusUpdate", "clock_checked").all { "`$it`" in collapsed(outside) },
+            "lines outside the §8.8 paragraphs still name three of the spans",
+        )
+        val keyword = guide.replace("Show it as waiting for the fee request", "You MUST show it as waiting for the fee request")
+        assertNotEquals(guide, keyword)
+        assertFailsWith<AssertionError> { assertFeeRequestWaitSaid(keyword) }
+        assertFailsWith<AssertionError> { assertFeeRequestWaitSaid(guide.replace(FEE_REQUEST_WAIT, "§8.7")) }
+    }
+
+    /** In memory: only column-0 paragraphs citing §8.8 are read, never a step's prose or another paragraph. */
+    @Test
+    fun `only the buyer's column-0 paragraphs citing section 8_8 are read`() {
+        val text = listOf(
+            BUYER_HEADING,
+            "",
+            "1. **Step** (§8.8). Read `feePayeeRequired`.",
+            "",
+            "   Indented (§8.8) `buildStatusUpdate`.",
+            "",
+            "   Calls: `buildStatusUpdate`.",
+            "A column-0 paragraph naming `stepOrderWithStatusUpdate`",
+            "and wrapping.",
+            "",
+            "The wait (§8.8) names `clock_checked`",
+            "and `FEE_TERM_MISMATCH` on its second line.",
+            "",
+            PROVIDER_HEADING,
+            "",
+            "Not the buyer's (§8.8) `feePayeeRequired`.",
+        ).joinToString("\n")
+        assertEquals(listOf(listOf(10, 11)), feeRequestWaitParagraphs(text))
+        val failure = assertFailsWith<AssertionError> { assertFeeRequestWaitSaid(text) }
+        for (span in listOf("feePayeeRequired", "buildStatusUpdate", "stepOrderWithStatusUpdate")) {
+            assertTrue(span in failure.message.orEmpty(), "`$span` is reported missing")
+        }
+        assertFeeRequestWaitSaid(text.replace("and wrapping.\n\nThe wait", "and wrapping.\n\nThe wait `feePayeeRequired`, `buildStatusUpdate`, `stepOrderWithStatusUpdate`"))
     }
 
     /** Negative control: a misplaced, doubled, stray or malformed `Calls:` line fails rather than being skipped. */
