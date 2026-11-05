@@ -14,7 +14,7 @@ library, not an application or a service; `nenya-core` is one reference implemen
 
 ## 0. Status of this document
 
-This is NENYA-1, version `1`, **revision `1.15`** of the Nenya wire format. It is a draft:
+This is NENYA-1, version `1`, **revision `1.16`** of the Nenya wire format. It is a draft:
 nothing in it is deployed, and its reserved identifiers are not registered.
 
 A short non-normative summary is [the overview](NENYA-1-overview.md). The revision history is in
@@ -639,8 +639,9 @@ MUST NOT be derived from the coordinate, either pubkey, the price, or the time. 
 - `amount_msat` is the price in millisatoshis (§8.2). An `["amount", "<sats>"]` tag MAY also be
   present; if `amount × 1000 ≠ amount_msat`, an implementation MUST reject the message and MUST NOT
   prefer one and continue.
-- `expiration` is the acceptance deadline. When both are present, `expiration` MUST be strictly
-  earlier than `deliver_by`; an implementation MUST reject a proposal that violates this.
+- `expiration` is the acceptance deadline, and §11.2 also applies it to an order not yet `paid`.
+  When both are present, `expiration` MUST be strictly earlier than `deliver_by`; an implementation
+  MUST reject a proposal that violates this.
 - `fee` (write rule; the §8.1 read rule governs): a proposal MUST NOT carry more than one `fee` tag,
   and SHOULD carry exactly one, as `["fee", "0"]` when no fee applies.
 
@@ -842,6 +843,24 @@ recipient MUST NOT treat that copy as evidence of an acceptance, a commitment or
 `OPEN-7`: whether the transport binding above suffices for v1, or a stronger one is specified (a
 fee-recipient nostr signature over the invoice's `payment_hash`, or BOLT-11 node-key recovery
 against a pre-registered node key).
+
+### 8.8 Waiting for the fee request
+
+A buyer's order whose `fee_msat` (§8.3) is not `0` does not reach `awaiting_payment` without a
+valid fee request (`kind:16` `type=2`, `payee=fee`; §11.2). While its order waits in `committed`
+for that request, the buyer SHOULD NOT pay the provider's invoice: a cancellation does not recover
+a payment.
+
+An implementation MUST surface that wait as the distinct, named condition *waiting for the fee
+request*, never as a generic failure, and MUST offer the buyer a cancellation while it lasts. §8.4
+governs a fee request refused for its `fee` tag. The buyer cancels by sending the provider §11.2's
+sealed `type=3`.
+
+A fee request received once the order is `cancelled`, `expired` or `disputed` advances nothing
+(§11.3 invariant 3) and is not paid (§8.5). The buyer MAY then propose a new order (§7.5), with no
+fee or another fee recipient; the provider need not accept it. A new order made from a bid that
+carried a `fee` tag keeps that term (§8.4), so changing the fee needs another bid or, on an offer, a
+proposal not made from a bid.
 
 ---
 
@@ -1259,8 +1278,9 @@ Open: whether to file a `registry-of-kinds` pull request for `30404`.
 
 These decisions are closed: `SAT`, not `btc`, as the price unit (§4.4); two kinds, not one kind
 with a buy/sell discriminator (§5); rejecting, not resolving, duplicate single-cardinality tags
-(§4.3); a fee not enforced against the buyer, not a release conditional on the fee (§8);
-pay-on-delivery, not a hold-invoice pay-for-key exchange (§11.4).
+(§4.3); a fee not enforced against the buyer, not a release conditional on the fee (§8); a buyer's
+order that waits for the fee request, not one that goes on without it (§8.8); pay-on-delivery, not
+a hold-invoice pay-for-key exchange (§11.4).
 
 ---
 
@@ -1315,7 +1335,7 @@ externally-authored vectors rather than to the implementer's own understanding.
 | BOLT-11 parsing | the BOLT-11 Examples appendix |
 | Preimage verification | invoices with known preimages, **plus** negative controls: wrong preimage, 31-byte preimage, 33-byte preimage, uppercase hex, preimage of the wrong invoice |
 | Fee arithmetic | boundary cases at `bps = 0`, `bps = 10000`, the msat rounding example in §8.3, an overflow probe at the supply cap, and the non-zero-`bps`-but-zero-`fee_msat` case (`bps = 1`, `price_msat = 3000`) |
-| State machine | every legal transition, **and** an enumeration proving every unlisted pair is refused. Include as named cases: a buyer's fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe); a provider on the same terms releasing on its own receipt with no fee invoice or fee receipt; a buyer's order holding only the provider's receipt staying in `awaiting_payment`; an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe); a `type=1` with no `fee` tag opening at zero fee; a `type=6` and a `kind:14` each advancing nothing from every state; an order in `released` whose served blob was refused for its length — which is no hash mismatch (§10.4) — reaching `disputed` at the verification deadline, probed one second before the deadline, at it exactly, and one second after; the same order under each fallback anchor in turn, with the candidate deadlines chosen so that anchoring on the wrong one would be visible; and an order with no clock reading at `paid`, none at release and no `deliver_by`, reporting that it has no deadline to check rather than that it is pending |
+| State machine | every legal transition, **and** an enumeration proving every unlisted pair is refused. Include as named cases: a buyer's fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe); a provider on the same terms releasing on its own receipt with no fee invoice or fee receipt; a buyer's order holding only the provider's receipt staying in `awaiting_payment`; a buyer's fee-bearing order with no fee request staying `committed` and reaching `cancelled` on its own `type=3`; an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe); a `type=1` with no `fee` tag opening at zero fee; a `type=6` and a `kind:14` each advancing nothing from every state; an order in `released` whose served blob was refused for its length — which is no hash mismatch (§10.4) — reaching `disputed` at the verification deadline, probed one second before the deadline, at it exactly, and one second after; the same order under each fallback anchor in turn, with the candidate deadlines chosen so that anchoring on the wrong one would be visible; and an order with no clock reading at `paid`, none at release and no `deliver_by`, reporting that it has no deadline to check rather than that it is pending |
 
 Vectors that only prove the happy path prove very little. Every check above whose failure
 would cost a user money SHOULD have a negative control demonstrating that the check rejects

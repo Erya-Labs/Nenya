@@ -34,7 +34,7 @@ class StateMachineCasesTest {
 
         const val MARKER: String = "Include as named cases: "
 
-        /** Each named case, as revision `1.15` states it, to the `file#JsName` of every test proving it. */
+        /** Each named case, as revision `1.16` states it, to the `file#JsName` of every test proving it. */
         val CASES: Map<String, List<String>> = mapOf(
             "a buyer's fee-bearing order reaching `awaiting_payment` and then `paid` (the §8.5 deadlock probe)" to listOf(
                 "order/OrderControlsTest.kt#a_fee_bearing_order_reaches_awaiting_payment_and_then_paid",
@@ -45,6 +45,9 @@ class StateMachineCasesTest {
             "a buyer's order holding only the provider's receipt staying in `awaiting_payment`" to listOf(
                 "order/OrderControlsTest.kt#an_incomplete_receipt_set_leaves_the_order_awaiting_payment",
                 "js/JsTradeWalkthroughTest.kt#a_fee_bearing_trade_with_the_fee_unpaid_stays_awaiting_payment_and_refuses_the_release",
+            ),
+            "a buyer's fee-bearing order with no fee request staying `committed` and reaching `cancelled` on its own `type=3`" to listOf(
+                "js/JsTradeWalkthroughTest.kt#a_fee_request_that_does_not_arrive_leaves_the_buyer_s_order_committed_until_it_cancels",
             ),
             "an order whose `fee_msat` computes to `0` reaching `paid` with no fee invoice (the §8.3 deadlock probe)" to listOf(
                 "order/OrderControlsTest.kt#a_zero_fee_order_needs_no_fee_receipt_and_reaches_paid",
@@ -111,7 +114,7 @@ class StateMachineCasesTest {
     @Test
     fun `the row's named cases are exactly the pinned cases`() {
         val cases = namedCases(vendored)
-        assertEquals(9, cases.size, "revision 1.15's row names nine cases")
+        assertEquals(10, cases.size, "revision 1.16's row names ten cases")
         assertEquals(cases.size, cases.toSet().size, "no case is named twice")
         assertEquals(CASES.keys, cases.toSet())
     }
@@ -140,7 +143,7 @@ class StateMachineCasesTest {
     @Test
     fun `a case added to the row fails`() {
         val added = withRow { it.replace("; and ", "; an order reaching `settled` twice; and ") }
-        assertEquals(10, namedCases(added).size)
+        assertEquals(11, namedCases(added).size)
         assertNotEquals(CASES.keys, namedCases(added).toSet())
     }
 
@@ -149,7 +152,7 @@ class StateMachineCasesTest {
     fun `a case removed from the row fails`() {
         for (case in namedCases(vendored).dropLast(1)) {
             val removed = withRow { it.replace("$case; ", "") }
-            assertEquals(8, namedCases(removed).size, "\"$case\" removed")
+            assertEquals(9, namedCases(removed).size, "\"$case\" removed")
             assertNotEquals(CASES.keys, namedCases(removed).toSet(), "\"$case\" removed")
         }
     }

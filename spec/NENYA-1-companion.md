@@ -30,6 +30,7 @@ NENYA-1 §0 names the current revision. No revision has changed the `["nenya", "
 | `1.13` | 2026-10-31 | Citation typo fixed: §5.3's `image` row and §5.4 cited "§12.10", but §12 is a numbered list with no subsections; both now cite §12 item 10. No requirement, keyword, identifier, wire value or section number changed; no line of NENYA-1 moved, so `nenya-1-11.2-transitions.psv` is unchanged. |
 | `1.14` | 2026-11-03 | §8.7: when an order whose `fee_msat` is not `0` enters `committed`, the buyer sends the fee recipient that order's `type=1`, unchanged, by §7.1's write procedure; the fee recipient does not treat the copy as evidence of an acceptance, a commitment or a payment. Before this revision nothing told a fee recipient that an order existed, so a fee-bearing order could not reach `awaiting_payment`. No tag, kind, state, transition or fee arithmetic changed, and the version tag is unchanged (Appendix B). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1079–1093 to 1083–1097), its `(from, to)` pairs unchanged. |
 | `1.15` | 2026-11-04 | A fee is not enforced against the buyer (§8). §9.2: a buyer's order becomes `paid` only with a verified receipt from each payee with a non-zero expected amount, as before; a provider's release needs only a verified receipt for its own `payee=provider` request; the six checks do not bind a fee recipient in that role. §10.3: the release is sent once the evidence §9.2 requires for a release has verified, and a buyer MAY hold a release received before its order is `paid` and apply it then. §11's lead: §11.1 and §11.2 state the buyer's order, a provider MAY keep an order by the same table, and a fee recipient holds no order state in that role. §2, §8.5, §8.6, §13, §16.3 and §18 worded to match. No tag, kind, state, transition, fee arithmetic or evidence rule changed, and the version tag is unchanged (Appendix B). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1083–1097 to 1095–1109), its `(from, to)` pairs unchanged. |
+| `1.16` | 2026-11-05 | A buyer's fee-bearing order waits for the fee request (§8.8). Without a valid fee request it does not reach `awaiting_payment`; while it waits in `committed` the buyer SHOULD NOT pay the provider's invoice; an implementation MUST surface the wait as *waiting for the fee request* and MUST offer a cancellation, sent to the provider as §11.2's sealed `type=3`; a fee request received once the order is `cancelled`, `expired` or `disputed` advances nothing, and the buyer MAY propose a new order, keeping a bid's `fee` term (§8.4). §7.5: `expiration` is also applied to an order not yet `paid`, which §11.2's rows already applied. §16.3 and §18 worded to match. No tag, kind, state, transition, fee arithmetic or evidence rule changed, and the version tag is unchanged (Appendix B). `nenya-1-11.2-transitions.psv` regenerated (row block moved from lines 1095–1109 to 1114–1128), its `(from, to)` pairs unchanged. |
 
 ## 1. Motivation and scope
 
@@ -214,6 +215,15 @@ privately outside the protocol, so such a check would bind only an honest provid
 would add a further dependence on the fee recipient. A buyer's own order still needs the fee
 invoice to reach `awaiting_payment` (§11.2).
 
+A buyer's order waits for the fee request and does not go on without it (§8.8). A buyer cannot tell
+a fee recipient that did not answer from a message that did not arrive, and §8.1's check does not
+cover this case, because a fee recipient with a `kind:10050` can still fail to answer. A buyer that
+has paid neither invoice has moved no money, so it loses none by cancelling and proposing a new
+order. The alternative, in which the order goes on without the fee request, was rejected: it would
+change §8.5, §9.2 check 6 and §11.2 for a case the buyer can end by cancelling. A fee recipient that
+is not also the provider is not told of a cancellation, and a fee recipient holds no order state in
+that role.
+
 ## 9. Payment evidence
 
 Zap receipts (§9.1) are also public events linking payer, payee and amount. The payee releases the
@@ -308,7 +318,8 @@ that model:
 `1.0` numbers; `1.2` added `OPEN-9` and widened `OPEN-8` in place. The client-local policies that
 closed decisions permit (§8.1, §6.1) each carry their own visibility rule. Of the decisions in
 §16.3, §4.4 gives the reason for `SAT`, §4.3 for rejecting duplicate tags, §8 for a fee not enforced
-against the buyer, and §11.4 the cost of pay-on-delivery.
+against the buyer and for a buyer's order that waits for the fee request, and §11.4 the cost of
+pay-on-delivery.
 
 ### 16.1 Closed decisions
 
